@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="FpsEntries">
+        <item>24</item>
+        <item>25</item>
+        <item>30</item>
+        <item>60</item>
+    </string-array>
+
+    <string-array name="AudioChannelConfigEntries">
+        <item>Mono</item>
+        <item>Stereo</item>
+    </string-array>
+
+    <string-array name="AudioChannelConfigEntryValues">
+        <!-- CHANNEL_IN_MONO = 16 -->
+        <item>16</item>
+        <!-- CHANNEL_IN_STEREO = 12 -->
+        <item>12</item>
+    </string-array>
+
+    <string-array name="AudioBitrateEntryValues">
+        <item>24000</item>
+        <item>64000</item>
+        <item>128000</item>
+        <item>192000</item>
+    </string-array>
+
+</resources>

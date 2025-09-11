@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <data>
+
+        <variable
+            name="viewmodel"
+            type="com.dimadesu.lifestreamer.ui.main.PreviewViewModel" />
+    </data>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:keepScreenOn="true">
+
+        <io.github.thibaultbee.streampack.ui.views.PreviewView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:enableZoomOnPinch="true"
+            app:layout_constraintBottom_toTopOf="@+id/liveButton"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:position="center"
+            app:scaleMode="fill" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
+
+            <ImageButton
+                android:id="@+id/switchCameraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/switch_camera_source"
+                android:onClick="@{() -> viewmodel.toggleCamera()}"
+                android:onLongClick="@{() -> viewmodel.switchBackToFront()}"
+                android:src="@drawable/ic_baseline_cameraswitch_24"
+                app:goneUnless="@{viewmodel.isCameraSource}"
+                app:tint="@android:color/white" />
+
+            <ImageButton
+                android:id="@+id/switchSourceButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/switch_camera_source"
+                android:onClick="@{() -> viewmodel.toggleVideoSource()}"
+                android:src="@drawable/ic_switch_camera_24px"
+                app:tint="@android:color/white" />
+
+        </LinearLayout>
+
+        <ToggleButton
+            android:id="@+id/liveButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/live"
+            android:textOff="@string/live"
+            android:textOn="@string/stop"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <LinearLayout
+            android:layout_width="200dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:rotation="-90"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="@+id/settingsLayout"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <com.google.android.material.slider.Slider
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:stepSize="@{viewmodel.exposureCompensationStep.floatValue()}"
+                android:theme="@style/AppTheme"
+                android:value="@={viewmodel.exposureCompensation}"
+                android:valueFrom="@{viewmodel.exposureCompensationRange.lower}"
+                android:valueTo="@{viewmodel.exposureCompensationRange.upper}"
+                app:goneUnless="@{viewmodel.showExposureSlider}" />
+
+            <com.google.android.material.slider.Slider
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:theme="@style/AppTheme"
+                android:value="@={viewmodel.zoomRatio}"
+                android:valueFrom="@{viewmodel.zoomRatioRange.lower}"
+                android:valueTo="@{viewmodel.zoomRatioRange.upper}"
+                app:goneUnless="@{viewmodel.showZoomSlider}" />
+
+            <com.google.android.material.slider.Slider
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:theme="@style/AppTheme"
+                android:value="@={viewmodel.lensDistance}"
+                android:valueFrom="@{viewmodel.lensDistanceRange.lower}"
+                android:valueTo="@{viewmodel.lensDistanceRange.upper}"
+                app:goneUnless="@{viewmodel.showLensDistanceSlider}" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/settingsLayout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="16dp"
+            android:orientation="vertical"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <ImageButton
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/turn_on_off_torch"
+                android:onClick="@{() -> viewmodel.toggleFlash()}"
+                android:src="@drawable/ic_baseline_flash_on_24"
+                app:goneUnless="@{viewmodel.isFlashAvailable}"
+                app:tint="@android:color/white" />
+
+            <ImageButton
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/set_white_balance"
+                android:onClick="@{() -> viewmodel.toggleAutoWhiteBalanceMode()}"
+                android:src="@drawable/ic_baseline_wb_auto_24"
+                app:goneUnless="@{viewmodel.isAutoWhiteBalanceAvailable}"
+                app:tint="@android:color/white" />
+
+            <ImageButton
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/set_exposure_compensation"
+                android:onClick="@{() -> viewmodel.toggleExposureSlider()}"
+                android:src="@drawable/ic_baseline_exposure_24"
+                app:goneUnless="@{viewmodel.isExposureCompensationAvailable()}"
+                app:tint="@android:color/white" />
+
+            <ImageButton
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/set_zoom_ratio"
+                android:onClick="@{() -> viewmodel.toggleZoomSlider()}"
+                android:src="@drawable/ic_baseline_zoom_in_24"
+                app:goneUnless="@{viewmodel.isZoomAvailable()}"
+                app:tint="@android:color/white" />
+
+            <ImageButton
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/set_auto_focus_mode"
+                android:onClick="@{() -> viewmodel.toggleAutoFocusMode()}"
+                android:src="@drawable/ic_baseline_center_focus_strong_24"
+                app:goneUnless="@{viewmodel.isAutoFocusModeAvailable()}"
+                app:tint="@android:color/white" />
+
+            <ToggleButton
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/mute_unmute_microphone"
+                android:drawableTop="@drawable/ic_toggle_mic_button"
+                android:onCheckedChanged="@{(_, checked) -> viewmodel.setMute(checked)}"
+                android:textOff=""
+                android:textOn=""
+                app:tint="@android:color/white" />
+
+
+        </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</layout>
