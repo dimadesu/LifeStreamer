@@ -26,8 +26,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.dimadesu.lifestreamer.R
-import com.dimadesu.lifestreamer.utils.AudioPermissionChecker
-import com.dimadesu.lifestreamer.utils.ProcessPriorityManager
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
@@ -84,15 +82,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
     
     // Audio permission checker for debugging
-    private val audioPermissionChecker: AudioPermissionChecker by lazy {
-        AudioPermissionChecker(this)
-    }
-    
-    // Process priority manager for maintaining foreground service behavior
-    private val processPriorityManager: ProcessPriorityManager by lazy {
-        ProcessPriorityManager(this)
-    }
-
     /**
      * Override onCreate to use both camera and mediaProjection service types
      */
@@ -163,17 +152,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
         override fun onStreamingStart() {
-        // Boost process and thread priority for foreground service behavior
-        processPriorityManager.boostServicePriority()
-        processPriorityManager.logProcessStatus()
-        
         // Acquire audio focus when streaming starts
         requestAudioFocus()
         // Acquire wake lock when streaming starts
         acquireWakeLock()
-        
-        // Log detailed audio permission status when streaming starts
-        audioPermissionChecker.logAudioPermissionStatus()
         
         // Boost process priority for foreground service
         try {
@@ -294,16 +276,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * This helps restore audio recording that may have been silenced in background
      */
     fun handleForegroundRecovery() {
-        Log.i(TAG, "handleForegroundRecovery() called - checking audio permission status")
-        
-        // Log current permission status for debugging
-        audioPermissionChecker.logAudioPermissionStatus()
-        
-        // Check if we have AppOps permission for audio recording
-        if (!audioPermissionChecker.hasRecordAudioAppOp()) {
-            Log.w(TAG, "AppOps RECORD_AUDIO permission is denied - this may cause audio issues")
-            Log.w(TAG, "User should check: Settings > Apps > StreamPack > Permissions > Microphone")
-        }
+        Log.i(TAG, "handleForegroundRecovery() called - checking audio status")
         
         // Try to restart audio recording by requesting audio focus again
         if (hasAudioFocus) {
@@ -461,6 +434,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private val customBinder = CameraStreamerServiceBinder()
 
     override fun onBind(intent: Intent): IBinder? {
+        super.onBind(intent)
         return customBinder
     }
 
