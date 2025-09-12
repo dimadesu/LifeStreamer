@@ -40,7 +40,6 @@
         <!-- Camera streaming service for background streaming capability -->
         <service
             android:name=".services.CameraStreamerService"
-            android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="camera|mediaProjection|microphone" />
     </application>
