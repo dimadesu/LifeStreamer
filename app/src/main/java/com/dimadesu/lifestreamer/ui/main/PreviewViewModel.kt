@@ -16,6 +16,7 @@
 package com.dimadesu.lifestreamer.ui.main
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.ComponentName
 import android.content.Context
@@ -29,6 +30,7 @@ import android.os.IBinder
 import android.util.Log
 import android.util.Range
 import android.util.Rational
+import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.databinding.Bindable
@@ -79,6 +81,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 
+@RequiresApi(Build.VERSION_CODES.O)
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 
@@ -92,6 +95,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Service reference for background streaming (using the service abstraction)
      */
+    @SuppressLint("StaticFieldLeak")
     private var streamerService: CameraStreamerService? = null
     
     /**
@@ -278,6 +282,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Bind to the CameraStreamerService for background streaming.
      * This handles both starting a new service and reconnecting to an existing one.
      */
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun bindToStreamerService() {
         Log.i(TAG, "Binding to CameraStreamerService...")
         
@@ -452,30 +457,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun onZoomRationOnPinchChanged() {
         notifyPropertyChanged(BR.zoomRatio)
-    }
-
-    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun configureAudio() {
-        viewModelScope.launch {
-            try {
-                // Don't reconfigure audio if already streaming - prevents disruption
-                if (serviceStreamer?.isStreamingFlow?.value == true) {
-                    Log.i(TAG, "Skipping audio configuration - already streaming")
-                    return@launch
-                }
-                
-                storageRepository.audioConfigFlow.first()?.let { 
-                    serviceStreamer?.setAudioConfig(it)
-                }
-                    ?: Log.i(
-                        TAG,
-                        "Audio is disabled"
-                    )
-            } catch (t: Throwable) {
-                Log.e(TAG, "configureAudio failed", t)
-                _streamerErrorLiveData.postValue("configureAudio: ${t.message ?: "Unknown error"}")
-            }
-        }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
