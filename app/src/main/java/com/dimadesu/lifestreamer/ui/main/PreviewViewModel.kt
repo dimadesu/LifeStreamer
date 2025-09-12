@@ -53,15 +53,11 @@ import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.IAudioRecordSource
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
-import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.IBitmapSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSettings
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFrameRateSupported
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
-import io.github.thibaultbee.streampack.core.interfaces.releaseBlocking
-import io.github.thibaultbee.streampack.core.interfaces.startStream
-import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MediaProjectionAudioSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.core.utils.extensions.isClosedException
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
