@@ -112,6 +112,10 @@ class NotificationUtils(
                     // Add foreground service badge
                     setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
                 }
+
+                setVibrate(null) // Disable vibration for background service
+                setLights(0, 0, 0) // Disable LED for background service
+                setSound(null) // Silent for background service
                 
                 // Prevent system from killing the service
                 setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
