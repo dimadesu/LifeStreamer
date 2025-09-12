@@ -661,7 +661,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             when (videoSource) {
                 is ICameraSource -> {
-                    Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
+                    Log.i(TAG, "Switching from Camera to Bitmap source (streaming: $isCurrentlyStreaming)")
                     
                     // If we're currently streaming, temporarily stop to prepare for source switch
                     var wasStreaming = false
@@ -677,27 +677,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                     }
                     
-                    // If we were streaming before, restart with RTMP source
+                    // Switch to bitmap source
+                    currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
+                    
+                    // If we were streaming before, restart with bitmap source
                     if (wasStreaming) {
-                        Log.i(TAG, "Restarting stream with RTMP source")
+                        Log.i(TAG, "Restarting stream with bitmap source")
                         try {
-                            // Small delay to let RTMP source initialize
+                            // Small delay to let bitmap source initialize
                             kotlinx.coroutines.delay(300)
                             val descriptor = storageRepository.endpointDescriptorFlow.first()
                             startServiceStreaming(descriptor)
                         } catch (e: Exception) {
-                            Log.e(TAG, "Error restarting stream with RTMP: ${e.message}")
-                            _streamerErrorLiveData.postValue("Failed to restart stream with RTMP: ${e.message}")
+                            Log.e(TAG, "Error restarting stream with bitmap: ${e.message}")
+                            _streamerErrorLiveData.postValue("Failed to restart stream with bitmap: ${e.message}")
                         }
                     }
                 }
                 else -> {
-                    Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
+                    Log.i(TAG, "Switching from Bitmap back to Camera source (streaming: $isCurrentlyStreaming)")
                     
                     // If we're currently streaming, we need to stop the current source first
                     var wasStreaming = false
                     if (isCurrentlyStreaming) {
-                        Log.i(TAG, "Stopping RTMP streaming before switch")
+                        Log.i(TAG, "Stopping bitmap streaming before switch")
                         wasStreaming = true
                         try {
                             stopServiceStreaming()
