@@ -5,9 +5,26 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.CAPTURE_AUDIO_OUTPUT" />
+    <uses-permission android:name="android.permission.CAPTURE_AUDIO_HOTWORD"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <!-- Background microphone access for streaming -->
+    <uses-permission android:name="android.permission.MICROPHONE" />
+    <!-- Request exemption from background restrictions for audio recording -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+
+    <!-- MediaProjection permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.microphone" />
@@ -30,6 +47,20 @@
             </intent-filter>
         </activity>
         <activity android:name=".ui.settings.SettingsActivity" />
+
+        <!-- MediaProjection service for audio capture with required foreground service type -->
+        <service
+            android:name=".services.DemoMediaProjectionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- Camera streaming service for background streaming capability -->
+        <service
+            android:name=".services.CameraStreamerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="camera|mediaProjection|microphone" />
     </application>
 
 </manifest>
