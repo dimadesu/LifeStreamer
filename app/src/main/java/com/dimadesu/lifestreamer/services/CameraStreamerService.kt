@@ -19,7 +19,6 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
-import android.media.projection.MediaProjection
 import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
@@ -27,23 +26,15 @@ import android.os.PowerManager
 import android.util.Log
 import com.dimadesu.lifestreamer.R
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
-import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
-import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
-import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
-import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
-import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.services.StreamerService
 import io.github.thibaultbee.streampack.services.utils.SingleStreamerFactory
-import io.github.thibaultbee.streampack.services.utils.StreamerFactory
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.view.Surface
+import androidx.annotation.RequiresApi
 import androidx.core.app.ServiceCompat
 import com.dimadesu.lifestreamer.services.utils.NotificationUtils
-import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
 
 /**
  * CameraStreamerService extending StreamerService for camera streaming
@@ -52,7 +43,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     streamerFactory = SingleStreamerFactory(
         withAudio = true, 
         withVideo = true, 
-        defaultRotation = 0  // Provide default rotation since service context has no display
+        defaultRotation = Surface.ROTATION_0  // Provide default rotation since service context has no display
     ),
     notificationId = 1001,
     channelId = "camera_streaming_channel", 
@@ -151,7 +142,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Intentionally NOT calling stopSelf() here - let the service stay alive
     }
 
-        override fun onStreamingStart() {
+    @RequiresApi(Build.VERSION_CODES.R)
+    override fun onStreamingStart() {
         // Acquire audio focus when streaming starts
         requestAudioFocus()
         // Acquire wake lock when streaming starts
@@ -167,14 +159,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // Request system to keep service alive
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForeground(1001, onCreateNotification(), 
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or 
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
-                Log.i(TAG, "Foreground service reinforced with all required service types")
-            }
+            startForeground(1001, onCreateNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+            Log.i(TAG, "Foreground service reinforced with all required service types")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
         }
@@ -325,103 +315,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Handle extras if needed
         _serviceReady.value = true
     }
-
-    /**
-     * Get the SingleStreamer instance for ViewModel compatibility
-     */
-    fun getSingleStreamer(): SingleStreamer = streamer as SingleStreamer
-
-    /**
-     * Alternative getter that ViewModel uses
-     */
-    fun getStreamer(): SingleStreamer = getSingleStreamer()
-
-    /**
-     * Get MediaProjection for audio capture - not needed for camera service
-     */
-    fun getMediaProjection(): MediaProjection? = null
-
-    /**
-     * Video input access for ViewModel compatibility
-     */
-    val videoInput get() = (streamer as? IWithVideoSource)?.videoInput
-
-    /**
-     * Audio input access for ViewModel compatibility
-     */
-    val audioInput get() = (streamer as? IWithAudioSource)?.audioInput
-
-    /**
-     * Service ready StateFlow for ViewModel compatibility
-     */
-    val serviceReady: StateFlow<Boolean> = _serviceReady
-
-    /**
-     * Service ready callback helper
-     */
-    fun serviceReady(callback: (SingleStreamer) -> Unit) {
-        callback(getSingleStreamer())
-    }
-
-    /**
-     * Get streaming flow for ViewModel compatibility
-     */
-    val isStreamingFlow: StateFlow<Boolean> get() = streamer.isStreamingFlow
-
-    /**
-     * Get streamer flow for ViewModel compatibility
-     */
-    val streamerFlow: StateFlow<SingleStreamer?> by lazy { 
-        MutableStateFlow(getSingleStreamer())
-    }
-
-    /**
-     * Track streaming state for restore functionality
-     */
-    var wasStreaming: Boolean = false
-
-    /**
-     * Set video source method for ViewModel compatibility
-     */
-    fun setVideoSource(videoSourceFactory: IVideoSourceInternal.Factory) {
-        lifecycleScope.launch {
-            (streamer as? IWithVideoSource)?.setVideoSource(videoSourceFactory)
-        }
-    }
-
-    /**
-     * Set audio source method for ViewModel compatibility  
-     */
-    fun setAudioSource(audioSourceFactory: IAudioSourceInternal.Factory) {
-        lifecycleScope.launch {
-            (streamer as? IWithAudioSource)?.setAudioSource(audioSourceFactory)
-        }
-    }
-
-    /**
-     * Start streaming with MediaDescriptor for ViewModel compatibility
-     */
-    suspend fun startStreaming(descriptor: MediaDescriptor): Boolean {
-        return try {
-            streamer.open(descriptor)
-            streamer.startStream()
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /**
-     * Stop streaming method
-     */
-    suspend fun stopStreaming(): Boolean {
-        return try {
-            streamer.stopStream()
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
     
     /**
      * Custom binder that provides access to both the streamer and the service
@@ -448,23 +341,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onOpenNotification(): Notification? {
-        // Check if battery optimization is disabled for better notification message
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val isOptimized = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            !powerManager.isIgnoringBatteryOptimizations(packageName)
-        } else {
-            false
-        }
-        
-        val notificationText = if (isOptimized) {
-            getString(R.string.service_notification_text_background_audio_restricted)
-        } else {
-            getString(R.string.service_notification_text_streaming)
-        }
-        
         return customNotificationUtils.createNotification(
             getString(R.string.service_notification_title),
-            notificationText,
+            getString(R.string.service_notification_text_streaming),
             R.drawable.ic_baseline_linked_camera_24,
             isForgroundService = true // Enable enhanced foreground service attributes
         )
