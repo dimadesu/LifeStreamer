@@ -6,6 +6,8 @@ Can stream SRT with dynamic/adaptive bitrate alrogrithm as well as RTMP. A lot o
 
 Can have bonding via [Bond Bunny app](https://github.com/dimadesu/bond-bunny).
 
+Discord server: https://discord.gg/3ejS5Eqx
+
 ## How to install
 
 For now, I'll be releasing APK files using [GitHub releases](https://github.com/dimadesu/LifeStreamer/releases).
