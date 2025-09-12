@@ -4,6 +4,20 @@
     <string name="action_settings">Settings</string>
     <string name="menu_actions">Menu actions</string>
 
+    <!-- Camera Streaming Service -->
+    <string name="streaming_channel_name">Camera Streaming</string>
+    <string name="streaming_channel_description">Notification channel for camera streaming service</string>
+
+    <!-- Service Notifications -->
+    <string name="service_notification_title">LifeStreamer Camera Service</string>
+    <string name="service_notification_text_created">Service created</string>
+    <string name="service_notification_text_streaming">Streaming in progress… (Audio continues in
+        background)</string>
+    <string name="service_notification_text_error">Error: %1$s</string>
+    <string name="service_notification_text_stopped">Streaming stopped</string>
+    <string name="service_notification_text_background_audio_restricted">Background audio may be
+        limited. Check battery optimization settings.</string>
+
     <!-- Preview -->
     <string name="live">Start Live</string>
     <string name="stop">Stop</string>

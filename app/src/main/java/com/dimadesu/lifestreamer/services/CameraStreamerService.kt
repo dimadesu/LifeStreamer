@@ -26,7 +26,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.dimadesu.lifestreamer.R
-import com.dimadesu.lifestreamer.utils.BatteryOptimizationManager
 import com.dimadesu.lifestreamer.utils.AudioPermissionChecker
 import com.dimadesu.lifestreamer.utils.ProcessPriorityManager
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
