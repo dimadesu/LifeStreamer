@@ -4,6 +4,17 @@
     <string name="action_settings">Settings</string>
     <string name="menu_actions">Menu actions</string>
 
+    <!-- Camera Streaming Service -->
+    <string name="streaming_channel_name">Camera Streaming</string>
+    <string name="streaming_channel_description">Notification channel for camera streaming service</string>
+
+    <!-- Service Notifications -->
+    <string name="service_notification_title">LifeStreamer</string>
+    <string name="service_notification_text_created">Service created</string>
+    <string name="service_notification_text_streaming">Streaming in progress…</string>
+    <string name="service_notification_text_error">Error: %1$s</string>
+    <string name="service_notification_text_stopped">Not streaming</string>
+
     <!-- Preview -->
     <string name="live">Start Live</string>
     <string name="stop">Stop</string>

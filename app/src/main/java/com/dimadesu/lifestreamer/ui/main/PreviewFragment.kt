@@ -17,15 +17,22 @@ package com.dimadesu.lifestreamer.ui.main
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AppOpsManager
+import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ToggleButton
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresPermission
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
@@ -36,6 +43,7 @@ import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
 import io.github.thibaultbee.streampack.core.interfaces.IStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewableSource
 import io.github.thibaultbee.streampack.core.streamers.lifecycle.StreamerViewModelLifeCycleObserver
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.ui.views.PreviewView
@@ -63,13 +71,40 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private fun bindProperties() {
         binding.liveButton.setOnClickListener { view ->
             view as ToggleButton
-            if (view.isPressed) {
-                if (view.isChecked) {
-                    startStreamIfPermissions(previewViewModel.requiredPermissions)
-                } else {
-                    stopStream()
-                }
+            Log.d(TAG, "Live button clicked - isChecked: ${view.isChecked}, streaming: ${previewViewModel.isStreamingLiveData.value}, trying: ${previewViewModel.isTryingConnectionLiveData.value}")
+            
+            // Check current state to determine action
+            val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value == true
+            val isTryingConnection = previewViewModel.isTryingConnectionLiveData.value == true
+            
+            // Also check the actual streamer state directly as backup
+            val actualStreamingState = previewViewModel.serviceStreamer?.isStreamingFlow?.value == true
+            Log.d(TAG, "Live button - actualStreamingState from serviceStreamer: $actualStreamingState")
+            
+            // Use either LiveData or direct streamer state
+            val isReallyStreaming = isCurrentlyStreaming || actualStreamingState
+            
+            if (!isReallyStreaming && !isTryingConnection) {
+                // Not streaming and not trying - start stream
+                Log.d(TAG, "Starting stream...")
+                // Set button to "Stop" immediately and keep it there
+                view.isChecked = true
+                startStreamIfPermissions(previewViewModel.requiredPermissions)
+            } else if (isReallyStreaming || isTryingConnection) {
+                // Streaming or trying to connect - stop stream
+                Log.d(TAG, "Stopping stream...")
+                // Set button to "Start" immediately
+                view.isChecked = false
+                stopStream()
+            } else {
+                Log.w(TAG, "Uncertain state - button clicked but unclear action needed")
+                // Reset button to reflect actual state
+                view.isChecked = isReallyStreaming || isTryingConnection
             }
+        }
+
+        binding.switchSourceButton.setOnClickListener {
+            previewViewModel.toggleVideoSource()
         }
 
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) {
@@ -81,34 +116,46 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
+            Log.d(TAG, "Streaming state changed to: $isStreaming")
             if (isStreaming) {
                 lockOrientation()
             } else {
                 unlockOrientation()
             }
             if (isStreaming) {
-                binding.liveButton.isChecked = true
-            } else if (previewViewModel.isTryingConnectionLiveData.value == true) {
-                binding.liveButton.isChecked = true
+                // Ensure button shows "Stop" when definitely streaming
+                if (!binding.liveButton.isChecked) {
+                    Log.d(TAG, "Streaming confirmed - ensuring button shows Stop")
+                    binding.liveButton.isChecked = true
+                }
             } else {
-                binding.liveButton.isChecked = false
+                // Only set to "Start" if we're not in a connecting state
+                if (previewViewModel.isTryingConnectionLiveData.value != true && binding.liveButton.isChecked) {
+                    Log.d(TAG, "Streaming stopped and not trying - ensuring button shows Start")
+                    binding.liveButton.isChecked = false
+                }
             }
         }
 
         previewViewModel.isTryingConnectionLiveData.observe(viewLifecycleOwner) { isWaitingForConnection ->
-            if (isWaitingForConnection) {
-                binding.liveButton.isChecked = true
-            } else if (previewViewModel.isStreamingLiveData.value == true) {
-                binding.liveButton.isChecked = true
-            } else {
-                binding.liveButton.isChecked = false
-            }
+            Log.d(TAG, "Trying connection state changed to: $isWaitingForConnection")
+            // Don't change button state here - let the click handler manage it
+            // if (isWaitingForConnection) {
+            //     binding.liveButton.isChecked = true
+            // } else if (previewViewModel.isStreamingLiveData.value == true) {
+            //     binding.liveButton.isChecked = true
+            // } else {
+            //     binding.liveButton.isChecked = false
+            // }
         }
 
         previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
             if (streamer is IStreamer) {
+                // TODO: For background streaming, we don't want to automatically stop streaming
+                // when the app goes to background. The service should handle this.
                 // TODO: Remove this observer when streamer is released
-                lifecycle.addObserver(StreamerViewModelLifeCycleObserver(streamer))
+                // lifecycle.addObserver(StreamerViewModelLifeCycleObserver(streamer))
+                Log.d(TAG, "Streamer lifecycle observer disabled for background streaming support")
             } else {
                 Log.e(TAG, "Streamer is not a ICoroutineStreamer")
             }
@@ -160,7 +207,54 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     override fun onPause() {
         super.onPause()
-        stopStream()
+        // DO NOT stop streaming when going to background - the service should continue streaming
+        // DO NOT stop preview either when the camera is being used for streaming -
+        // the camera source is shared between preview and streaming, so stopping preview
+        // would also stop the streaming. Instead, let the preview continue running.
+        Log.d(TAG, "onPause() - app going to background, keeping both preview and stream active via service")
+        
+        // Note: We used to stop preview here, but that was causing streaming to stop
+        // because the camera source is shared. For background streaming to work properly,
+        // we need to keep the camera active.
+        // stopStream()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
+        
+        // Since we no longer stop preview in onPause(), the preview should still be running
+        // We only need to ensure preview is started if it's not already running
+        if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
+            val streamer = previewViewModel.streamerLiveData.value
+            if (streamer is SingleStreamer) {
+                lifecycleScope.launch {
+                    try {
+                        // Check if preview is already running before trying to start it
+                        val videoSource = (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
+                        if (videoSource is IPreviewableSource && !videoSource.isPreviewingFlow.value) {
+                            binding.preview.startPreview()
+                            Log.d(TAG, "Preview restarted for foreground mode")
+                        } else {
+                            Log.d(TAG, "Preview was already running")
+                        }
+                        
+                        // Re-request audio focus when app returns to foreground if streaming
+                        val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
+                        if (isCurrentlyStreaming) {
+                            Log.d(TAG, "App returned to foreground while streaming - handling recovery")
+                            // Get service and handle foreground recovery
+                            previewViewModel.service?.let { service ->
+                                service.handleForegroundRecovery()
+                                Log.d(TAG, "Foreground recovery completed")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error ensuring preview is running: ${e.message}")
+                    }
+                }
+            }
+        }
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
@@ -207,10 +301,36 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             PermissionManager.hasPermissions(
                 requireContext(), *permissions.toTypedArray()
             ) -> {
+                // Log detailed permission status before starting stream
+                permissions.forEach { permission ->
+                    val isGranted = ContextCompat.checkSelfPermission(requireContext(), permission) == PackageManager.PERMISSION_GRANTED
+                    Log.i(TAG, "Permission $permission: granted=$isGranted")
+                }
+                
+                // Special check for RECORD_AUDIO AppOps
+                if (permissions.contains(Manifest.permission.RECORD_AUDIO)) {
+                    try {
+                        val appOpsManager = requireContext().getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+                        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            appOpsManager.checkOpNoThrow(
+                                AppOpsManager.OPSTR_RECORD_AUDIO,
+                                android.os.Process.myUid(),
+                                requireContext().packageName
+                            )
+                        } else {
+                            AppOpsManager.MODE_ALLOWED
+                        }
+                        Log.i(TAG, "RECORD_AUDIO AppOps mode: $mode (${if (mode == AppOpsManager.MODE_ALLOWED) "ALLOWED" else "BLOCKED"})")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to check RECORD_AUDIO AppOps", e)
+                    }
+                }
+                
                 startStream()
             }
 
             else -> {
+                Log.w(TAG, "Missing permissions, requesting: ${permissions.joinToString()}")
                 requestLiveStreamPermissionsLauncher.launch(
                     permissions.toTypedArray()
                 )
@@ -225,7 +345,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 requireContext(), Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
             ) -> {
                 inflateStreamerPreview()
-                previewViewModel.configureAudio()
+                // Don't call configureAudio() here - it will be handled by service connection
+                // when the service is ready and only if not already streaming
+                // previewViewModel.configureAudio()
                 previewViewModel.initializeVideoSource()
             }
 
@@ -283,7 +405,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             inflateStreamerPreview()
             previewViewModel.initializeVideoSource()
         } else if (permissions[Manifest.permission.RECORD_AUDIO] == true) {
-            previewViewModel.configureAudio()
+            // Don't call configureAudio() here - it will be handled by service connection
+            // when the service is ready and only if not already streaming
+            // previewViewModel.configureAudio()
+            Log.d(TAG, "RECORD_AUDIO permission granted - audio will be configured via service")
         }
         if (missingPermissions.isNotEmpty()) {
             showPermissionError(*missingPermissions.toTypedArray())
