@@ -345,7 +345,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 requireContext(), Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
             ) -> {
                 inflateStreamerPreview()
-                previewViewModel.configureAudio()
+                // Don't call configureAudio() here - it will be handled by service connection
+                // when the service is ready and only if not already streaming
+                // previewViewModel.configureAudio()
                 previewViewModel.initializeVideoSource()
             }
 
@@ -403,7 +405,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             inflateStreamerPreview()
             previewViewModel.initializeVideoSource()
         } else if (permissions[Manifest.permission.RECORD_AUDIO] == true) {
-            previewViewModel.configureAudio()
+            // Don't call configureAudio() here - it will be handled by service connection
+            // when the service is ready and only if not already streaming
+            // previewViewModel.configureAudio()
+            Log.d(TAG, "RECORD_AUDIO permission granted - audio will be configured via service")
         }
         if (missingPermissions.isNotEmpty()) {
             showPermissionError(*missingPermissions.toTypedArray())

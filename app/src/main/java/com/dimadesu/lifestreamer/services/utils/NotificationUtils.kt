@@ -18,13 +18,16 @@ package com.dimadesu.lifestreamer.services.utils
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.dimadesu.lifestreamer.ui.main.MainActivity
 
 /**
  * Helper class to create and manage notifications.
@@ -70,9 +73,28 @@ class NotificationUtils(
         @DrawableRes iconResourceId: Int,
         isForgroundService: Boolean = false
     ): Notification {
+        // Create an intent to open the main activity when notification is tapped
+        val intent = Intent(service, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        
+        val pendingIntent = PendingIntent.getActivity(
+            service,
+            0,
+            intent,
+            pendingIntentFlags
+        )
+        
         val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
             setContentTitle(title)
+            setContentIntent(pendingIntent) // This makes the notification tappable
             
             content?.let {
                 setContentText(it)

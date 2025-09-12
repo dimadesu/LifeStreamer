@@ -254,12 +254,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     private fun setServiceAudioSource(audioSourceFactory: IAudioSourceInternal.Factory) {
         viewModelScope.launch {
+            // Don't change audio source while streaming to avoid configuration conflicts
+            if (serviceStreamer?.isStreamingFlow?.value == true) {
+                Log.i(TAG, "Skipping audio source change - streamer is currently streaming")
+                return@launch
+            }
             serviceStreamer?.setAudioSource(audioSourceFactory)
         }
     }
     
     private fun setServiceVideoSource(videoSourceFactory: IVideoSourceInternal.Factory) {
         viewModelScope.launch {
+            // Don't change video source while streaming to avoid configuration conflicts
+            if (serviceStreamer?.isStreamingFlow?.value == true) {
+                Log.i(TAG, "Skipping video source change - streamer is currently streaming")
+                return@launch
+            }
             serviceStreamer?.setVideoSource(videoSourceFactory)
         }
     }
@@ -305,13 +315,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Initialize streamer sources after service is ready.
+     * Only initializes if streamer is not already streaming to avoid configuration conflicts.
      */
     private suspend fun initializeStreamerSources() {
         val currentStreamer = serviceStreamer ?: return
         
+        // Don't reinitialize sources if already streaming - this prevents configuration conflicts
+        if (currentStreamer.isStreamingFlow.value == true) {
+            Log.i(TAG, "Streamer is already streaming - skipping source initialization to avoid conflicts")
+            observeStreamerFlows()
+            return
+        }
+        
         Log.i(TAG, "Initializing streamer sources - Audio enabled: ${currentStreamer.withAudio}, Video enabled: ${currentStreamer.withVideo}")
         
-        // Set audio source and video source
+        // Set audio source and video source only if not streaming
         if (currentStreamer.withAudio) {
             Log.i(TAG, "Audio source is enabled. Setting audio source")
             setServiceAudioSource(MicrophoneSourceFactory())
@@ -399,6 +417,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             storageRepository.audioConfigFlow
                 .collect { config ->
+                    // Don't change audio config while streaming to avoid configuration conflicts
+                    if (serviceStreamer?.isStreamingFlow?.value == true) {
+                        Log.i(TAG, "Skipping audio config change - streamer is currently streaming")
+                        return@collect
+                    }
+                    
                     if (ActivityCompat.checkSelfPermission(
                             application,
                             Manifest.permission.RECORD_AUDIO
@@ -413,6 +437,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             storageRepository.videoConfigFlow
                 .collect { config ->
+                    // Don't change video config while streaming to avoid configuration conflicts
+                    if (serviceStreamer?.isStreamingFlow?.value == true) {
+                        Log.i(TAG, "Skipping video config change - streamer is currently streaming")
+                        return@collect
+                    }
+                    
                     config?.let {
                         serviceStreamer?.setVideoConfig(it)
                     } ?: Log.i(TAG, "Video is disabled")
