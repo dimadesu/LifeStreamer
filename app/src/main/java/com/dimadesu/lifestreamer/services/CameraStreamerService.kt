@@ -4,6 +4,7 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.media.audiofx.AudioEffect
 import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
@@ -19,6 +20,7 @@ import android.view.Surface
 import androidx.annotation.RequiresApi
 import androidx.core.app.ServiceCompat
 import com.dimadesu.lifestreamer.services.utils.NotificationUtils
+import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -134,10 +136,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Acquire wake lock when streaming starts
         acquireWakeLock()
         
-        // Boost process priority for foreground service
+        // Boost process priority for foreground service - use more conservative priority for stability
         try {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-            Log.i(TAG, "Process priority boosted to URGENT_AUDIO for background audio reliability")
+            // Use URGENT_DISPLAY instead of URGENT_AUDIO for less aggressive scheduling
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
+            Log.i(TAG, "Process priority boosted to URGENT_DISPLAY for stable background audio")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to boost process priority", e)
         }
@@ -166,16 +169,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     /**
-     * Acquire wake lock to prevent audio silencing
+     * Acquire wake lock to prevent audio silencing and ensure stable background recording
      */
     private fun acquireWakeLock() {
         if (wakeLock == null) {
+            // Use PARTIAL_WAKE_LOCK for better compatibility across Android versions
             wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
-                "StreamPack::HighPriorityAudioRecording"
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "StreamPack::StableBackgroundAudioRecording"
             ).apply {
-                acquire(10 * 60 * 1000L) // 10 minutes max
-                Log.i(TAG, "Enhanced wake lock acquired with ON_AFTER_RELEASE flag for high priority audio recording")
+                acquire(30 * 60 * 1000L) // 30 minutes max - longer timeout for stability
+                Log.i(TAG, "Wake lock acquired for stable background audio recording")
             }
         }
     }
