@@ -35,8 +35,8 @@ I'll start with original camera demo from StreamPack. I'll tweak it and add new 
 
 ### Top planned features
 
-- Foreground service to allow streaming with app in background, phone locked and screen off.
-- Dynamic bitrate. I want to upgrade it to [Belabox](https://github.com/BELABOX/belacoder) or [Moblin](https://github.com/eerimoq/moblin) algorithm.
+- [x] _(Can be polished more)_ Foreground service to allow streaming with app in background, phone locked and screen off.
+- [x] Dynamic bitrate. I want to upgrade it to [Belabox](https://github.com/BELABOX/belacoder) or [Moblin](https://github.com/eerimoq/moblin) algorithm.
 - RTMP as source.
   - I tried a few things. I looked into building RTMP server, like Moblin does. Maybe I'll try building it later.
   - I was able to get proof of concept working with [ExoPlayer](https://github.com/androidx/media).
@@ -44,7 +44,7 @@ I'll start with original camera demo from StreamPack. I'll tweak it and add new 
   - I can stream RTMP from action camera to my server.
   - I give ExoPlayer RTMP URL to that server to play and it does all the hard work - handles RTMP connection, demuxes and decodes video/audio.
   - I sort of grab uncommpressed data from ExoPlayer and feed into StreamPack via custom video/audio source.
-  - There are many things that can go wrong with RTMP source, but I got the basic version be working.
+  - There are many things that can go wrong with RTMP source, but I got the basic version working.
 
 ### Planned minor features
 - Re-connect on disconnect
