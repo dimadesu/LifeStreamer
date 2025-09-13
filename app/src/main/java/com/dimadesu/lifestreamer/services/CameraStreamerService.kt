@@ -204,27 +204,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         audioFocusListener?.let { listener ->
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Use new API for Android 8+ with persistent focus request
+                // Use new API for Android 8+ with stable background recording configuration
                 val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(
                         android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION) 
-                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .setFlags(android.media.AudioAttributes.FLAG_LOW_LATENCY)
+                            .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION) // Perfect for microphone streaming
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH) // Optimized for speech
+                            // Remove FLAG_LOW_LATENCY to prevent crackling in background
                             .build()
                     )
-                    .setAcceptsDelayedFocusGain(false)
+                    .setAcceptsDelayedFocusGain(true) // Allow delayed focus for better compatibility
                     .setWillPauseWhenDucked(false) // Continue recording even when ducked
                     .setOnAudioFocusChangeListener(listener)
                     .build()
                 audioFocusRequest = focusRequest
                 audioManager.requestAudioFocus(focusRequest)
             } else {
-                // Use deprecated API for older versions
+                // Use deprecated API for older versions with voice stream for microphone content
                 @Suppress("DEPRECATION")
                 audioManager.requestAudioFocus(
                     listener,
-                    AudioManager.STREAM_VOICE_CALL, // Use voice call stream for recording
+                    AudioManager.STREAM_VOICE_CALL, // Appropriate for microphone/voice streaming
                     AudioManager.AUDIOFOCUS_GAIN
                 )
             }
