@@ -17,6 +17,7 @@ import io.github.thibaultbee.streampack.services.utils.SingleStreamerFactory
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.view.Surface
+import android.view.WindowManager
 import androidx.annotation.RequiresApi
 import androidx.core.app.ServiceCompat
 import com.dimadesu.lifestreamer.services.utils.NotificationUtils
@@ -29,8 +30,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class CameraStreamerService : StreamerService<ISingleStreamer>(
     streamerFactory = SingleStreamerFactory(
         withAudio = true, 
-        withVideo = true, 
-        defaultRotation = Surface.ROTATION_0  // Provide default rotation since service context has no display
+        withVideo = true 
+        // Remove defaultRotation - let StreamPack detect it automatically and we'll update it dynamically
     ),
     notificationId = 1001,
     channelId = "camera_streaming_channel", 
@@ -40,9 +41,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 ) {
     companion object {
         const val TAG = "CameraStreamerService"
+        
+        /**
+         * Convert rotation constant to readable string for logging
+         */
+        private fun rotationToString(rotation: Int): String {
+            return when (rotation) {
+                Surface.ROTATION_0 -> "ROTATION_0 (Portrait)"
+                Surface.ROTATION_90 -> "ROTATION_90 (Landscape Left)"
+                Surface.ROTATION_180 -> "ROTATION_180 (Portrait Upside Down)"
+                Surface.ROTATION_270 -> "ROTATION_270 (Landscape Right)"
+                else -> "UNKNOWN ($rotation)"
+            }
+        }
     }
 
     private val _serviceReady = MutableStateFlow(false)
+    
+    // Current device rotation
+    private var currentRotation: Int = Surface.ROTATION_0
     
     // Audio focus management
     private lateinit var audioManager: AudioManager
@@ -67,6 +84,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Initialize audio manager and focus listener
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        
+        // Detect current device rotation
+        detectCurrentRotation()
         
         audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
             when (focusChange) {
@@ -166,6 +186,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Release wake lock when service is destroyed
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    /**
+     * Detect the current device rotation using the window manager
+     */
+    private fun detectCurrentRotation() {
+        try {
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            }
+            
+            currentRotation = rotation
+            Log.i(TAG, "Detected device rotation: ${rotationToString(rotation)}")
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to detect device rotation, keeping current: ${rotationToString(currentRotation)}", e)
+        }
     }
 
     /**
