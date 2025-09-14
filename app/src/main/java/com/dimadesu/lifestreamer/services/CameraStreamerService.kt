@@ -3,8 +3,6 @@ package com.dimadesu.lifestreamer.services
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
-import android.media.AudioManager
-import android.media.audiofx.AudioEffect
 import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
@@ -21,7 +19,6 @@ import android.view.WindowManager
 import androidx.annotation.RequiresApi
 import androidx.core.app.ServiceCompat
 import com.dimadesu.lifestreamer.services.utils.NotificationUtils
-import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -61,12 +58,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current device rotation
     private var currentRotation: Int = Surface.ROTATION_0
     
-    // Audio focus management
-    private lateinit var audioManager: AudioManager
-    private var audioFocusListener: AudioManager.OnAudioFocusChangeListener? = null
-    private var audioFocusRequest: android.media.AudioFocusRequest? = null // Store for proper release
-    private var hasAudioFocus = false
-    
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
@@ -81,34 +72,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Override onCreate to use both camera and mediaProjection service types
      */
     override fun onCreate() {
-        // Initialize audio manager and focus listener
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+    // Initialize power manager and other services
+    powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         
         // Detect current device rotation
         detectCurrentRotation()
-        
-        audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-            when (focusChange) {
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    Log.i(TAG, "Audio focus gained - continuing recording")
-                    hasAudioFocus = true
-                }
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    Log.w(TAG, "Audio focus lost permanently")
-                    hasAudioFocus = false
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    Log.w(TAG, "Audio focus lost temporarily")
-                    hasAudioFocus = false
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    Log.i(TAG, "Audio focus lost temporarily (can duck) - continuing recording")
-                    // For recording apps, we want to continue recording even when ducked
-                    hasAudioFocus = true
-                }
-            }
-        }
         
         // Let the base class handle most of the setup first
         super.onCreate()
@@ -133,8 +101,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onStreamingStop() {
-        // Release audio focus when streaming stops
-        releaseAudioFocus()
         // Release wake lock when streaming stops
         releaseWakeLock()
         
@@ -151,8 +117,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
     @RequiresApi(Build.VERSION_CODES.R)
     override fun onStreamingStart() {
-        // Acquire audio focus when streaming starts
-        requestAudioFocus()
         // Acquire wake lock when streaming starts
         acquireWakeLock()
         
@@ -181,8 +145,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onDestroy() {
-        // Release audio focus when service is destroyed
-        releaseAudioFocus()
         // Release wake lock when service is destroyed
         releaseWakeLock()
         super.onDestroy()
@@ -239,103 +201,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     /**
-     * Request audio focus for continuous recording
-     */
-    fun requestAudioFocus() {
-        if (hasAudioFocus) {
-            Log.i(TAG, "Audio focus already held")
-            return
-        }
-        
-        audioFocusListener?.let { listener ->
-            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Use new API for Android 8+ with stable background recording configuration
-                val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(
-                        android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION) // Perfect for microphone streaming
-                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH) // Optimized for speech
-                            // Remove FLAG_LOW_LATENCY to prevent crackling in background
-                            .build()
-                    )
-                    .setAcceptsDelayedFocusGain(true) // Allow delayed focus for better compatibility
-                    .setWillPauseWhenDucked(false) // Continue recording even when ducked
-                    .setOnAudioFocusChangeListener(listener)
-                    .build()
-                audioFocusRequest = focusRequest
-                audioManager.requestAudioFocus(focusRequest)
-            } else {
-                // Use deprecated API for older versions with voice stream for microphone content
-                @Suppress("DEPRECATION")
-                audioManager.requestAudioFocus(
-                    listener,
-                    AudioManager.STREAM_VOICE_CALL, // Appropriate for microphone/voice streaming
-                    AudioManager.AUDIOFOCUS_GAIN
-                )
-            }
-            
-            when (result) {
-                AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> {
-                    Log.i(TAG, "Audio focus granted for persistent background recording")
-                    hasAudioFocus = true
-                }
-                AudioManager.AUDIOFOCUS_REQUEST_FAILED -> {
-                    Log.w(TAG, "Audio focus request failed")
-                    hasAudioFocus = false
-                }
-                AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> {
-                    Log.i(TAG, "Audio focus request delayed")
-                    hasAudioFocus = false
-                }
-            }
-        }
-    }
-
-    /**
      * Handle foreground recovery - called when app returns to foreground
      * This helps restore audio recording that may have been silenced in background
      */
     fun handleForegroundRecovery() {
-        Log.i(TAG, "handleForegroundRecovery() called - checking audio status")
-        
-        // Try to restart audio recording by requesting audio focus again
-        if (hasAudioFocus) {
-            Log.i(TAG, "Re-requesting audio focus to help restore background audio")
-            requestAudioFocus()
-        }
-        
-        // Notify the streamer about foreground recovery if it has audio capabilities
-        try {
-            streamer.let { currentStreamer ->
-                if (currentStreamer.isStreamingFlow.value) {
-                    Log.i(TAG, "Triggering audio source recovery for active stream")
-                    // Audio recovery now handled by comprehensive background audio solution
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to trigger audio recovery", e)
-        }
-    }
-
-    /**
-     * Release audio focus
-     */
-    private fun releaseAudioFocus() {
-        if (!hasAudioFocus) {
-            return
-        }
-        
-        audioFocusListener?.let { listener ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-                audioManager.abandonAudioFocusRequest(audioFocusRequest!!)
-                audioFocusRequest = null
-            } else {
-                @Suppress("DEPRECATION")
-                audioManager.abandonAudioFocus(listener)
-            }
-            Log.i(TAG, "Audio focus released")
-            hasAudioFocus = false
-        }
+        // No-op. Audio focus logic removed; keep method for compatibility.
+        Log.i(TAG, "handleForegroundRecovery() called - audio focus logic removed")
     }
 
     /**
