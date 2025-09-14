@@ -131,7 +131,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // Request system to keep service alive
         try {
-            startForeground(1001, onCreateNotification(),
+            // Use the "open/streaming" notification when starting foreground so the
+            // notification immediately reflects that streaming is in progress.
+            // Fall back to the create notification if open notification is not provided.
+            startForeground(1001, onOpenNotification() ?: onCreateNotification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
