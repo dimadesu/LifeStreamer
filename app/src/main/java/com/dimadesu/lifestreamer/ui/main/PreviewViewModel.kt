@@ -65,7 +65,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import io.github.thibaultbee.streampack.ext.srt.regulator.controllers.DefaultSrtBitrateRegulatorController
-import com.dimadesu.lifestreamer.bitrate.MoblinSrtFightBitrateRegulatorController
+import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
@@ -512,12 +512,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         storageRepository.bitrateRegulatorConfigFlow.first()
                     if (bitrateRegulatorConfig != null) {
                         Log.i(TAG, "Add Moblin SrtFight bitrate regulator controller")
-                        // Read user preference for Moblin regulator mode (fast/slow)
-                        val useFastMode = storageRepository.moblinRegulatorModeIsFastFlow.first()
+                        // Read user preference for regulator mode (fast/slow/belabox)
+                        val selectedMode = storageRepository.regulatorModeFlow.first()
                         streamer?.addBitrateRegulatorController(
-                            MoblinSrtFightBitrateRegulatorController.Factory(
+                            AdaptiveSrtBitrateRegulatorController.Factory(
                                 bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                useFastSettings = useFastMode
+                                mode = selectedMode
                             )
                         )
                     }

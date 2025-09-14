@@ -9,14 +9,16 @@ import io.github.thibaultbee.streampack.core.regulator.controllers.DummyBitrateR
 import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 
 /**
- * A BitrateRegulatorController implementation for Moblin SrtFight algorithm.
+ * A neutral BitrateRegulatorController implementation that can create either
+ * the Moblin SrtFight regulator (fast/slow) or the Belabox regulator depending
+ * on the selected `RegulatorMode`.
  */
-class MoblinSrtFightBitrateRegulatorController {
+class AdaptiveSrtBitrateRegulatorController {
     class Factory(
         private val bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
         private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
         private val delayTimeInMs: Long = 200, // Moblin updates every 200ms
-        private val useFastSettings: Boolean = true
+        private val mode: RegulatorMode = RegulatorMode.MOBLIN_FAST
     ) : BitrateRegulatorController.Factory() {
         override fun newBitrateRegulatorController(pipelineOutput: IEncodingPipelineOutput): DummyBitrateRegulatorController {
             require(pipelineOutput is IConfigurableVideoEncodingPipelineOutput) {
@@ -33,21 +35,31 @@ class MoblinSrtFightBitrateRegulatorController {
                 null
             }
 
-            // Create the Moblin factory
-            val moblinFactory = object : SrtBitrateRegulator.Factory {
-                override fun newBitrateRegulator(
-                    bitrateRegulatorConfig: BitrateRegulatorConfig,
-                    onVideoTargetBitrateChange: (Int) -> Unit,
-                    onAudioTargetBitrateChange: (Int) -> Unit
-                ): SrtBitrateRegulator {
-                    // Only use video bitrate changes, ignore audio changes as requested
-                    val regulator = MoblinSrtFightBitrateRegulator(
-                        bitrateRegulatorConfig = bitrateRegulatorConfig,
-                        moblinConfig = moblinConfig,
-                        onVideoTargetBitrateChange = onVideoTargetBitrateChange
-                    )
-                    regulator.setSettings(useFastSettings)
-                    return regulator
+            // Choose factory based on selected mode
+            val factory: SrtBitrateRegulator.Factory = when (mode) {
+                RegulatorMode.BELABOX -> object : SrtBitrateRegulator.Factory {
+                    override fun newBitrateRegulator(
+                        bitrateRegulatorConfig: BitrateRegulatorConfig,
+                        onVideoTargetBitrateChange: (Int) -> Unit,
+                        onAudioTargetBitrateChange: (Int) -> Unit
+                    ): SrtBitrateRegulator {
+                        return BelaboxSrtBelaRegulator(bitrateRegulatorConfig, onVideoTargetBitrateChange)
+                    }
+                }
+                RegulatorMode.MOBLIN_FAST, RegulatorMode.MOBLIN_SLOW -> object : SrtBitrateRegulator.Factory {
+                    override fun newBitrateRegulator(
+                        bitrateRegulatorConfig: BitrateRegulatorConfig,
+                        onVideoTargetBitrateChange: (Int) -> Unit,
+                        onAudioTargetBitrateChange: (Int) -> Unit
+                    ): SrtBitrateRegulator {
+                        val regulator = MoblinSrtFightBitrateRegulator(
+                            bitrateRegulatorConfig = bitrateRegulatorConfig,
+                            moblinConfig = moblinConfig,
+                            onVideoTargetBitrateChange = onVideoTargetBitrateChange
+                        )
+                        regulator.setSettings(mode == RegulatorMode.MOBLIN_FAST)
+                        return regulator
+                    }
                 }
             }
 
@@ -55,7 +67,7 @@ class MoblinSrtFightBitrateRegulatorController {
                 audioEncoder,
                 videoEncoder,
                 pipelineOutput.endpoint,
-                moblinFactory,
+                factory,
                 bitrateRegulatorConfig,
                 delayTimeInMs
             )
