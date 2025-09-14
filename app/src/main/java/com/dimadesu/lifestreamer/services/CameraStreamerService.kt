@@ -72,13 +72,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Override onCreate to use both camera and mediaProjection service types
      */
     override fun onCreate() {
-    // Initialize power manager and other services
-    powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        
+        // Initialize power manager and other services
+        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+
         // Detect current device rotation
         detectCurrentRotation()
-        
-        // Let the base class handle most of the setup first
+
+        // Ensure our app-level notification channel (silent) is created before
+        // the base StreamerService posts the initial foreground notification.
+        // This prevents the system from using an existing channel with sound.
+        try {
+            customNotificationUtils.createNotificationChannel(
+                channelNameResourceId,
+                channelDescriptionResourceId
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to create custom notification channel: ${t.message}")
+        }
+
+        // Let the base class handle the rest of the setup (including startForeground)
         super.onCreate()
         
         // The base class already calls startForeground with MEDIA_PROJECTION type,
@@ -131,7 +143,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // Request system to keep service alive
         try {
-            startForeground(1001, onCreateNotification(),
+            // Use the "open/streaming" notification when starting foreground so the
+            // notification immediately reflects that streaming is in progress.
+            // Fall back to the create notification if open notification is not provided.
+            startForeground(1001, onOpenNotification() ?: onCreateNotification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE

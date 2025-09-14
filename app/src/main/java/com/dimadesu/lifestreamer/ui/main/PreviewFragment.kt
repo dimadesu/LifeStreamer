@@ -47,6 +47,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewable
 import io.github.thibaultbee.streampack.core.streamers.lifecycle.StreamerViewModelLifeCycleObserver
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.ui.views.PreviewView
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
@@ -226,31 +227,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // Since we no longer stop preview in onPause(), the preview should still be running
         // We only need to ensure preview is started if it's not already running
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            val streamer = previewViewModel.streamerLiveData.value
-            if (streamer is SingleStreamer) {
-                lifecycleScope.launch {
+            // Use the same guarded preview inflation logic to avoid races when the
+            // activity is re-created or the SurfaceView is being detached/attached
+            // (for example when tapping the notification). inflateStreamerPreview()
+            // sets the streamer and starts the preview only when safe.
+            try {
+                inflateStreamerPreview()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+            }
+
+            // Re-request audio focus / handle foreground recovery if streaming
+            val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
+            if (isCurrentlyStreaming) {
+                Log.d(TAG, "App returned to foreground while streaming - handling recovery")
+                previewViewModel.service?.let { service ->
                     try {
-                        // Check if preview is already running before trying to start it
-                        val videoSource = (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
-                        if (videoSource is IPreviewableSource && !videoSource.isPreviewingFlow.value) {
-                            binding.preview.startPreview()
-                            Log.d(TAG, "Preview restarted for foreground mode")
-                        } else {
-                            Log.d(TAG, "Preview was already running")
-                        }
-                        
-                        // Re-request audio focus when app returns to foreground if streaming
-                        val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
-                        if (isCurrentlyStreaming) {
-                            Log.d(TAG, "App returned to foreground while streaming - handling recovery")
-                            // Get service and handle foreground recovery
-                            previewViewModel.service?.let { service ->
-                                service.handleForegroundRecovery()
-                                Log.d(TAG, "Foreground recovery completed")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error ensuring preview is running: ${e.message}")
+                        service.handleForegroundRecovery()
+                        Log.d(TAG, "Foreground recovery completed")
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Foreground recovery failed: ${t.message}")
                     }
                 }
             }
@@ -281,18 +277,89 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Wait till streamer exists to set it to the SurfaceView.
-        preview.streamer = streamer
-        if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            lifecycleScope.launch {
+        // If the preview already uses the same streamer, no need to set it again.
+        var assignedStreamer = false
+        if (preview.streamer == streamer) {
+            Log.d(TAG, "Preview already bound to streamer - skipping set")
+            assignedStreamer = true
+        } else {
+            // Defensive check: PreviewView will throw if the new source is already
+            // previewing. Avoid setting the streamer in that case because the
+            // preview is already active and managed elsewhere (service/background).
+            val newSource = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
+            if (newSource?.isPreviewingFlow?.value == true) {
+                Log.w(TAG, "New streamer's video source is already previewing - skipping set to avoid exception")
+            } else {
                 try {
-                    preview.startPreview()
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Error starting preview", t)
+                    // Wait till streamer exists to set it to the SurfaceView.
+                    preview.streamer = streamer
+                    assignedStreamer = true
+                } catch (e: IllegalArgumentException) {
+                    // Defensive catch: if PreviewView rejects the streamer because the
+                    // source is already previewing, log and continue without crashing.
+                    Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
                 }
             }
-        } else {
+        }
+
+        // Only start preview if we actually have the streamer assigned (or it was
+        // already assigned). This prevents calling startPreview() when the view
+        // hasn't been bound and would throw "Streamer is not set".
+    // If streamer was assigned, try to start preview when both the UI surface and
+    // the video source are ready. This adds an app-level readiness gate without
+    // modifying StreamPack.
+    if (assignedStreamer && PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
+            // Retry starting preview locally without modifying StreamPack.
+            // Check common surface readiness signals (view attached + surface holder valid)
+            lifecycleScope.launch {
+                val maxAttempts = 10
+                var attempt = 1
+                var started = false
+                // Read the source instance once here (may be null for non-previewable sources)
+                val source = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
+
+                while (attempt <= maxAttempts && !started) {
+                    try {
+                        // Quick heuristics: SurfaceView is attached and has non-zero size
+                        val isAttached = preview.isAttachedToWindow
+                        val hasSize = preview.width > 0 && preview.height > 0
+                        // Check surface readiness
+                        if (!isAttached || !hasSize) {
+                            Log.d(TAG, "Preview not attached or has no size (attempt=$attempt) - will retry")
+                        } else {
+                            // If we have a previewable source, ensure it is not already previewing
+                            val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
+                            if (sourceAlreadyPreviewing) {
+                                Log.w(TAG, "Source is already previewing elsewhere - skipping startPreview")
+                                started = true
+                                break
+                            }
+                            try {
+                                preview.startPreview()
+                                Log.d(TAG, "Preview started (attempt=$attempt)")
+                                started = true
+                                break
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "startPreview attempt=$attempt failed: ${t.message}")
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Error checking/starting preview on attempt=$attempt: ${t.message}")
+                    }
+
+                    attempt++
+                    delay(250)
+                }
+
+                if (!started) {
+                    Log.e(TAG, "Failed to start preview after $maxAttempts attempts")
+                }
+            }
+        } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
+        } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             Log.e(TAG, "Camera permission not granted. Preview will not start.")
+        } else {
+            Log.d(TAG, "Preview streamer not assigned - skipping startPreview()")
         }
     }
 

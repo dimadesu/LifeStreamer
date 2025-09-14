@@ -749,16 +749,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isFlashAvailable = MutableLiveData(false)
     fun toggleFlash() {
         cameraSettings?.let {
-            it.flash.enable = !it.flash.enable
+            try {
+                it.flash.enable = !it.flash.enable
+            } catch (t: Throwable) {
+                Log.w(TAG, "toggleFlash failed (camera session may be closed): ${t.message}")
+            }
         } ?: Log.e(TAG, "Camera settings is not accessible")
     }
 
     val isAutoWhiteBalanceAvailable = MutableLiveData(false)
     fun toggleAutoWhiteBalanceMode() {
         cameraSettings?.let { settings ->
-            val awbModes = settings.whiteBalance.availableAutoModes
-            val index = awbModes.indexOf(settings.whiteBalance.autoMode)
-            settings.whiteBalance.autoMode = awbModes[(index + 1) % awbModes.size]
+            try {
+                val awbModes = settings.whiteBalance.availableAutoModes
+                val index = awbModes.indexOf(settings.whiteBalance.autoMode)
+                settings.whiteBalance.autoMode = awbModes[(index + 1) % awbModes.size]
+            } catch (t: Throwable) {
+                Log.w(TAG, "toggleAutoWhiteBalanceMode failed (camera session may be closed): ${t.message}")
+            }
         } ?: Log.e(TAG, "Camera settings is not accessible")
     }
 
@@ -781,11 +789,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                settings.exposure.let {
-                    if (settings.isAvailableFlow.value) {
-                        it.compensation = (value / it.availableCompensationStep.toFloat()).toInt()
+                try {
+                    settings.exposure.let {
+                        if (settings.isAvailableFlow.value) {
+                            it.compensation = (value / it.availableCompensationStep.toFloat()).toInt()
+                        }
+                        notifyPropertyChanged(BR.exposureCompensation)
                     }
-                    notifyPropertyChanged(BR.exposureCompensation)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Setting exposure failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
@@ -808,23 +820,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                if (settings.isAvailableFlow.value) {
-                    settings.zoom.zoomRatio = value
+                try {
+                    if (settings.isAvailableFlow.value) {
+                        settings.zoom.zoomRatio = value
+                    }
+                    notifyPropertyChanged(BR.zoomRatio)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Setting zoom failed (camera session may be closed): ${t.message}")
                 }
-                notifyPropertyChanged(BR.zoomRatio)
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
 
     val isAutoFocusModeAvailable = MutableLiveData(false)
     fun toggleAutoFocusMode() {
         cameraSettings?.let {
-            val afModes = it.focus.availableAutoModes
-            val index = afModes.indexOf(it.focus.autoMode)
-            it.focus.autoMode = afModes[(index + 1) % afModes.size]
-            if (it.focus.autoMode == CaptureResult.CONTROL_AF_MODE_OFF) {
-                showLensDistanceSlider.postValue(true)
-            } else {
-                showLensDistanceSlider.postValue(false)
+            try {
+                val afModes = it.focus.availableAutoModes
+                val index = afModes.indexOf(it.focus.autoMode)
+                it.focus.autoMode = afModes[(index + 1) % afModes.size]
+                if (it.focus.autoMode == CaptureResult.CONTROL_AF_MODE_OFF) {
+                    showLensDistanceSlider.postValue(true)
+                } else {
+                    showLensDistanceSlider.postValue(false)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "toggleAutoFocusMode failed (camera session may be closed): ${t.message}")
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
     }
@@ -844,11 +864,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                settings.focus.let {
-                    if (settings.isAvailableFlow.value) {
-                        it.lensDistance = value
+                try {
+                    settings.focus.let {
+                        if (settings.isAvailableFlow.value) {
+                            it.lensDistance = value
+                        }
+                        notifyPropertyChanged(BR.lensDistance)
                     }
-                    notifyPropertyChanged(BR.lensDistance)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Setting lens distance failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
