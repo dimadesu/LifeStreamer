@@ -137,9 +137,13 @@
 
     <!-- Moblin regulator mode -->
     <string name="srt_server_moblin_regulator_mode_key">srt_server_moblin_regulator_mode_key</string>
-    <string name="srt_server_moblin_regulator_mode">Moblin regulator mode</string>
-    <string name="srt_server_moblin_regulator_mode_fast">Fast</string>
-    <string name="srt_server_moblin_regulator_mode_slow">Slow</string>
+    <string name="srt_server_moblin_regulator_mode">Bitrate algorithm</string>
+    <string name="srt_server_moblin_regulator_mode_fast">Moblin fast</string>
+    <string name="srt_server_moblin_regulator_mode_slow">Moblin slow</string>
+    <string name="srt_server_moblin_regulator_mode_belabox">Belabox</string>
+    <string name="srt_server_moblin_regulator_mode_value_fast">fast</string>
+    <string name="srt_server_moblin_regulator_mode_value_slow">slow</string>
+    <string name="srt_server_moblin_regulator_mode_value_belabox">belabox</string>
 
     <string name="rtmp_server_key">rtmp_server_key</string>
     <string name="rtmp_server">RTMP Server</string>

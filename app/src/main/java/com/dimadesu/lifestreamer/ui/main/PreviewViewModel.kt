@@ -512,12 +512,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         storageRepository.bitrateRegulatorConfigFlow.first()
                     if (bitrateRegulatorConfig != null) {
                         Log.i(TAG, "Add Moblin SrtFight bitrate regulator controller")
-                        // Read user preference for Moblin regulator mode (fast/slow)
-                        val useFastMode = storageRepository.moblinRegulatorModeIsFastFlow.first()
+                        // Read user preference for regulator mode (fast/slow/belabox)
+                        val selectedMode = storageRepository.regulatorModeFlow.first()
                         streamer?.addBitrateRegulatorController(
                             MoblinSrtFightBitrateRegulatorController.Factory(
                                 bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                useFastSettings = useFastMode
+                                mode = selectedMode
                             )
                         )
                     }
