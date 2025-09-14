@@ -9,9 +9,11 @@ import io.github.thibaultbee.streampack.core.regulator.controllers.DummyBitrateR
 import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 
 /**
- * A BitrateRegulatorController implementation for Moblin SrtFight algorithm.
+ * A neutral BitrateRegulatorController implementation that can create either
+ * the Moblin SrtFight regulator (fast/slow) or the Belabox regulator depending
+ * on the selected `RegulatorMode`.
  */
-class MoblinSrtFightBitrateRegulatorController {
+class AdaptiveSrtBitrateRegulatorController {
     class Factory(
         private val bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
         private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
