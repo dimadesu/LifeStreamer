@@ -7,6 +7,16 @@
         <item>60</item>
     </string-array>
 
+    <string-array name="moblin_regulator_mode_entries">
+        <item>@string/srt_server_moblin_regulator_mode_fast</item>
+        <item>@string/srt_server_moblin_regulator_mode_slow</item>
+    </string-array>
+
+    <string-array name="moblin_regulator_mode_values">
+        <item>@string/srt_server_moblin_regulator_mode_fast</item>
+        <item>@string/srt_server_moblin_regulator_mode_slow</item>
+    </string-array>
+
     <string-array name="AudioChannelConfigEntries">
         <item>Mono</item>
         <item>Stereo</item>

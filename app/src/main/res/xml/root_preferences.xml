@@ -160,6 +160,14 @@
                 app:title="@string/srt_server_video_min_bitrate"
                 app:useSimpleSummaryProvider="true" />
 
+            <ListPreference
+                app:defaultValue="@string/srt_server_moblin_regulator_mode_fast"
+                app:key="@string/srt_server_moblin_regulator_mode_key"
+                app:title="@string/srt_server_moblin_regulator_mode"
+                app:entries='@array/moblin_regulator_mode_entries'
+                app:entryValues='@array/moblin_regulator_mode_values'
+                app:useSimpleSummaryProvider="true" />
+
         </PreferenceCategory>
 
         <PreferenceCategory

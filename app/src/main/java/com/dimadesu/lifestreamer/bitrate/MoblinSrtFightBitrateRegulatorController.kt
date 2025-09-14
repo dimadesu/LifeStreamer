@@ -15,7 +15,8 @@ class MoblinSrtFightBitrateRegulatorController {
     class Factory(
         private val bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
         private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
-        private val delayTimeInMs: Long = 200 // Moblin updates every 200ms
+        private val delayTimeInMs: Long = 200, // Moblin updates every 200ms
+        private val useFastSettings: Boolean = true
     ) : BitrateRegulatorController.Factory() {
         override fun newBitrateRegulatorController(pipelineOutput: IEncodingPipelineOutput): DummyBitrateRegulatorController {
             require(pipelineOutput is IConfigurableVideoEncodingPipelineOutput) {
@@ -40,11 +41,13 @@ class MoblinSrtFightBitrateRegulatorController {
                     onAudioTargetBitrateChange: (Int) -> Unit
                 ): SrtBitrateRegulator {
                     // Only use video bitrate changes, ignore audio changes as requested
-                    return MoblinSrtFightBitrateRegulator(
+                    val regulator = MoblinSrtFightBitrateRegulator(
                         bitrateRegulatorConfig = bitrateRegulatorConfig,
                         moblinConfig = moblinConfig,
                         onVideoTargetBitrateChange = onVideoTargetBitrateChange
                     )
+                    regulator.setSettings(useFastSettings)
+                    return regulator
                 }
             }
 
