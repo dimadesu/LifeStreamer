@@ -75,7 +75,12 @@ class NotificationUtils(
     ): Notification {
         // Create an intent to open the main activity when notification is tapped
         val intent = Intent(service, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            // Bring existing activity to front if it exists instead of recreating it.
+            // REORDER_TO_FRONT keeps the existing instance and moves it above other
+            // activities, SINGLE_TOP will route the intent to onNewIntent if already
+            // at the top. NEW_TASK is kept so this works when fired from a Service.
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
         }
         
         val pendingIntentFlags =

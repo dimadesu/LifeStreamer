@@ -43,6 +43,23 @@ class MainActivity : AppCompatActivity() {
         bindProperties()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Handle notification tap action to avoid re-creating activity and
+        // triggering unnecessary view detach/attach which can race with camera.
+        val action = intent.action
+        if (action == "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION") {
+            // If the PreviewFragment is already present, do nothing. If not,
+            // ensure it's added without recreating the fragment stack.
+            val current = supportFragmentManager.findFragmentById(R.id.container)
+            if (current == null) {
+                supportFragmentManager.beginTransaction()
+                    .replace(R.id.container, PreviewFragment())
+                    .commitNow()
+            }
+        }
+    }
+
     private fun bindProperties() {
         binding.actions.setOnClickListener {
             showPopup()
