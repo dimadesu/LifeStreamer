@@ -118,14 +118,19 @@ class NotificationUtils(
                     setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
                 }
 
-                setVibrate(null) // Disable vibration for background service
-                setLights(0, 0, 0) // Disable LED for background service
-                setSound(null) // Silent for background service
+                // Foreground service attributes (visual/priority). Sound/vibration
+                // are cleared below globally to ensure silence across platforms.
                 
                 // Prevent system from killing the service
                 setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 setLocalOnly(true) // Don't sync to wearables to save resources
             }
+            // Make notification silent by clearing any sound or defaults
+            setOnlyAlertOnce(true)
+            setSound(null)
+            setVibrate(null)
+            setLights(0, 0, 0)
+            setDefaults(0)
         }
 
         return builder.build()
@@ -142,23 +147,46 @@ class NotificationUtils(
 
             val name = service.getString(nameResourceId)
 
-            val channel = NotificationChannel(
-                channelId,
-                name,
-                importance // Use the provided importance level
-            ).apply {
-                // Enhanced channel attributes for foreground services
-                setShowBadge(true)
-                enableVibration(false) // Disable vibration for background service
-                enableLights(false) // Disable LED for background service
-                setSound(null, null) // Silent for background service
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            val existing = notificationManager.getNotificationChannel(channelId)
+
+            // If the channel exists and is already silent/low-importance, keep it.
+            // Otherwise (it exists with a sound or high importance), delete and
+            // recreate it as silent. This avoids clearing user prefs unnecessarily.
+            var shouldRecreate = true
+            if (existing != null) {
+                val hasSound = existing.sound != null
+                val hasVibration = existing.vibrationPattern != null
+                val isLoud = existing.importance > NotificationManager.IMPORTANCE_LOW
+                if (!hasSound && !hasVibration && !isLoud) {
+                    shouldRecreate = false
+                }
             }
-            
-            if (descriptionResourceId != 0) {
-                channel.description = service.getString(descriptionResourceId)
+
+            if (shouldRecreate && existing != null) {
+                notificationManager.deleteNotificationChannel(channelId)
             }
-            notificationManager.createNotificationChannel(channel)
+
+            // If channel didn't exist or we decided to recreate, create silent channel.
+            if (existing == null || shouldRecreate) {
+                val silentImportance = NotificationManager.IMPORTANCE_MIN
+                val channel = NotificationChannel(
+                    channelId,
+                    name,
+                    silentImportance
+                ).apply {
+                    setShowBadge(true)
+                    enableVibration(false)
+                    enableLights(false)
+                    setSound(null, null)
+                    vibrationPattern = null
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                    if (descriptionResourceId != 0) {
+                        description = service.getString(descriptionResourceId)
+                    }
+                }
+
+                notificationManager.createNotificationChannel(channel)
+            }
         }
     }
 }
