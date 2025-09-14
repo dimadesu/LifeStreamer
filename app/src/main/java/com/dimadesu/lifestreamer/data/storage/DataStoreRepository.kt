@@ -194,4 +194,15 @@ class DataStoreRepository(
                 videoBitrateRange = Range(videoMinBitrate, videoMaxBitrate)
             )
         }
+
+    /**
+     * Moblin regulator mode: true = fast, false = slow. Defaults to fast.
+     */
+    val moblinRegulatorModeIsFastFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[stringPreferencesKey(context.getString(R.string.srt_server_moblin_regulator_mode_key))]
+            ?: context.getString(R.string.srt_server_moblin_regulator_mode_fast)
+    }.map { value ->
+        // Compare against fast string
+        value == context.getString(R.string.srt_server_moblin_regulator_mode_fast)
+    }.distinctUntilChanged()
 }
