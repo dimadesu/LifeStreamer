@@ -28,6 +28,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICame
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import android.app.AppOpsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -37,6 +38,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ToggleButton
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
@@ -61,6 +63,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     private val previewViewModel: PreviewViewModel by viewModels {
         PreviewViewModelFactory(requireActivity().application)
+    }
+
+    // MediaProjection permission launcher - connects to MediaProjectionHelper
+    private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Initialize MediaProjection launcher with helper
+        mediaProjectionLauncher = previewViewModel.mediaProjectionHelper.registerLauncher(this)
     }
 
     override fun onCreateView(
@@ -189,7 +201,27 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     private fun startStream() {
-        previewViewModel.startStream()
+        Log.d(TAG, "startStream() called - checking if MediaProjection is required")
+
+        // Check if MediaProjection is required for this streaming setup
+        if (previewViewModel.requiresMediaProjection()) {
+            Log.d(TAG, "MediaProjection required - using startStreamWithMediaProjection")
+            // Use MediaProjection-enabled streaming for RTMP sources
+            previewViewModel.startStreamWithMediaProjection(
+                mediaProjectionLauncher,
+                onSuccess = {
+                    Log.d(TAG, "MediaProjection stream started successfully")
+                },
+                onError = { error ->
+                    Log.e(TAG, "MediaProjection stream failed: $error")
+                    showError("Streaming Error", error)
+                }
+            )
+        } else {
+            Log.d(TAG, "Regular streaming - using standard startStream")
+            // Use the main startStream method for camera sources
+            previewViewModel.startStream()
+        }
     }
 
     private fun stopStream() {

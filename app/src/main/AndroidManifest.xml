@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Required for media projection foreground service on Android 14+ -->
+    <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" />
+    <uses-permission android:name="android.permission.PROJECT_MEDIA" />
+
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.microphone" />
 
@@ -42,6 +46,12 @@
             android:name=".services.CameraStreamerService"
             android:exported="false"
             android:foregroundServiceType="camera|mediaProjection|microphone" />
+
+        <!-- MediaProjection service for audio capture with required foreground service type -->
+        <service
+            android:name=".rtmp.audio.MediaProjectionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
     </application>
 
 </manifest>
