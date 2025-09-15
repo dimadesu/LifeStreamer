@@ -17,17 +17,9 @@ package com.dimadesu.lifestreamer.ui.main
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CameraCharacteristics
-import android.util.SizeF
-import kotlin.math.atan
-import kotlin.math.sqrt
-import kotlin.math.PI
-import androidx.appcompat.app.AlertDialog
-import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
-import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import android.app.AppOpsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -37,23 +29,29 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ToggleButton
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.dimadesu.lifestreamer.ApplicationConstants
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
 import com.dimadesu.lifestreamer.utils.DialogUtils
+import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.utils.PermissionManager
 import io.github.thibaultbee.streampack.core.interfaces.IStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewableSource
+import io.github.thibaultbee.streampack.core.streamers.lifecycle.StreamerViewModelLifeCycleObserver
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.ui.views.PreviewView
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
@@ -63,12 +61,28 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         PreviewViewModelFactory(requireActivity().application)
     }
 
+    // MediaProjection permission launcher - connects to MediaProjectionHelper
+    private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
+
+    // Battery optimization manager for background audio support
+    override fun onDestroyView() {
+        super.onDestroyView()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Initialize MediaProjection launcher with helper
+        mediaProjectionLauncher = previewViewModel.mediaProjectionHelper.registerLauncher(this)
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
         binding = MainFragmentBinding.inflate(inflater, container, false)
         binding.lifecycleOwner = this
         binding.viewmodel = previewViewModel
+        binding.bufferVisualizer.previewViewModel = previewViewModel
 
         bindProperties()
         return binding.root
@@ -79,18 +93,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.liveButton.setOnClickListener { view ->
             view as ToggleButton
             Log.d(TAG, "Live button clicked - isChecked: ${view.isChecked}, streaming: ${previewViewModel.isStreamingLiveData.value}, trying: ${previewViewModel.isTryingConnectionLiveData.value}")
-            
+
             // Check current state to determine action
             val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value == true
             val isTryingConnection = previewViewModel.isTryingConnectionLiveData.value == true
-            
+
             // Also check the actual streamer state directly as backup
             val actualStreamingState = previewViewModel.serviceStreamer?.isStreamingFlow?.value == true
             Log.d(TAG, "Live button - actualStreamingState from serviceStreamer: $actualStreamingState")
-            
+
             // Use either LiveData or direct streamer state
             val isReallyStreaming = isCurrentlyStreaming || actualStreamingState
-            
+
             if (!isReallyStreaming && !isTryingConnection) {
                 // Not streaming and not trying - start stream
                 Log.d(TAG, "Starting stream...")
@@ -110,8 +124,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        binding.switchCameraButton.setOnClickListener {
-            showCameraSelectionDialog()
+        binding.switchSourceButton.setOnClickListener {
+            binding.bufferVisualizer.previewViewModel = previewViewModel
+            previewViewModel.toggleVideoSource(binding.bufferVisualizer)
         }
 
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) {
@@ -189,11 +204,54 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     private fun startStream() {
-        previewViewModel.startStream()
+        Log.d(TAG, "startStream() called - checking if MediaProjection is required")
+
+        performStartStream()
+    }
+
+    private fun performStartStream() {
+        // Check if MediaProjection is required for this streaming setup
+        if (previewViewModel.requiresMediaProjection()) {
+            Log.d(TAG, "MediaProjection required - using startStreamWithMediaProjection")
+            // Use MediaProjection-enabled streaming for RTMP sources
+            previewViewModel.startStreamWithMediaProjection(
+                mediaProjectionLauncher,
+                onSuccess = {
+                    Log.d(TAG, "MediaProjection stream started successfully")
+                },
+                onError = { error ->
+                    Log.e(TAG, "MediaProjection stream failed: $error")
+                    showError("Streaming Error", error)
+                }
+            )
+        } else {
+            Log.d(TAG, "Regular streaming - using standard startStream")
+            // Use the main startStream method for camera sources
+            previewViewModel.startStream()
+        }
     }
 
     private fun stopStream() {
         previewViewModel.stopStream()
+    }
+
+    private fun updateButtonState() {
+        val isStreaming = previewViewModel.isStreamingLiveData.value == true
+        val isTrying = previewViewModel.isTryingConnectionLiveData.value == true
+        val currentButtonState = binding.liveButton.isChecked
+
+        // Button should be checked (show "Stop") if streaming OR trying to connect
+        val shouldBeChecked = isStreaming || isTrying
+
+        Log.d(TAG, "updateButtonState: isStreaming=$isStreaming, isTrying=$isTrying, currentButton=$currentButtonState, shouldBeChecked=$shouldBeChecked")
+
+        // Only update if state actually changed to prevent unnecessary flicker
+        if (currentButtonState != shouldBeChecked) {
+            Log.d(TAG, "updateButtonState: CHANGING button from $currentButtonState to $shouldBeChecked")
+            binding.liveButton.isChecked = shouldBeChecked
+        } else {
+            Log.d(TAG, "updateButtonState: button already in correct state, no change")
+        }
     }
 
     private fun showPermissionError(vararg permissions: String) {
@@ -219,7 +277,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // the camera source is shared between preview and streaming, so stopping preview
         // would also stop the streaming. Instead, let the preview continue running.
         Log.d(TAG, "onPause() - app going to background, keeping both preview and stream active via service")
-        
+
         // Note: We used to stop preview here, but that was causing streaming to stop
         // because the camera source is shared. For background streaming to work properly,
         // we need to keep the camera active.
@@ -229,30 +287,35 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
-        
+
         // Since we no longer stop preview in onPause(), the preview should still be running
         // We only need to ensure preview is started if it's not already running
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            // Use the same guarded preview inflation logic to avoid races when the
-            // activity is re-created or the SurfaceView is being detached/attached
-            // (for example when tapping the notification). inflateStreamerPreview()
-            // sets the streamer and starts the preview only when safe.
-            try {
-                inflateStreamerPreview()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
-            }
-
-            // Re-request audio focus / handle foreground recovery if streaming
-            val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
-            if (isCurrentlyStreaming) {
-                Log.d(TAG, "App returned to foreground while streaming - handling recovery")
-                previewViewModel.service?.let { service ->
+            val streamer = previewViewModel.streamerLiveData.value
+            if (streamer is SingleStreamer) {
+                lifecycleScope.launch {
                     try {
-                        service.handleForegroundRecovery()
-                        Log.d(TAG, "Foreground recovery completed")
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Foreground recovery failed: ${t.message}")
+                        // Check if preview is already running before trying to start it
+                        val videoSource = (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
+                        if (videoSource is IPreviewableSource && !videoSource.isPreviewingFlow.value) {
+                            binding.preview.startPreview()
+                            Log.d(TAG, "Preview restarted for foreground mode")
+                        } else {
+                            Log.d(TAG, "Preview was already running")
+                        }
+
+                        // Re-request audio focus when app returns to foreground if streaming
+                        val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
+                        if (isCurrentlyStreaming) {
+                            Log.d(TAG, "App returned to foreground while streaming - handling recovery")
+                            // Get service and handle foreground recovery
+                            previewViewModel.service?.let { service ->
+                                service.handleForegroundRecovery()
+                                Log.d(TAG, "Foreground recovery completed")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error ensuring preview is running: ${e.message}")
                     }
                 }
             }
@@ -283,89 +346,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // If the preview already uses the same streamer, no need to set it again.
-        var assignedStreamer = false
-        if (preview.streamer == streamer) {
-            Log.d(TAG, "Preview already bound to streamer - skipping set")
-            assignedStreamer = true
-        } else {
-            // Defensive check: PreviewView will throw if the new source is already
-            // previewing. Avoid setting the streamer in that case because the
-            // preview is already active and managed elsewhere (service/background).
-            val newSource = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
-            if (newSource?.isPreviewingFlow?.value == true) {
-                Log.w(TAG, "New streamer's video source is already previewing - skipping set to avoid exception")
-            } else {
-                try {
-                    // Wait till streamer exists to set it to the SurfaceView.
-                    preview.streamer = streamer
-                    assignedStreamer = true
-                } catch (e: IllegalArgumentException) {
-                    // Defensive catch: if PreviewView rejects the streamer because the
-                    // source is already previewing, log and continue without crashing.
-                    Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
-                }
-            }
-        }
-
-        // Only start preview if we actually have the streamer assigned (or it was
-        // already assigned). This prevents calling startPreview() when the view
-        // hasn't been bound and would throw "Streamer is not set".
-    // If streamer was assigned, try to start preview when both the UI surface and
-    // the video source are ready. This adds an app-level readiness gate without
-    // modifying StreamPack.
-    if (assignedStreamer && PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            // Retry starting preview locally without modifying StreamPack.
-            // Check common surface readiness signals (view attached + surface holder valid)
+        // Wait till streamer exists to set it to the SurfaceView.
+        preview.streamer = streamer
+        if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             lifecycleScope.launch {
-                val maxAttempts = 10
-                var attempt = 1
-                var started = false
-                // Read the source instance once here (may be null for non-previewable sources)
-                val source = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
-
-                while (attempt <= maxAttempts && !started) {
-                    try {
-                        // Quick heuristics: SurfaceView is attached and has non-zero size
-                        val isAttached = preview.isAttachedToWindow
-                        val hasSize = preview.width > 0 && preview.height > 0
-                        // Check surface readiness
-                        if (!isAttached || !hasSize) {
-                            Log.d(TAG, "Preview not attached or has no size (attempt=$attempt) - will retry")
-                        } else {
-                            // If we have a previewable source, ensure it is not already previewing
-                            val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
-                            if (sourceAlreadyPreviewing) {
-                                Log.w(TAG, "Source is already previewing elsewhere - skipping startPreview")
-                                started = true
-                                break
-                            }
-                            try {
-                                preview.startPreview()
-                                Log.d(TAG, "Preview started (attempt=$attempt)")
-                                started = true
-                                break
-                            } catch (t: Throwable) {
-                                Log.w(TAG, "startPreview attempt=$attempt failed: ${t.message}")
-                            }
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Error checking/starting preview on attempt=$attempt: ${t.message}")
-                    }
-
-                    attempt++
-                    delay(250)
-                }
-
-                if (!started) {
-                    Log.e(TAG, "Failed to start preview after $maxAttempts attempts")
+                try {
+                    preview.startPreview()
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Error starting preview", t)
                 }
             }
-        } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-        } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            Log.e(TAG, "Camera permission not granted. Preview will not start.")
         } else {
-            Log.d(TAG, "Preview streamer not assigned - skipping startPreview()")
+            Log.e(TAG, "Camera permission not granted. Preview will not start.")
         }
     }
 
@@ -379,7 +371,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     val isGranted = ContextCompat.checkSelfPermission(requireContext(), permission) == PackageManager.PERMISSION_GRANTED
                     Log.i(TAG, "Permission $permission: granted=$isGranted")
                 }
-                
+
                 // Special check for RECORD_AUDIO AppOps
                 if (permissions.contains(Manifest.permission.RECORD_AUDIO)) {
                     try {
@@ -398,7 +390,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         Log.w(TAG, "Failed to check RECORD_AUDIO AppOps", e)
                     }
                 }
-                
+
                 startStream()
             }
 
@@ -409,85 +401,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 )
             }
         }
-    }
-
-    private fun showCameraSelectionDialog() {
-        val ctx = requireContext()
-        val cameraManager = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val cameraIds = try {
-            cameraManager.cameraIdList
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to list camera ids: ${t.message}")
-            return
-        }
-
-        if (cameraIds.isEmpty()) {
-            Log.w(TAG, "No camera devices available on this device")
-            return
-        }
-
-        val items = cameraIds.map { id ->
-            try {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                val facingConst = chars.get(CameraCharacteristics.LENS_FACING)
-                val facing = when (facingConst) {
-                    CameraCharacteristics.LENS_FACING_FRONT -> "Front"
-                    CameraCharacteristics.LENS_FACING_BACK -> "Back"
-                    else -> "External"
-                }
-
-                // Use available focal lengths only. Sensor physical size isn't always
-                // provided on all devices, and focal length values alone are often
-                // the most consistently available data we can show.
-                val focalArr = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                val physicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) as? SizeF
-                val fovLabel = if (focalArr != null && focalArr.isNotEmpty()) {
-                    // Prefer showing diagonal FOV when sensor physical size is available.
-                    val firstFocal = focalArr.first()
-                    val focalFormatted = "%.1f".format(firstFocal)
-                    if (physicalSize != null) {
-                        val sensorDiag = sqrt(physicalSize.width * physicalSize.width + physicalSize.height * physicalSize.height)
-                        // diagonal FOV in degrees = 2 * atan(sensorDiag / (2 * focal))
-                        val fovRad = 2.0 * atan((sensorDiag / (2.0 * firstFocal)).toDouble())
-                        val fovDeg = (fovRad * 180.0 / PI).toInt()
-                        "${fovDeg}°"
-                    } else {
-                        // If physical size is missing, show available focal(s)
-                        val formattedAll = focalArr.joinToString(",") { "%.1f".format(it) }
-                        "f=${formattedAll}mm"
-                    }
-                } else {
-                    "focal unknown"
-                }
-
-                "$id $facing $fovLabel"
-            } catch (t: Throwable) {
-                "Camera $id"
-            }
-        }.toTypedArray()
-
-        // Determine currently selected camera id if any
-        val currentSource = previewViewModel.streamer?.videoInput?.sourceFlow?.value
-        val currentCameraId = (currentSource as? ICameraSource)?.cameraId
-        val currentIndex = if (currentCameraId != null) cameraIds.indexOf(currentCameraId).coerceAtLeast(0) else -1
-
-        AlertDialog.Builder(ctx)
-            .setTitle("Select camera")
-            .setSingleChoiceItems(items, if (currentIndex >= 0) currentIndex else -1) { dialog, which ->
-                val selectedId = cameraIds[which]
-                lifecycleScope.launch {
-                    try {
-                        (previewViewModel.streamer as? IWithVideoSource)?.setCameraId(selectedId)
-                        // Update button text to show chosen camera and orientation
-                        binding.switchSourceButton.contentDescription = items[which]
-                    } catch (t: Throwable) {
-                        Log.e(TAG, "Failed to set camera id $selectedId: ${t.message}")
-                    }
-                }
-                dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     @SuppressLint("MissingPermission")

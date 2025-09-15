@@ -194,17 +194,4 @@ class DataStoreRepository(
                 videoBitrateRange = Range(videoMinBitrate, videoMaxBitrate)
             )
         }
-
-    /**
-     * Regulator mode flow. Stored as string preference values: fast, slow, belabox.
-     */
-    val regulatorModeFlow: Flow<com.dimadesu.lifestreamer.bitrate.RegulatorMode> = dataStore.data.map { preferences ->
-        val stored = preferences[stringPreferencesKey(context.getString(R.string.srt_server_moblin_regulator_mode_key))]
-            ?: context.getString(R.string.srt_server_moblin_regulator_mode_value_fast)
-        when (stored) {
-            context.getString(R.string.srt_server_moblin_regulator_mode_value_slow) -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_SLOW
-            context.getString(R.string.srt_server_moblin_regulator_mode_value_belabox) -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.BELABOX
-            else -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_FAST
-        }
-    }.distinctUntilChanged()
 }

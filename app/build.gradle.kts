@@ -48,12 +48,6 @@ android {
 }
 
 dependencies {
-    implementation("io.github.thibaultbee.streampack:streampack-core:3.0.0-RC3")
-    implementation("io.github.thibaultbee.streampack:streampack-ui:3.0.0-RC3")
-    implementation("io.github.thibaultbee.streampack:streampack-services:3.0.0-RC3")
-    implementation("io.github.thibaultbee.streampack:streampack-rtmp:3.0.0-RC3")
-    implementation("io.github.thibaultbee.streampack:streampack-srt:3.0.0-RC3")
-
     implementation(libs.material)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
@@ -64,6 +58,16 @@ dependencies {
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.datastore)
+
+    implementation("io.github.thibaultbee.streampack:streampack-core:3.0.0-RC3")
+    implementation("io.github.thibaultbee.streampack:streampack-ui:3.0.0-RC3")
+    implementation("io.github.thibaultbee.streampack:streampack-services:3.0.0-RC3")
+    implementation("io.github.thibaultbee.streampack:streampack-rtmp:3.0.0-RC3")
+    implementation("io.github.thibaultbee.streampack:streampack-srt:3.0.0-RC3")
+
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-ui:1.8.0")
+    implementation("androidx.media3:media3-datasource-rtmp:1.8.0")
 
     testImplementation(libs.junit)
 
