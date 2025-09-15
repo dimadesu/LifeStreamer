@@ -179,9 +179,36 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.e(TAG, "Streamer is not a ICoroutineStreamer")
             }
             if (streamer is IWithVideoSource) {
-                inflateStreamerPreview(streamer)
+                    // If streamer is currently streaming, skip attaching preview to avoid
+                    // preview overriding the encoder/output surface. Rebind preview after
+                    // streaming stops.
+                    if (streamer.isStreamingFlow.value == true) {
+                        Log.i(TAG, "Streamer is streaming - skipping preview while live")
+                        // Ensure preview view has no streamer assigned while streaming
+                        try {
+                            if (binding.preview.streamer == streamer) {
+                                binding.preview.streamer = null
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to clear preview streamer while streaming: ${t.message}")
+                        }
+                    } else {
+                        inflateStreamerPreview(streamer)
+                    }
             } else {
                 Log.e(TAG, "Can't start preview, streamer is not a IVideoStreamer")
+            }
+        }
+
+        // Rebind preview when streaming stops so the UI preview returns to normal
+        previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
+            if (isStreaming == false) {
+                Log.d(TAG, "Streaming stopped - re-attaching preview if possible")
+                try {
+                    inflateStreamerPreview()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
+                }
             }
         }
     }
