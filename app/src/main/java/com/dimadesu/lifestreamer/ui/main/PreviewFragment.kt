@@ -126,6 +126,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             showCameraSelectionDialog()
         }
 
+        binding.switchSourceButton.setOnClickListener {
+            previewViewModel.toggleVideoSource()
+        }
+
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) {
             showError("Oops", it)
         }
