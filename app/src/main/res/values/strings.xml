@@ -152,7 +152,9 @@
     <string name="server_url">URL</string>
 
     <!-- RTMP source -->
-    <string name="rtmp_source_title">RTMP source URL</string>
+    <string name="rtmp_source_category_title">RTMP Video/Audio Source</string>
+    <string name="rtmp_source_key">rtmp_source_key</string>
+    <string name="rtmp_source_title">RTMP Source URL (example: rtmp://localhost:1935/publish/live)</string>
     <string name="rtmp_source_url_key">rtmp_source_url_key</string>
     <string name="rtmp_source_default_url">rtmp://localhost:1935/publish/live</string>
 
