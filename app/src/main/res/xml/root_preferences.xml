@@ -168,6 +168,12 @@
                 app:entryValues='@array/moblin_regulator_mode_values'
                 app:useSimpleSummaryProvider="true" />
 
+            <EditTextPreference
+                app:defaultValue="@string/rtmp_source_default_url"
+                app:key="@string/rtmp_source_url_key"
+                app:title="@string/rtmp_source_title"
+                app:useSimpleSummaryProvider="true" />
+
         </PreferenceCategory>
 
         <PreferenceCategory

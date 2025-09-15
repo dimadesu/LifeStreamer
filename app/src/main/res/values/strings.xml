@@ -151,6 +151,11 @@
     <string name="default_rtmp_url">rtmp://192.168.1.192/s/streamKey</string>
     <string name="server_url">URL</string>
 
+    <!-- RTMP source -->
+    <string name="rtmp_source_title">RTMP source URL</string>
+    <string name="rtmp_source_url_key">rtmp_source_url_key</string>
+    <string name="rtmp_source_default_url">rtmp://localhost:1935/publish/live</string>
+
     <string name="file_endpoint_key">file_endpoint_key</string>
     <string name="file">File</string>
     <string name="file_name_key">file_name_key</string>

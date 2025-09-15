@@ -167,10 +167,16 @@ class DataStoreRepository(
             EndpointType.RTMP -> {
                 val url =
                     preferences[stringPreferencesKey(context.getString(R.string.rtmp_server_url_key))]
-                        ?: context.getString(R.string.default_rtmp_url)
+                    ?: context.getString(R.string.default_rtmp_url)
                 UriMediaDescriptor(context, url)
             }
         }
+    }.distinctUntilChanged()
+
+    // Flow for RTMP video source URL
+    val rtmpVideoSourceUrlFlow: Flow<String> = dataStore.data.map { preferences ->
+        preferences[stringPreferencesKey(context.getString(R.string.rtmp_source_url_key))]
+            ?: context.getString(R.string.rtmp_source_default_url)
     }.distinctUntilChanged()
 
     val bitrateRegulatorConfigFlow: Flow<BitrateRegulatorConfig?> =

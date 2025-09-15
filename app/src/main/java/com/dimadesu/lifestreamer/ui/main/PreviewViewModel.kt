@@ -1015,7 +1015,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
-    private fun setupExoPlayerWithMediaProjection(): ExoPlayer? {
+    private suspend fun setupExoPlayerWithMediaProjection(): ExoPlayer? {
         // Create ExoPlayer for video with minimal buffering for immediate playback
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -1030,8 +1030,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             .setLoadControl(loadControl)
             .build()
 
+        // Determine RTMP URL to use for preview.
+        val videoSourceUrl = try {
+            storageRepository.rtmpVideoSourceUrlFlow.first()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read RTMP video source URL from storage: ${e.message}")
+            application.getString(R.string.rtmp_source_default_url)
+        }
+
         // Set up RTMP media source for preview display
-        val mediaItem = MediaItem.fromUri("rtmp://localhost:1935/publish/live")
+        val mediaItem = MediaItem.fromUri(videoSourceUrl)
         val mediaSource = ProgressiveMediaSource.Factory(
             DefaultDataSource.Factory(application)
         ).createMediaSource(mediaItem)
