@@ -572,9 +572,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     @SuppressLint("MissingPermission")
     private fun requestCameraAndMicrophonePermissions() {
+        // Include POST_NOTIFICATIONS on API 33+ so the app asks for it during app open
+        val permissionsToCheck = mutableListOf<String>().apply {
+            add(Manifest.permission.CAMERA)
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
         when {
             PermissionManager.hasPermissions(
-                requireContext(), Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
+                requireContext(), *permissionsToCheck.toTypedArray()
             ) -> {
                 inflateStreamerPreview()
                 // Don't call configureAudio() here - it will be handled by service connection
@@ -603,9 +610,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
             else -> {
                 requestCameraAndMicrophonePermissionsLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA
-                    )
+                    permissionsToCheck.toTypedArray()
                 )
             }
         }
@@ -641,6 +646,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             // when the service is ready and only if not already streaming
             // previewViewModel.configureAudio()
             Log.d(TAG, "RECORD_AUDIO permission granted - audio will be configured via service")
+        }
+        // POST_NOTIFICATIONS is optional for preview; if granted, we can create
+        // or update our notification channel. If not granted, continue normally.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val notifGranted = permissions[Manifest.permission.POST_NOTIFICATIONS] == true
+            Log.d(TAG, "POST_NOTIFICATIONS granted=$notifGranted")
+            // Optionally create silent notification channel here if granted
+            if (notifGranted) {
+                try {
+                    previewViewModel.service?.let { service ->
+                        // Ensure channel exists
+                        service.run {
+                            // customNotificationUtils exists in the service - calling via reflection
+                            // would be heavy; just log for now and allow service to recreate channel when needed
+                        }
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to ensure notification channel after permission grant: ${t.message}")
+                }
+            }
         }
         if (missingPermissions.isNotEmpty()) {
             showPermissionError(*missingPermissions.toTypedArray())

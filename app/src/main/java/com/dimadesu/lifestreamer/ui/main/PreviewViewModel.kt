@@ -163,11 +163,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
 
-            // Add notification permission for Android 13+ (API 33+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-
             return permissions
         }
 
