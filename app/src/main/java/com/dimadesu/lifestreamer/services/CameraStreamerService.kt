@@ -432,9 +432,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // Boost process priority for foreground service - use more conservative priority for stability
         try {
-            // Use URGENT_DISPLAY instead of URGENT_AUDIO for less aggressive scheduling
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
-            Log.i(TAG, "Process priority boosted to URGENT_DISPLAY for stable background audio")
+            // Use URGENT_AUDIO to prioritize audio capture when streaming in background.
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+            Log.i(TAG, "Process priority boosted to URGENT_AUDIO for stable background audio")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to boost process priority", e)
         }
