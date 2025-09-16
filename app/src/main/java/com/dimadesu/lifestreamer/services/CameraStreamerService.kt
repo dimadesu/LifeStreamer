@@ -56,6 +56,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         const val ACTION_STOP_STREAM = "com.dimadesu.lifestreamer.action.STOP_STREAM"
         const val ACTION_START_STREAM = "com.dimadesu.lifestreamer.action.START_STREAM"
         const val ACTION_TOGGLE_MUTE = "com.dimadesu.lifestreamer.action.TOGGLE_MUTE"
+        const val ACTION_EXIT_APP = "com.dimadesu.lifestreamer.action.EXIT_APP"
         const val ACTION_OPEN_FROM_NOTIFICATION = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
 
         /**
@@ -259,6 +260,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         }
                     }
                 }
+                // EXIT handled by Activity via Activity PendingIntent; do not handle here.
                 ACTION_OPEN_FROM_NOTIFICATION -> {
                     Log.i(TAG, "Notification receiver: OPEN_FROM_NOTIFICATION")
                     // Launch MainActivity (bring to front if exists)
@@ -322,6 +324,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val muteIntent = Intent(ACTION_TOGGLE_MUTE).apply { setPackage(packageName) }
                     val mutePending = PendingIntent.getBroadcast(this@CameraStreamerService, 2, muteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
+                    // Use an Activity PendingIntent for Exit so the system starts the
+                    // activity directly (avoids background-start/trampoline blocking).
+                    val exitActivityIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
+                        setAction(ACTION_EXIT_APP)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    val exitPending = PendingIntent.getActivity(
+                        this@CameraStreamerService,
+                        4,
+                        exitActivityIntent,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT
+                    )
+
                     // Create tap intent so notification opens the app's main activity
                     val tapOpenIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -353,6 +368,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         val isMuted = audio?.isMuted ?: false
                         val muteLabel = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
                         addAction(notificationIconResourceId, muteLabel, mutePending)
+                        // Exit button to stop service and close the app
+                        addAction(notificationIconResourceId, getString(R.string.service_notification_action_exit), exitPending)
                     }
 
                     customNotificationUtils.notify(builder.build())
