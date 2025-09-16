@@ -23,6 +23,7 @@ import android.view.WindowManager
 import androidx.annotation.RequiresApi
 import androidx.core.app.ServiceCompat
 import com.dimadesu.lifestreamer.services.utils.NotificationUtils
+import com.dimadesu.lifestreamer.ui.main.MainActivity
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
@@ -55,6 +56,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         const val ACTION_STOP_STREAM = "com.dimadesu.lifestreamer.action.STOP_STREAM"
         const val ACTION_START_STREAM = "com.dimadesu.lifestreamer.action.START_STREAM"
         const val ACTION_TOGGLE_MUTE = "com.dimadesu.lifestreamer.action.TOGGLE_MUTE"
+        const val ACTION_OPEN_FROM_NOTIFICATION = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
 
         /**
          * Convert rotation constant to readable string for logging
@@ -125,6 +127,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val filter = IntentFilter().apply {
             addAction(ACTION_STOP_STREAM)
             addAction(ACTION_START_STREAM)
+            addAction(ACTION_OPEN_FROM_NOTIFICATION)
             addAction(ACTION_TOGGLE_MUTE)
         }
         try {
@@ -256,6 +259,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         }
                     }
                 }
+                ACTION_OPEN_FROM_NOTIFICATION -> {
+                    Log.i(TAG, "Notification receiver: OPEN_FROM_NOTIFICATION")
+                    // Launch MainActivity (bring to front if exists)
+                    try {
+                        val activityOpenIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            setAction(ACTION_OPEN_FROM_NOTIFICATION)
+                        }
+                        startActivity(activityOpenIntent)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to open MainActivity from notification: ${e.message}")
+                    }
+                }
             }
         }
     }
@@ -306,7 +322,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val muteIntent = Intent(ACTION_TOGGLE_MUTE).apply { setPackage(packageName) }
                     val mutePending = PendingIntent.getBroadcast(this@CameraStreamerService, 2, muteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
+                    // Create tap intent so notification opens the app's main activity
+                    val tapOpenIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        setAction("com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION")
+                    }
+                    val openPending = PendingIntent.getActivity(this@CameraStreamerService, 3, tapOpenIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
                     val builder = NotificationCompat.Builder(this@CameraStreamerService, "camera_streaming_channel").apply {
+                        setContentIntent(openPending)
                         setSmallIcon(notificationIconResourceId)
                         setContentTitle(title)
                         setContentText(content)
