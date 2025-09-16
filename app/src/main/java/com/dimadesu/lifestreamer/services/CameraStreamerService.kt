@@ -56,6 +56,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         const val ACTION_STOP_STREAM = "com.dimadesu.lifestreamer.action.STOP_STREAM"
         const val ACTION_START_STREAM = "com.dimadesu.lifestreamer.action.START_STREAM"
         const val ACTION_TOGGLE_MUTE = "com.dimadesu.lifestreamer.action.TOGGLE_MUTE"
+        const val ACTION_EXIT_APP = "com.dimadesu.lifestreamer.action.EXIT_APP"
         const val ACTION_OPEN_FROM_NOTIFICATION = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
 
         /**
@@ -93,9 +94,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Coroutine scope for periodic notification updates
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var statusUpdaterJob: Job? = null
+    // Cache last notification state to avoid re-posting identical notifications
+    private var lastNotificationKey: String? = null
     // SharedFlow for UI messages (notification start feedback)
     private val _notificationMessages = MutableSharedFlow<String>(replay = 1)
     val notificationMessages = _notificationMessages.asSharedFlow()
+    // Cached PendingIntents for notification actions to avoid recreating/cancelling them
+    private lateinit var startPendingIntent: PendingIntent
+    private lateinit var stopPendingIntent: PendingIntent
+    private lateinit var mutePendingIntent: PendingIntent
+    private lateinit var exitPendingIntent: PendingIntent
+    private lateinit var openPendingIntent: PendingIntent
     
     // Audio permission checker for debugging
     /**
@@ -154,8 +163,41 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         Log.i(TAG, "CameraStreamerService created and configured for background camera access")
 
+        // Prepare cached PendingIntents for notification actions so updates don't
+        // cancel/recreate them which sometimes causes the UI to render a disabled state.
+        initNotificationPendingIntents()
+
         // Start periodic notification updater to reflect runtime status
         startStatusUpdater()
+    }
+
+    private fun initNotificationPendingIntents() {
+        // Use stable request codes and UPDATE_CURRENT to keep PendingIntents valid
+        val startIntent = Intent(ACTION_START_STREAM).apply { setPackage(packageName) }
+        startPendingIntent = PendingIntent.getBroadcast(this@CameraStreamerService, 0, startIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val stopIntent = Intent(ACTION_STOP_STREAM).apply { setPackage(packageName) }
+        stopPendingIntent = PendingIntent.getBroadcast(this@CameraStreamerService, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val muteIntent = Intent(ACTION_TOGGLE_MUTE).apply { setPackage(packageName) }
+        mutePendingIntent = PendingIntent.getBroadcast(this@CameraStreamerService, 2, muteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val exitActivityIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
+            setAction(ACTION_EXIT_APP)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        exitPendingIntent = PendingIntent.getActivity(
+            this@CameraStreamerService,
+            4,
+            exitActivityIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val tapOpenIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            setAction(ACTION_OPEN_FROM_NOTIFICATION)
+        }
+        openPendingIntent = PendingIntent.getActivity(this@CameraStreamerService, 3, tapOpenIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     override fun onDestroy() {
@@ -259,6 +301,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         }
                     }
                 }
+                // EXIT handled by Activity via Activity PendingIntent; do not handle here.
                 ACTION_OPEN_FROM_NOTIFICATION -> {
                     Log.i(TAG, "Notification receiver: OPEN_FROM_NOTIFICATION")
                     // Launch MainActivity (bring to front if exists)
@@ -313,23 +356,29 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Build notification with actions using NotificationCompat.Builder directly
                     // Use explicit service intent for Start so the service is started if not running
                     // Use broadcast for Start action so the registered receiver handles it reliably
-                    val startIntent = Intent(ACTION_START_STREAM).apply { setPackage(packageName) }
-                    val startPending = PendingIntent.getBroadcast(this@CameraStreamerService, 0, startIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                    // Use cached PendingIntents to avoid recreating actions every loop
+                    val startPending = startPendingIntent
+                    val stopPending = stopPendingIntent
+                    val mutePending = mutePendingIntent
+                    val exitPending = exitPendingIntent
+                    val openPending = openPendingIntent
 
-                    val stopIntent = Intent(ACTION_STOP_STREAM).apply { setPackage(packageName) }
-                    val stopPending = PendingIntent.getBroadcast(this@CameraStreamerService, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                    // Determine mute/unmute state before building the notification key
+                    val audio = (streamer as? IWithAudioSource)?.audioInput
+                    val isMuted = audio?.isMuted ?: false
 
-                    val muteIntent = Intent(ACTION_TOGGLE_MUTE).apply { setPackage(packageName) }
-                    val mutePending = PendingIntent.getBroadcast(this@CameraStreamerService, 2, muteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                    val notificationKey = listOf(streamer?.isStreamingFlow?.value, isMuted, content).joinToString("|")
 
-                    // Create tap intent so notification opens the app's main activity
-                    val tapOpenIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        setAction("com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION")
+                    // Skip rebuilding the notification if nothing relevant changed.
+                    if (notificationKey == lastNotificationKey) {
+                        // No visual change needed
+                        delay(2000)
+                        continue
                     }
-                    val openPending = PendingIntent.getActivity(this@CameraStreamerService, 3, tapOpenIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
                     val builder = NotificationCompat.Builder(this@CameraStreamerService, "camera_streaming_channel").apply {
+                        // Make subsequent updates silent to avoid visual rips/press animations
+                        setOnlyAlertOnce(true)
                         setContentIntent(openPending)
                         setSmallIcon(notificationIconResourceId)
                         // Avoid duplicate app label in expanded notification.
@@ -353,12 +402,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         val isMuted = audio?.isMuted ?: false
                         val muteLabel = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
                         addAction(notificationIconResourceId, muteLabel, mutePending)
+                        // Exit button to stop service and close the app
+                        addAction(notificationIconResourceId, getString(R.string.service_notification_action_exit), exitPending)
                     }
 
                     customNotificationUtils.notify(builder.build())
+                    lastNotificationKey = notificationKey
                 } catch (e: Exception) {
                     Log.w(TAG, "Status updater failed: ${e.message}")
                 }
+                // Use a short sleep between checks; notification updates are already
+                // gated above to happen only when needed.
                 delay(2000)
             }
         }

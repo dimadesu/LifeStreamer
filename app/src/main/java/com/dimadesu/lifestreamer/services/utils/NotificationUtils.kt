@@ -76,12 +76,14 @@ class NotificationUtils(
         // Create a broadcast intent so the service receives the tap and can
         // decide whether to open the activity (keeps handling consistent with
         // other notification actions that are delivered to the service).
-        val intent = Intent("com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION").apply {
-            setPackage(service.packageName)
+        val openIntent = Intent(service, MainActivity::class.java).apply {
+            action = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
+            // Ensure the activity is brought to front if already running
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
 
         val pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val pendingIntent = PendingIntent.getBroadcast(service, 0, intent, pendingIntentFlags)
+        val pendingIntent = PendingIntent.getActivity(service, 0, openIntent, pendingIntentFlags)
         
         val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)

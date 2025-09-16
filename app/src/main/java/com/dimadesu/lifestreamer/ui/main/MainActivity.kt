@@ -57,6 +57,13 @@ class MainActivity : AppCompatActivity() {
                     .replace(R.id.container, PreviewFragment())
                     .commitNow()
             }
+        } else if (action == "com.dimadesu.lifestreamer.action.EXIT_APP") {
+            // Exit requested via notification: stop the service (if running) and finish activity
+            try {
+                val stopIntent = Intent(this, com.dimadesu.lifestreamer.services.CameraStreamerService::class.java)
+                stopService(stopIntent)
+            } catch (_: Exception) {}
+            finish()
         }
     }
 
