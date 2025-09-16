@@ -85,9 +85,20 @@ class NotificationUtils(
         
         val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
-            setContentTitle(title)
+            // Avoid showing the app label twice when expanded: if the provided
+            // title matches the application label, don't set content title so
+            // the system (which already shows the app name in the header)
+            // won't render it twice.
+            val appLabel = try {
+                service.applicationInfo.loadLabel(service.packageManager).toString()
+            } catch (_: Throwable) {
+                null
+            }
+            if (appLabel == null || title != appLabel) {
+                setContentTitle(title)
+            }
             setContentIntent(pendingIntent) // This makes the notification tappable
-            
+
             content?.let {
                 setContentText(it)
             }

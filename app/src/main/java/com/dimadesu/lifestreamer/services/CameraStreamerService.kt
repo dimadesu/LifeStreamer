@@ -332,7 +332,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val builder = NotificationCompat.Builder(this@CameraStreamerService, "camera_streaming_channel").apply {
                         setContentIntent(openPending)
                         setSmallIcon(notificationIconResourceId)
-                        setContentTitle(title)
+                        // Avoid duplicate app label in expanded notification.
+                        val appLabel = try {
+                            applicationInfo.loadLabel(packageManager).toString()
+                        } catch (_: Throwable) { null }
+                        if (appLabel == null || title != appLabel) {
+                            setContentTitle(title)
+                        }
                         setContentText(content)
                         setOngoing(true)
                         // Show Start when not streaming, Stop when streaming
