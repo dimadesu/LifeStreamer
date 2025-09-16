@@ -151,7 +151,7 @@
                 app:useSimpleSummaryProvider="true" />
 
             <SwitchPreference
-                android:defaultValue="false"
+                android:defaultValue="true"
                 app:key="@string/srt_server_enable_bitrate_regulation_key"
                 app:title="@string/srt_server_enable_bitrate_regulation" />
 
@@ -174,7 +174,7 @@
                 app:useSimpleSummaryProvider="true" />
 
             <ListPreference
-                app:defaultValue="@string/srt_server_moblin_regulator_mode_value_fast"
+                app:defaultValue="@string/srt_server_moblin_regulator_mode_value_belabox"
                 app:key="@string/srt_server_moblin_regulator_mode_key"
                 app:title="@string/srt_server_moblin_regulator_mode"
                 app:entries='@array/moblin_regulator_mode_entries'
