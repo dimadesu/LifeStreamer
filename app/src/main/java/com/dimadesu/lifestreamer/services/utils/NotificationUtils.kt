@@ -73,31 +73,32 @@ class NotificationUtils(
         @DrawableRes iconResourceId: Int,
         isForgroundService: Boolean = false
     ): Notification {
-        // Create an intent to open the main activity when notification is tapped
-        val intent = Intent(service, MainActivity::class.java).apply {
-            // Bring existing activity to front if it exists instead of recreating it.
-            // REORDER_TO_FRONT keeps the existing instance and moves it above other
-            // activities, SINGLE_TOP will route the intent to onNewIntent if already
-            // at the top. NEW_TASK is kept so this works when fired from a Service.
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            action = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
+        // Create a broadcast intent so the service receives the tap and can
+        // decide whether to open the activity (keeps handling consistent with
+        // other notification actions that are delivered to the service).
+        val intent = Intent("com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION").apply {
+            setPackage(service.packageName)
         }
-        
-        val pendingIntentFlags =
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
-        val pendingIntent = PendingIntent.getActivity(
-            service,
-            0,
-            intent,
-            pendingIntentFlags
-        )
+        val pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getBroadcast(service, 0, intent, pendingIntentFlags)
         
         val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
-            setContentTitle(title)
+            // Avoid showing the app label twice when expanded: if the provided
+            // title matches the application label, don't set content title so
+            // the system (which already shows the app name in the header)
+            // won't render it twice.
+            val appLabel = try {
+                service.applicationInfo.loadLabel(service.packageManager).toString()
+            } catch (_: Throwable) {
+                null
+            }
+            if (appLabel == null || title != appLabel) {
+                setContentTitle(title)
+            }
             setContentIntent(pendingIntent) // This makes the notification tappable
-            
+
             content?.let {
                 setContentText(it)
             }

@@ -117,6 +117,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var serviceConnection: ServiceConnection? = null
     private val _serviceReady = MutableStateFlow(false)
     private val streamerFlow = MutableStateFlow<SingleStreamer?>(null)
+    // UI-visible message from service (notification start results)
+    private val _notificationMessage = MutableLiveData<String?>()
+    val notificationMessageLiveData: LiveData<String?> get() = _notificationMessage
 
     // Streamer access through service (with fallback for backward compatibility)
     val streamer: SingleStreamer?
@@ -327,6 +330,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     serviceStreamer = binder.streamer as SingleStreamer
                     streamerFlow.value = serviceStreamer
                     _serviceReady.value = true
+                    // Collect notification messages from the service and post to LiveData
+                    try {
+                        val flow = binder.notificationMessages()
+                        viewModelScope.launch {
+                            flow.collect { msg -> _notificationMessage.postValue(msg) }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to collect notification messages from service: ${t.message}")
+                    }
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }
             }

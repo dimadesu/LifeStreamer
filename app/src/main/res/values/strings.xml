@@ -15,6 +15,10 @@
     <string name="service_notification_text_error">Error: %1$s</string>
     <string name="service_notification_text_stopped">Not streaming</string>
 
+    <!-- Notification action labels -->
+    <string name="service_notification_action_mute">Mute</string>
+    <string name="service_notification_action_unmute">Unmute</string>
+
     <!-- Preview -->
     <string name="live">Start Live</string>
     <string name="stop">Stop</string>
