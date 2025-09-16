@@ -317,7 +317,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         } else {
                             addAction(notificationIconResourceId, "Start", startPending)
                         }
-                        addAction(notificationIconResourceId, "Mute", mutePending)
+
+                        // Determine mute/unmute label based on current audio state
+                        val audio = (streamer as? IWithAudioSource)?.audioInput
+                        val isMuted = audio?.isMuted ?: false
+                        val muteLabel = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+                        addAction(notificationIconResourceId, muteLabel, mutePending)
                     }
 
                     customNotificationUtils.notify(builder.build())
