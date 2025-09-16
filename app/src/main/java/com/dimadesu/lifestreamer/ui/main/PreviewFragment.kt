@@ -57,6 +57,8 @@ import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.ui.views.PreviewView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.widget.Toast
+import com.google.android.material.snackbar.Snackbar
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var binding: MainFragmentBinding
@@ -67,6 +69,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
+    // UI messages from service (notification-start feedback)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,7 +84,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding = MainFragmentBinding.inflate(inflater, container, false)
         binding.lifecycleOwner = this
         binding.viewmodel = previewViewModel
-
         bindProperties()
         return binding.root
     }
@@ -215,6 +217,17 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 }
             }
         }
+
+        // Observe service notification messages and show in UI
+        previewViewModel.notificationMessageLiveData.observe(viewLifecycleOwner) { msg ->
+            if (!msg.isNullOrEmpty()) {
+                view?.let { v ->
+                    Snackbar.make(v, msg, Snackbar.LENGTH_LONG).show()
+                } ?: run {
+                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun lockOrientation() {
@@ -257,6 +270,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     private fun stopStream() {
         previewViewModel.stopStream()
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
     }
 
     private fun showPermissionError(vararg permissions: String) {
