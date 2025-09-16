@@ -114,6 +114,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     var serviceStreamer: SingleStreamer? = null
         private set
+    // If rotation changes while streaming we queue it here and apply it when streaming stops
+    private var pendingTargetRotation: Int? = null
     private var serviceConnection: ServiceConnection? = null
     private val _serviceReady = MutableStateFlow(false)
     private val streamerFlow = MutableStateFlow<SingleStreamer?>(null)
@@ -438,11 +440,43 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
+        // Apply rotation changes, but if streamer is currently streaming queue the change and
+        // apply it when streaming stops to avoid conflicts in encoding pipeline.
         viewModelScope.launch {
-            rotationRepository.rotationFlow
-                .collect {
-                    serviceStreamer?.setTargetRotation(it)
+            rotationRepository.rotationFlow.collect { rotation ->
+                val current = serviceStreamer
+                if (current?.isStreamingFlow?.value == true) {
+                    Log.i(TAG, "Rotation change to $rotation queued until stream stops")
+                    pendingTargetRotation = rotation
+                } else {
+                    try {
+                        current?.setTargetRotation(rotation)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to set target rotation: $t")
+                    }
                 }
+            }
+        }
+
+        // When streaming stops, apply any pending rotation change.
+        viewModelScope.launch {
+            serviceReadyFlow.collect { isReady ->
+                if (isReady) {
+                    serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
+                        if (!isStreaming) {
+                            pendingTargetRotation?.let { pending ->
+                                Log.i(TAG, "Applying pending rotation $pending after stream stopped")
+                                try {
+                                    serviceStreamer?.setTargetRotation(pending)
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, "Failed to apply pending rotation: $t")
+                                }
+                                pendingTargetRotation = null
+                            }
+                        }
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             storageRepository.isAudioEnableFlow.combine(storageRepository.isVideoEnableFlow) { isAudioEnable, isVideoEnable ->
