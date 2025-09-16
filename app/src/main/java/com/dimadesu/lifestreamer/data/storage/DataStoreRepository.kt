@@ -206,11 +206,11 @@ class DataStoreRepository(
      */
     val regulatorModeFlow: Flow<com.dimadesu.lifestreamer.bitrate.RegulatorMode> = dataStore.data.map { preferences ->
         val stored = preferences[stringPreferencesKey(context.getString(R.string.srt_server_moblin_regulator_mode_key))]
-            ?: context.getString(R.string.srt_server_moblin_regulator_mode_value_fast)
+            ?: context.getString(R.string.srt_server_moblin_regulator_mode_value_belabox)
         when (stored) {
             context.getString(R.string.srt_server_moblin_regulator_mode_value_slow) -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_SLOW
             context.getString(R.string.srt_server_moblin_regulator_mode_value_belabox) -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.BELABOX
-            else -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_FAST
+            else -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.BELABOX
         }
     }.distinctUntilChanged()
 }

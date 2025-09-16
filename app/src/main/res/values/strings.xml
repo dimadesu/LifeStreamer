@@ -54,11 +54,11 @@
 
     <string name="video_encoder">Encoder</string>
     <string name="video_encoder_key">video_encoder_key</string>
-    <string name="default_video_encoder">video/avc</string>
+    <string name="default_video_encoder">video/hevc</string>
 
     <string name="video_resolution">Resolution</string>
     <string name="video_resolution_key">video_resolution_key</string>
-    <string name="default_video_resolution">1280x720</string>
+    <string name="default_video_resolution">1920x1080</string>
 
     <string name="video_fps">Frames per second</string>
     <string name="video_fps_key">video_fps_key</string>
@@ -122,10 +122,10 @@
     <string name="srt_server_key">srt_server_key</string>
     <string name="server_ip">IP</string>
     <string name="srt_server_ip_key">srt_server_ip_key</string>
-    <string name="default_srt_server_url">192.168.1.11</string>
+    <string name="default_srt_server_url">127.0.0.1</string>
     <string name="server_port">Port</string>
     <string name="srt_server_port_key">srt_server_port_key</string>
-    <string name="default_srt_server_port">9998</string>
+    <string name="default_srt_server_port">6000</string>
     <string name="srt_server_stream_id_key">server_stream_id_key</string>
     <string name="srt_server_stream_id">Stream ID</string>
     <string name="default_srt_server_stream_id" />
@@ -153,7 +153,7 @@
     <string name="rtmp_server_key">rtmp_server_key</string>
     <string name="rtmp_server">RTMP Server</string>
     <string name="rtmp_server_url_key">rtmp_server_url_key</string>
-    <string name="default_rtmp_url">rtmp://192.168.1.192/s/streamKey</string>
+    <string name="default_rtmp_url">rtmp://127.0.0.1:1935/publish/live</string>
     <string name="server_url">URL</string>
 
     <!-- RTMP source -->
