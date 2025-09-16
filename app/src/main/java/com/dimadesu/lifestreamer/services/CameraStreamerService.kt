@@ -219,6 +219,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     serviceScope.launch {
                         try {
                             streamer?.stopStream()
+                            // Refresh notification to show Start action
+                            customNotificationUtils.notify(onCloseNotification() ?: onCreateNotification())
                         } catch (e: Exception) {
                             Log.w(TAG, "Stop from notification receiver failed: ${e.message}")
                         }
@@ -232,6 +234,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             if (!isStreaming) {
                                 // Start using configured endpoint from DataStore
                                 startStreamFromConfiguredEndpoint()
+                                // Refresh notification to show Stop action
+                                customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification receiver failed: ${e.message}")
@@ -307,8 +311,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         setContentTitle(title)
                         setContentText(content)
                         setOngoing(true)
-                        addAction(notificationIconResourceId, "Start", startPending)
-                        addAction(notificationIconResourceId, "Stop", stopPending)
+                        // Show Start when not streaming, Stop when streaming
+                        if (streamer?.isStreamingFlow?.value == true) {
+                            addAction(notificationIconResourceId, "Stop", stopPending)
+                        } else {
+                            addAction(notificationIconResourceId, "Start", startPending)
+                        }
                         addAction(notificationIconResourceId, "Mute", mutePending)
                     }
 
