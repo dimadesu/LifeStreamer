@@ -337,6 +337,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         onCloseNotification()?.let { notification ->
             customNotificationUtils.notify(notification)
         }
+        // Clear bitrate flow so UI shows cleared state immediately
+        try { _currentBitrateFlow.tryEmit(null) } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
     }
 
@@ -371,9 +373,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val audio = (streamer as? IWithAudioSource)?.audioInput
                     val isMuted = audio?.isMuted ?: false
 
-                    // Read current encoder bitrate if available
-                    val videoBitrate = (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
-                    // Emit bitrate to flow for UI consumers
+                    // Only read/emit current encoder bitrate when streaming; otherwise clear it
+                    val isStreamingNow = streamer?.isStreamingFlow?.value == true
+                    val videoBitrate = if (isStreamingNow) {
+                        (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
+                    } else null
+                    // Emit bitrate (or null when not streaming) to flow for UI consumers
                     try { _currentBitrateFlow.emit(videoBitrate) } catch (_: Throwable) {}
 
                     val bitrateText = videoBitrate?.let { b ->

@@ -456,6 +456,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
+        // Clear bitrate display when streaming stops
+        viewModelScope.launch {
+            serviceReadyFlow.collect { isReady ->
+                if (isReady) {
+                    serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
+                        if (!isStreaming) {
+                            Log.i(TAG, "Streamer stopped - clearing bitrate display")
+                            _bitrateLiveData.postValue(null)
+                        }
+                    }
+                }
+            }
+        }
         // Apply rotation changes, but if streamer is currently streaming queue the change and
         // apply it when streaming stops to avoid conflicts in encoding pipeline.
         viewModelScope.launch {
