@@ -54,7 +54,7 @@
 
     <string name="video_encoder">Encoder</string>
     <string name="video_encoder_key">video_encoder_key</string>
-    <string name="default_video_encoder">video/hevc</string>
+    <string name="default_video_encoder">video/avc</string>
 
     <string name="video_resolution">Resolution</string>
     <string name="video_resolution_key">video_resolution_key</string>
