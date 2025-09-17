@@ -34,6 +34,9 @@ import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import kotlinx.coroutines.*
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
+import io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation
+import io.github.thibaultbee.streampack.core.streamers.orientation.IRotationProvider
+import io.github.thibaultbee.streampack.core.streamers.orientation.SensorRotationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
 
@@ -80,6 +83,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     
     // Current device rotation
     private var currentRotation: Int = Surface.ROTATION_0
+
+    // Local rotation provider (we register our own to avoid calling StreamerService.onCreate)
+    private var localRotationProvider: IRotationProvider? = null
+    private var localRotationListener: IRotationProvider.Listener? = null
     
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
@@ -115,15 +122,45 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Override onCreate to use both camera and mediaProjection service types
      */
     override fun onCreate() {
+        // We intentionally avoid calling super.onCreate() here because the base
+        // StreamerService starts a foreground service with the mediaProjection type
+        // by default. We want to keep the change local to this app and ensure the
+        // camera service only requests CAMERA|MICROPHONE types.
+
         // Initialize power manager and other services
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
 
         // Detect current device rotation
         detectCurrentRotation()
 
+        // Add rotation provider listener similar to StreamerService's behavior
+        try {
+            // Create a local SensorRotationProvider and register a listener that
+            // forwards rotation updates to the streamer inside a coroutine (the
+            // streamer API is suspend).
+            val rotationProvider = SensorRotationProvider(this)
+            val listener = object : IRotationProvider.Listener {
+                override fun onOrientationChanged(rotation: Int) {
+                    // Forward rotation to the streamer's rotation handler in a coroutine
+                    try {
+                        serviceScope.launch {
+                            try {
+                                (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+                            } catch (_: Throwable) {}
+                        }
+                    } catch (_: Throwable) {}
+                }
+            }
+            rotationProvider.addListener(listener)
+            localRotationProvider = rotationProvider
+            localRotationListener = listener
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to register rotation provider: ${t.message}")
+        }
+
         // Ensure our app-level notification channel (silent) is created before
-        // the base StreamerService posts the initial foreground notification.
-        // This prevents the system from using an existing channel with sound.
+        // starting foreground notification. This prevents the system from using
+        // an existing channel with sound.
         try {
             customNotificationUtils.createNotificationChannel(
                 channelNameResourceId,
@@ -132,9 +169,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to create custom notification channel: ${t.message}")
         }
-
-        // Let the base class handle the rest of the setup (including startForeground)
-        super.onCreate()
 
         // Register a small receiver for notification actions handled via intents to the service
         val filter = IntentFilter().apply {
@@ -148,23 +182,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to register notification action receiver: ${t.message}")
         }
-        
-        // The base class already calls startForeground with MEDIA_PROJECTION type,
-        // but we need to update it with CAMERA and MICROPHONE types for Android 14+ to enable background access
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14+ supports camera, media projection, and microphone service types
-            ServiceCompat.startForeground(
-                this,
-                1001, // Use the same notification ID as specified in constructor
-                onCreateNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or 
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
+
+        // Start foreground with CAMERA and MICROPHONE types on Android 14+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceCompat.startForeground(
+                    this,
+                    1001,
+                    onCreateNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                // For older versions, start foreground normally using Service API
+                // (the three-arg ServiceCompat overload resolution can be ambiguous
+                // with newer API shims). We're in a Service subclass so call directly.
+                startForeground(1001, onCreateNotification())
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to start foreground in CameraStreamerService.onCreate(): ${t.message}")
         }
-        // For Android 13 and below, the base class MEDIA_PROJECTION type should work
-        // Camera access in background may be more limited but should still work with proper manifest declaration
-        
+
         Log.i(TAG, "CameraStreamerService created and configured for background camera access")
 
         // Prepare cached PendingIntents for notification actions so updates don't
@@ -208,6 +246,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Stop periodic updater and unregister receiver
         stopStatusUpdater()
         try { unregisterReceiver(notificationActionReceiver) } catch (_: Exception) {}
+
+        // Clean up local rotation provider if we registered one
+        try {
+            // Remove listener only if we have one registered
+            localRotationListener?.let { listener ->
+                localRotationProvider?.removeListener(listener)
+            }
+            localRotationProvider = null
+            localRotationListener = null
+        } catch (_: Exception) {}
 
         // Release wake lock if held
         try { releaseWakeLock() } catch (_: Exception) {}
@@ -467,9 +515,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             // Use the "open/streaming" notification when starting foreground so the
             // notification immediately reflects that streaming is in progress.
             // Fall back to the create notification if open notification is not provided.
-            startForeground(1001, onOpenNotification() ?: onCreateNotification(),
+            // Reinforce foreground with CAMERA and MICROPHONE types only.
+            // Avoid MEDIA_PROJECTION here for the same reasons as above.
+            startForeground(
+                1001,
+                onOpenNotification() ?: onCreateNotification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             Log.i(TAG, "Foreground service reinforced with all required service types")

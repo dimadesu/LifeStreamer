@@ -45,7 +45,7 @@
         <service
             android:name=".services.CameraStreamerService"
             android:exported="false"
-            android:foregroundServiceType="camera|mediaProjection|microphone" />
+            android:foregroundServiceType="camera|microphone" />
 
         <!-- MediaProjection service for audio capture with required foreground service type -->
         <service
