@@ -229,10 +229,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Show current bitrate if available
+        // Show current bitrate if available (render nothing when null)
         previewViewModel.bitrateLiveData.observe(viewLifecycleOwner) { text ->
             try {
-                binding.bitrateText.text = text ?: "-"
+                binding.bitrateText.text = text ?: ""
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to update bitrate text: ${t.message}")
             }
