@@ -54,6 +54,18 @@
 
         </LinearLayout>
 
+        <!-- Bitrate display -->
+        <TextView
+            android:id="@+id/bitrateText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:layout_margin="8dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:text="-" />
+
         <ToggleButton
             android:id="@+id/liveButton"
             android:layout_width="wrap_content"
