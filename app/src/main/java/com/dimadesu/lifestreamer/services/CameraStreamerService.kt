@@ -29,6 +29,7 @@ import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import kotlinx.coroutines.*
 import android.app.PendingIntent
@@ -99,6 +100,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // SharedFlow for UI messages (notification start feedback)
     private val _notificationMessages = MutableSharedFlow<String>(replay = 1)
     val notificationMessages = _notificationMessages.asSharedFlow()
+    // Current outgoing video bitrate in bits per second (nullable when unknown)
+    private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
+    val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
     // Cached PendingIntents for notification actions to avoid recreating/cancelling them
     private lateinit var startPendingIntent: PendingIntent
     private lateinit var stopPendingIntent: PendingIntent
@@ -333,6 +337,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         onCloseNotification()?.let { notification ->
             customNotificationUtils.notify(notification)
         }
+        // Clear bitrate flow so UI shows cleared state immediately
+        try { _currentBitrateFlow.tryEmit(null) } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
     }
 
@@ -367,7 +373,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val audio = (streamer as? IWithAudioSource)?.audioInput
                     val isMuted = audio?.isMuted ?: false
 
-                    val notificationKey = listOf(streamer?.isStreamingFlow?.value, isMuted, content).joinToString("|")
+                    // Only read/emit current encoder bitrate when streaming; otherwise clear it
+                    val isStreamingNow = streamer?.isStreamingFlow?.value == true
+                    val videoBitrate = if (isStreamingNow) {
+                        (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
+                    } else null
+                    // Emit bitrate (or null when not streaming) to flow for UI consumers
+                    try { _currentBitrateFlow.emit(videoBitrate) } catch (_: Throwable) {}
+
+                    val bitrateText = videoBitrate?.let { b ->
+                        if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000)
+                    } ?: "-"
+
+                    val notificationKey = listOf(streamer?.isStreamingFlow?.value, isMuted, content, bitrateText).joinToString("|")
 
                     // Skip rebuilding the notification if nothing relevant changed.
                     if (notificationKey == lastNotificationKey) {
@@ -388,7 +406,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         if (appLabel == null || title != appLabel) {
                             setContentTitle(title)
                         }
-                        setContentText(content)
+                        // Append bitrate to content when streaming
+                        val contentWithBitrate = if (streamer?.isStreamingFlow?.value == true) {
+                            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+                            "$content • $vb"
+                        } else content
+                        setContentText(contentWithBitrate)
                         setOngoing(true)
                         // Show Start when not streaming, Stop when streaming
                         if (streamer?.isStreamingFlow?.value == true) {

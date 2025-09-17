@@ -123,6 +123,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _notificationMessage = MutableLiveData<String?>()
     val notificationMessageLiveData: LiveData<String?> get() = _notificationMessage
 
+    // UI-visible current bitrate string
+    private val _bitrateLiveData = MutableLiveData<String?>()
+    val bitrateLiveData: LiveData<String?> get() = _bitrateLiveData
+
     // Streamer access through service (with fallback for backward compatibility)
     val streamer: SingleStreamer?
         get() = serviceStreamer
@@ -325,6 +329,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (binder is CameraStreamerService.CameraStreamerServiceBinder) {
                     streamerService = binder.getService()
                     serviceStreamer = binder.streamer as SingleStreamer
+                    // Collect bitrate flow from service binder if available
+                    try {
+                        val svc = binder.getService()
+                        viewModelScope.launch {
+                            svc.currentBitrateFlow.collect { bits ->
+                                val text = bits?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+                                _bitrateLiveData.postValue(text)
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to collect bitrate from service: ${t.message}")
+                    }
                     streamerFlow.value = serviceStreamer
                     _serviceReady.value = true
                     // Collect notification messages from the service and post to LiveData
@@ -436,6 +452,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect {
                         Log.i(TAG, "Streamer is streaming: $it")
+                    }
+                }
+            }
+        }
+        // Clear bitrate display when streaming stops
+        viewModelScope.launch {
+            serviceReadyFlow.collect { isReady ->
+                if (isReady) {
+                    serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
+                        if (!isStreaming) {
+                            Log.i(TAG, "Streamer stopped - clearing bitrate display")
+                            _bitrateLiveData.postValue(null)
+                        }
                     }
                 }
             }
