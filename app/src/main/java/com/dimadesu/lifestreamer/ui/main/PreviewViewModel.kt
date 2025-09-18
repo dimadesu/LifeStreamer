@@ -122,7 +122,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var serviceConnection: ServiceConnection? = null
     private val _serviceReady = MutableStateFlow(false)
     private val streamerFlow = MutableStateFlow<SingleStreamer?>(null)
-    // UI-visible message from service (notification start results) - removed; service no longer emits messages
 
     // UI-visible current bitrate string
     private val _bitrateLiveData = MutableLiveData<String?>()
@@ -713,8 +712,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-    _isTryingConnectionLiveData.postValue(true)
-    _streamStatus.value = StreamStatus.STARTING
+        _isTryingConnectionLiveData.postValue(true)
+        _streamStatus.value = StreamStatus.STARTING
 
         mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mediaProjection ->
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")

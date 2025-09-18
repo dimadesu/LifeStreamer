@@ -654,9 +654,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } ?: run {
                 Log.w(TAG, "startStreamFromConfiguredEndpoint: streamer not available after waiting")
                 // Update notification to show error so user gets feedback
-                    customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
-                    // Surface critical error for UI dialogs
-                    serviceScope.launch { _criticalErrors.emit("Streamer not available") }
+                customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
+                // Surface critical error for UI dialogs
+                serviceScope.launch { _criticalErrors.emit("Streamer not available") }
                 return
             }
 

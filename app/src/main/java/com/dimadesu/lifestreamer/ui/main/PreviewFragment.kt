@@ -218,9 +218,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Service notification messages previously triggered a sliding panel (Snackbar).
-        // That UI panel has been removed; notification messages are no longer shown here.
-
         // Show current bitrate if available (render nothing when null)
         previewViewModel.bitrateLiveData.observe(viewLifecycleOwner) { text ->
             try {
