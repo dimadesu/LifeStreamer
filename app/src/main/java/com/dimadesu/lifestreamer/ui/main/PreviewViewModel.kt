@@ -393,6 +393,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         viewModelScope.launch {
                             flow.collect { msg -> _notificationMessage.postValue(msg) }
                         }
+                        // Also collect service-provided stream status and map it to ViewModel status
+                        try {
+                            val svcStatusFlow = binder.serviceStreamStatus()
+                            viewModelScope.launch {
+                                svcStatusFlow.collect { svcStatus ->
+                                    try {
+                                        // Map service-side enum to ViewModel StreamStatus
+                                        _streamStatus.value = when (svcStatus) {
+                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STREAMING -> StreamStatus.STREAMING
+                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STARTING -> StreamStatus.STARTING
+                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.CONNECTING -> StreamStatus.CONNECTING
+                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.ERROR -> StreamStatus.ERROR
+                                            else -> StreamStatus.NOT_STREAMING
+                                        }
+                                    } catch (t: Throwable) {
+                                        Log.w(TAG, "Failed to map service status: ${t.message}")
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to collect service status: ${t.message}")
+                        }
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to collect notification messages from service: ${t.message}")
                     }

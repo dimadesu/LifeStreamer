@@ -110,6 +110,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
+    // Service-wide streaming status for UI synchronization (mirrors ViewModel.StreamStatus)
+    enum class ServiceStreamStatus {
+        NOT_STREAMING,
+        STARTING,
+        CONNECTING,
+        STREAMING,
+        ERROR
+    }
+
+    private val _serviceStreamStatus = MutableStateFlow(ServiceStreamStatus.NOT_STREAMING)
+    val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
     // Cached PendingIntents for notification actions to avoid recreating/cancelling them
     private lateinit var startPendingIntent: PendingIntent
     private lateinit var stopPendingIntent: PendingIntent
@@ -387,6 +398,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
         // Clear bitrate flow so UI shows cleared state immediately
         try { _currentBitrateFlow.tryEmit(null) } catch (_: Throwable) {}
+        // Update service-side status
+        try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.NOT_STREAMING) } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
     }
 
@@ -399,12 +412,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             while (isActive) {
                 try {
                     val title = getString(R.string.service_notification_title)
-                    val content = if (streamer?.isStreamingFlow?.value == true) {
-                        // show streaming and uptime (computed from streamingStartTime)
-                        val uptime = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
-                        getString(R.string.service_notification_text_streaming)
-                    } else {
-                        getString(R.string.service_notification_text_stopped)
+                    // Prefer canonical service-side status for notification content
+                    val serviceStatus = _serviceStreamStatus.value
+                    val content = when (serviceStatus) {
+                        ServiceStreamStatus.STREAMING -> {
+                            // show streaming and uptime (computed from streamingStartTime)
+                            val uptime = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
+                            getString(R.string.status_streaming)
+                        }
+                        ServiceStreamStatus.STARTING -> getString(R.string.status_starting)
+                        ServiceStreamStatus.CONNECTING -> getString(R.string.status_connecting)
+                        ServiceStreamStatus.ERROR -> getString(R.string.status_error)
+                        else -> getString(R.string.status_not_streaming)
                     }
 
                     // Build notification with actions using NotificationCompat.Builder directly
@@ -422,7 +441,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val isMuted = audio?.isMuted ?: false
 
                     // Only read/emit current encoder bitrate when streaming; otherwise clear it
-                    val isStreamingNow = streamer?.isStreamingFlow?.value == true
+                    val isStreamingNow = serviceStatus == ServiceStreamStatus.STREAMING
                     val videoBitrate = if (isStreamingNow) {
                         (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
                     } else null
@@ -433,8 +452,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000)
                     } ?: "-"
 
-                    val statusText = if (streamer?.isStreamingFlow?.value == true) getString(R.string.status_streaming) else getString(R.string.status_not_streaming)
-                    val notificationKey = listOf(streamer?.isStreamingFlow?.value, isMuted, content, bitrateText, statusText).joinToString("|")
+                    val statusText = when (serviceStatus) {
+                        ServiceStreamStatus.STREAMING -> getString(R.string.status_streaming)
+                        ServiceStreamStatus.STARTING -> getString(R.string.status_starting)
+                        ServiceStreamStatus.CONNECTING -> getString(R.string.status_connecting)
+                        ServiceStreamStatus.ERROR -> getString(R.string.status_error)
+                        else -> getString(R.string.status_not_streaming)
+                    }
+                    val notificationKey = listOf(serviceStatus.name, isMuted, content, bitrateText, statusText).joinToString("|")
 
                     // Skip rebuilding the notification if nothing relevant changed.
                     if (notificationKey == lastNotificationKey) {
@@ -456,16 +481,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             setContentTitle(title)
                         }
                         // Append bitrate to content when streaming
-                        val contentWithBitrate = if (streamer?.isStreamingFlow?.value == true) {
+                        val contentWithBitrate = if (serviceStatus == ServiceStreamStatus.STREAMING) {
                             val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
                             "$content • $vb"
                         } else content
                         // Append a small status label so the notification reflects current state
-                        val statusLabel = if (streamer?.isStreamingFlow?.value == true) getString(R.string.status_streaming) else getString(R.string.status_not_streaming)
-                        setContentText("$contentWithBitrate • $statusLabel")
+                        val statusLabel = statusText
+                        // Avoid duplicating the status if the content already equals the status (e.g. "Live")
+                        val finalContentText = if (content == statusLabel) {
+                            // contentWithBitrate already includes status for streaming case ("Live • 1.2 Mbps")
+                            contentWithBitrate
+                        } else {
+                            "$contentWithBitrate • $statusLabel"
+                        }
+                        setContentText(finalContentText)
                         setOngoing(true)
                         // Show Start when not streaming, Stop when streaming
-                        if (streamer?.isStreamingFlow?.value == true) {
+                        if (serviceStatus == ServiceStreamStatus.STREAMING) {
                             addAction(notificationIconResourceId, "Stop", stopPending)
                         } else {
                             addAction(notificationIconResourceId, "Start", startPending)
@@ -513,7 +545,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.w(TAG, "Failed to boost process priority", e)
         }
         
-        // Request system to keep service alive
+        // Request system to keep service alive and update service-side status
         try {
             // Use the "open/streaming" notification when starting foreground so the
             // notification immediately reflects that streaming is in progress.
@@ -527,8 +559,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             Log.i(TAG, "Foreground service reinforced with all required service types")
+            try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.STREAMING) } catch (_: Throwable) {}
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
+            try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.ERROR) } catch (_: Throwable) {}
         }
         
         super.onStreamingStart()
@@ -634,22 +668,32 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
 
             Log.i(TAG, "startStreamFromConfiguredEndpoint: opening descriptor $descriptor")
+            // Indicate start sequence
+            try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.STARTING) } catch (_: Throwable) {}
 
             try {
+                // Indicate we're attempting to connect/open
+                try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.CONNECTING) } catch (_: Throwable) {}
                 withTimeout(10000) { // 10s open timeout
                     currentStreamer.open(descriptor)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
+                try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.ERROR) } catch (_: Throwable) {}
                 customNotificationUtils.notify(onErrorNotification(Throwable("Open failed: ${e.message}")) ?: onCreateNotification())
                 sendNotificationStartResult("Open failed: ${e.message}")
                 return
             }
 
             try {
+                // We're ready to start streaming
+                try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.CONNECTING) } catch (_: Throwable) {}
                 currentStreamer.startStream()
+                // On success, move to STREAMING
+                try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.STREAMING) } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
+                try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.ERROR) } catch (_: Throwable) {}
                 customNotificationUtils.notify(onErrorNotification(Throwable("Start failed: ${e.message}")) ?: onCreateNotification())
                 sendNotificationStartResult("Start failed: ${e.message}")
                 return
@@ -700,6 +744,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val streamer: ISingleStreamer get() = this@CameraStreamerService.streamer
         // Expose message flow to bound clients
         fun notificationMessages() = this@CameraStreamerService.notificationMessages
+        // Expose service status flow to bound clients for UI synchronization
+        fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -721,14 +767,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     override fun onOpenNotification(): Notification? {
         return customNotificationUtils.createNotification(
             getString(R.string.service_notification_title),
-            getString(R.string.service_notification_text_streaming),
+            getString(R.string.status_streaming),
             R.drawable.ic_baseline_linked_camera_24,
             isForgroundService = true // Enable enhanced foreground service attributes
         )
     }
 
     override fun onErrorNotification(t: Throwable): Notification? {
-        val errorMessage = getString(R.string.service_notification_text_error, t.message ?: "Unknown error")
+        // Use the canonical status string and append the throwable message for details
+        val errorMessage = "${getString(R.string.status_error)}: ${t.message ?: "Unknown error"}"
         return customNotificationUtils.createNotification(
             getString(R.string.service_notification_title),
             errorMessage,
@@ -739,7 +786,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     override fun onCloseNotification(): Notification? {
         return customNotificationUtils.createNotification(
             getString(R.string.service_notification_title),
-            getString(R.string.service_notification_text_stopped),
+            getString(R.string.status_not_streaming),
             R.drawable.ic_baseline_linked_camera_24
         )
     }

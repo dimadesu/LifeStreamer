@@ -11,9 +11,6 @@
     <!-- Service Notifications -->
     <string name="service_notification_title">LifeStreamer</string>
     <string name="service_notification_text_created">Service created</string>
-    <string name="service_notification_text_streaming">Streaming in progress…</string>
-    <string name="service_notification_text_error">Error: %1$s</string>
-    <string name="service_notification_text_stopped">Not streaming</string>
 
     <!-- Stream status labels -->
     <string name="status_not_streaming">Not streaming</string>
