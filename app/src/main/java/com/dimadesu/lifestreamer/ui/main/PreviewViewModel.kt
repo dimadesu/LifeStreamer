@@ -75,6 +75,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICame
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
+import com.dimadesu.lifestreamer.model.StreamStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
@@ -84,7 +85,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -206,15 +206,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _isTryingConnectionLiveData = MutableLiveData<Boolean>()
     val isTryingConnectionLiveData: LiveData<Boolean> = _isTryingConnectionLiveData
 
-    // Unified stream status for UI and notifications
-    enum class StreamStatus {
-        NOT_STREAMING,
-        STARTING,
-        CONNECTING,
-        STREAMING,
-        ERROR
-    }
-
+    // Unified stream status for UI and notifications (shared enum)
     private val _streamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
 
@@ -374,14 +366,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         viewModelScope.launch {
                             svcStatusFlow.collect { svcStatus ->
                                 try {
-                                    // Map service-side enum to ViewModel StreamStatus
-                                    _streamStatus.value = when (svcStatus) {
-                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STREAMING -> StreamStatus.STREAMING
-                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STARTING -> StreamStatus.STARTING
-                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.CONNECTING -> StreamStatus.CONNECTING
-                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.ERROR -> StreamStatus.ERROR
-                                        else -> StreamStatus.NOT_STREAMING
-                                    }
+                                    // The service now publishes the shared StreamStatus enum; assign directly
+                                    _streamStatus.value = svcStatus
                                 } catch (t: Throwable) {
                                     Log.w(TAG, "Failed to map service status: ${t.message}")
                                 }
