@@ -218,17 +218,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Observe service notification messages and show in UI
-        previewViewModel.notificationMessageLiveData.observe(viewLifecycleOwner) { msg ->
-            if (!msg.isNullOrEmpty()) {
-                view?.let { v ->
-                    Snackbar.make(v, msg, Snackbar.LENGTH_LONG).show()
-                } ?: run {
-                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-
         // Show current bitrate if available (render nothing when null)
         previewViewModel.bitrateLiveData.observe(viewLifecycleOwner) { text ->
             try {
