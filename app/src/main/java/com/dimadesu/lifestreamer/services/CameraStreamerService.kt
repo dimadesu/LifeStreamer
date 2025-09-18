@@ -742,20 +742,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onCreateNotification(): Notification {
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            getString(R.string.service_notification_text_created),
-            R.drawable.ic_baseline_linked_camera_24,
-            isForgroundService = true // Enable enhanced foreground service attributes
+        return buildServiceNotification(
+            content = getString(R.string.service_notification_text_created),
+            isStreaming = false,
+            showStart = true,
+            showStop = false,
+            isForeground = true
         )
     }
 
     override fun onOpenNotification(): Notification? {
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            getString(R.string.status_streaming),
-            R.drawable.ic_baseline_linked_camera_24,
-            isForgroundService = true // Enable enhanced foreground service attributes
+        return buildServiceNotification(
+            content = getString(R.string.status_streaming),
+            isStreaming = true,
+            showStart = false,
+            showStop = true,
+            isForeground = true
         )
     }
 
@@ -766,18 +768,76 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try {
             serviceScope.launch { _criticalErrors.emit(errorMessage) }
         } catch (_: Throwable) {}
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            errorMessage,
-            R.drawable.ic_baseline_linked_camera_24
+        return buildServiceNotification(
+            content = errorMessage,
+            isStreaming = false,
+            showStart = true,
+            showStop = false,
+            isForeground = false
         )
     }
 
     override fun onCloseNotification(): Notification? {
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            getString(R.string.status_not_streaming),
-            R.drawable.ic_baseline_linked_camera_24
+        return buildServiceNotification(
+            content = getString(R.string.status_not_streaming),
+            isStreaming = false,
+            showStart = true,
+            showStop = false,
+            isForeground = false
         )
+    }
+
+    /**
+     * Helper to build a consistent notification with common attributes and actions.
+     */
+    private fun buildServiceNotification(
+        content: String?,
+        isStreaming: Boolean,
+        showStart: Boolean,
+        showStop: Boolean,
+        isForeground: Boolean
+    ): Notification {
+        val openPending = openPendingIntent
+        val startPending = startPendingIntent
+        val stopPending = stopPendingIntent
+        val mutePending = mutePendingIntent
+        val exitPending = exitPendingIntent
+
+        val builder = NotificationCompat.Builder(this, "camera_streaming_channel").apply {
+            setSmallIcon(notificationIconResourceId)
+            val title = try { getString(R.string.service_notification_title) } catch (_: Throwable) { null }
+            val appLabel = try { applicationInfo.loadLabel(packageManager).toString() } catch (_: Throwable) { null }
+            if (title != null && (appLabel == null || title != appLabel)) setContentTitle(title)
+            setContentIntent(openPending)
+            content?.let { setContentText(it) }
+
+            if (isForeground) {
+                priority = NotificationCompat.PRIORITY_HIGH
+                setOngoing(true)
+                setAutoCancel(false)
+                setShowWhen(true)
+                setUsesChronometer(true)
+                setCategory(NotificationCompat.CATEGORY_SERVICE)
+                setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                setLocalOnly(true)
+            } else {
+                setOngoing(false)
+            }
+
+            if (showStop) addAction(notificationIconResourceId, "Stop", stopPending)
+            if (showStart) addAction(notificationIconResourceId, "Start", startPending)
+            // Always show mute/unmute and exit actions so users can control audio and exit
+            val muteLabel = if ((streamer as? IWithAudioSource)?.audioInput?.isMuted == true) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+            addAction(notificationIconResourceId, muteLabel, mutePending)
+            addAction(notificationIconResourceId, getString(R.string.service_notification_action_exit), exitPending)
+
+            setOnlyAlertOnce(true)
+            setSound(null)
+            setVibrate(null)
+            setLights(0, 0, 0)
+            setDefaults(0)
+        }
+
+        return builder.build()
     }
 }
