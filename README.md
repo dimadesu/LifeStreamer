@@ -68,45 +68,50 @@ StreamPack includes 2 great demo apps that can use phone cameras or screen recor
 
 Applies to [LifeStreamer v0.0.8](https://github.com/dimadesu/LifeStreamer/releases/tag/v0.0.8).
 
-- :white_check_mark: Dynamic bitrate - seems to work alright.
+- :white_check_mark: Dynamic bitrate
 
-- :warning: Background mode aka foreground service.
+  Seems to work well. 3 algorithms added. Can be configured in Settings. When "bitrate regulation" is enabled the only bitrate setting that is used is maximum bitrate under "bitrate regulation".
+
+- :warning: Background mode aka foreground service
 
   Can be a bit unstable and stuttery.
 
-  *Workaround:* either don't go into background at all OR stay in foreground as much as possible OR lower max bitrate to ~2000 kbps.
+  **Workaround:** either don't go into background at all OR stay in the foreground as much as possible OR lower maximum bitrate to ~2000 kbps.
 
   I have ideas how to approach fixing it.
 
-- :warning:  RTMP as source. Many things can glitch out. *Workaround* for now is to do only RTMP only in foreground, no switching sources/apps.
+- :warning:  RTMP as source
 
-  Example of what works for RTMP source.
+  Many things can glitch out. **Workaround** is to stream only RTMP source primarily in foreground - no switching between sources and apps.
 
-  I tested streaming from Dji action cam 4 riding bicycle. I found smth that worked.
+  I tested streaming from DJI action cam 4 riding bicycle. I found configuration that works.
 
-  It was very glitchy at first, but then I tried to exclude other things affecting it. Everything bare minimum. One SIM card. No Bond Bunny.
+  At first, it was very glitchy, but then I got rid of anything that's not required. I kept only bare minimum: one SIM card, no Bond Bunny, etc.
 
-  SRT to Belabox Cloud w/ Belabox "bitrate regulator" (all algorithms should work I think). Max bitrate 5000kbps.
+  SRT to Belabox Cloud w/ "Belabox" bitrate regulator (all algorithms should work, I think). Max bitrate 5000kbps (can be set higher).
 
-  Do only minimum steps required to start it.
+  Do only minimum steps required to start the stream:
 
   - Run MediaMTX server.
   - Start action cam stream to server.
   - Kill LifeStreamer app/service.
   - Start LifeStreamer app.
   - Switch to RTMP source.
-  - Start stream.
-  - Keep it open, do not switch apps/sources. Do not go to settings screen. Do not lock the phone or turn screen off.
-  - It should work fine.
+  - Landscape orientation.
+  - Start the stream.
+  - Keep LifeStreamer app open, do not switch apps/sources. Do not go to settings screen. Do not lock the phone or turn the screen off.
+  - This works well on Samsung S20 FE on a usable cell signal (assuming phone is not too hot, so no CPU throttling).
+ 
+## Recommended solutions to most issues
 
-Once you find configuration that works get a solid sample size of that and then you can start slowly adding things to it and see when it breaks.
+**There are many bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
 
-*There are many bugs... General workaround for all of them:* kill LifeStreamer app and service, start fresh.
+Minimise transitions between foreground/background and stay in foreground for better performance with screen on and phone unlocked until background mode is fixed.
 
-Minimise transitions between foreground/background and stay in foreground for better performance with screen on, phone unlocked until I figure it out it.
+Once you find configuration that works get a solid sample size of that and then start carefully adding/changing things and test if it still works as expected.
 
-Some settings can be changed on the fly, but best to kill app/service and restart to make sure they apply.
+Some settings can be changed on the fly. It's best to kill app/service and restart the app after changing settings - this seems to help.
 
-Goal for near future is stabilising everything. Making sure it's solid. It will take some time to polish.
+Goal for near future is stabilising as much as possible and making sure it's solid. It will take some time to polish.
 
-MVP sort of works. There are workarounds for now.
+MVP sort of works. Use recommended workarounds if you encounter issues.
