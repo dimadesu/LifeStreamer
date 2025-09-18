@@ -122,9 +122,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var serviceConnection: ServiceConnection? = null
     private val _serviceReady = MutableStateFlow(false)
     private val streamerFlow = MutableStateFlow<SingleStreamer?>(null)
-    // UI-visible message from service (notification start results)
-    private val _notificationMessage = MutableLiveData<String?>()
-    val notificationMessageLiveData: LiveData<String?> get() = _notificationMessage
+    // UI-visible message from service (notification start results) - removed; service no longer emits messages
 
     // UI-visible current bitrate string
     private val _bitrateLiveData = MutableLiveData<String?>()
@@ -251,23 +249,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
 
-        // Publish user-visible notification messages for status changes
-        viewModelScope.launch {
-            _streamStatus.collect { status ->
-                try {
-                    val text = when (status) {
-                        StreamStatus.NOT_STREAMING -> application.getString(R.string.status_not_streaming)
-                        StreamStatus.STARTING -> application.getString(R.string.status_starting)
-                        StreamStatus.CONNECTING -> application.getString(R.string.status_connecting)
-                        StreamStatus.STREAMING -> application.getString(R.string.status_streaming)
-                        StreamStatus.ERROR -> application.getString(R.string.status_error)
-                    }
-                    _notificationMessage.postValue(text)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Failed to post status notification message: ${t.message}")
-                }
-            }
-        }
+        // Status-to-notification messaging removed; UI no longer shows sliding panel
     }
 
     /**
@@ -387,36 +369,27 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                     streamerFlow.value = serviceStreamer
                     _serviceReady.value = true
-                    // Collect notification messages from the service and post to LiveData
+                    // Collect service-provided stream status and map it to ViewModel status
                     try {
-                        val flow = binder.notificationMessages()
+                        val svcStatusFlow = binder.serviceStreamStatus()
                         viewModelScope.launch {
-                            flow.collect { msg -> _notificationMessage.postValue(msg) }
-                        }
-                        // Also collect service-provided stream status and map it to ViewModel status
-                        try {
-                            val svcStatusFlow = binder.serviceStreamStatus()
-                            viewModelScope.launch {
-                                svcStatusFlow.collect { svcStatus ->
-                                    try {
-                                        // Map service-side enum to ViewModel StreamStatus
-                                        _streamStatus.value = when (svcStatus) {
-                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STREAMING -> StreamStatus.STREAMING
-                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STARTING -> StreamStatus.STARTING
-                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.CONNECTING -> StreamStatus.CONNECTING
-                                            com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.ERROR -> StreamStatus.ERROR
-                                            else -> StreamStatus.NOT_STREAMING
-                                        }
-                                    } catch (t: Throwable) {
-                                        Log.w(TAG, "Failed to map service status: ${t.message}")
+                            svcStatusFlow.collect { svcStatus ->
+                                try {
+                                    // Map service-side enum to ViewModel StreamStatus
+                                    _streamStatus.value = when (svcStatus) {
+                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STREAMING -> StreamStatus.STREAMING
+                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.STARTING -> StreamStatus.STARTING
+                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.CONNECTING -> StreamStatus.CONNECTING
+                                        com.dimadesu.lifestreamer.services.CameraStreamerService.ServiceStreamStatus.ERROR -> StreamStatus.ERROR
+                                        else -> StreamStatus.NOT_STREAMING
                                     }
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, "Failed to map service status: ${t.message}")
                                 }
                             }
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to collect service status: ${t.message}")
                         }
                     } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to collect notification messages from service: ${t.message}")
+                        Log.w(TAG, "Failed to collect service status: ${t.message}")
                     }
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }

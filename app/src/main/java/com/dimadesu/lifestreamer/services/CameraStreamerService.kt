@@ -104,9 +104,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
-    // SharedFlow for UI messages (notification start feedback)
-    private val _notificationMessages = MutableSharedFlow<String>(replay = 1)
-    val notificationMessages = _notificationMessages.asSharedFlow()
+    // SharedFlow for UI messages (notification start feedback) - removed; UI no longer shows sliding panel
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
@@ -731,11 +729,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     private fun sendNotificationStartResult(message: String) {
-        try {
-            serviceScope.launch { _notificationMessages.emit(message) }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to emit notification start result: ${t.message}")
-        }
+        // Suppress emitting messages to `notificationMessages`.
+        // The app UI listens to this flow and shows a sliding panel from the bottom
+        // when a message is emitted. To remove that sliding panel, stop emitting
+        // messages here and keep the existing API surface intact so bound clients
+        // won't break.
+        Log.i(TAG, "sendNotificationStartResult suppressed message: $message")
     }
     
     /**
@@ -744,8 +743,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     inner class CameraStreamerServiceBinder : Binder() {
         fun getService(): CameraStreamerService = this@CameraStreamerService
         val streamer: ISingleStreamer get() = this@CameraStreamerService.streamer
-        // Expose message flow to bound clients
-        fun notificationMessages() = this@CameraStreamerService.notificationMessages
+        // Previously exposed notification messages to bound clients; removed as UI no longer uses it
         // Expose service status flow to bound clients for UI synchronization
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
     }
