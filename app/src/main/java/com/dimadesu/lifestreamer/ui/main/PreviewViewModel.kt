@@ -78,6 +78,9 @@ import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -206,6 +209,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _isTryingConnectionLiveData = MutableLiveData<Boolean>()
     val isTryingConnectionLiveData: LiveData<Boolean> = _isTryingConnectionLiveData
 
+    // Unified stream status for UI and notifications
+    enum class StreamStatus {
+        NOT_STREAMING,
+        STARTING,
+        CONNECTING,
+        STREAMING,
+        ERROR
+    }
+
+    private val _streamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
+    val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
+
+    // Human-friendly status string for UI binding
+    val streamStatusTextLiveData: LiveData<String> = _streamStatus.map { status ->
+        when (status) {
+            StreamStatus.NOT_STREAMING -> application.getString(R.string.status_not_streaming)
+            StreamStatus.STARTING -> application.getString(R.string.status_starting)
+            StreamStatus.CONNECTING -> application.getString(R.string.status_connecting)
+            StreamStatus.STREAMING -> application.getString(R.string.status_streaming)
+            StreamStatus.ERROR -> application.getString(R.string.status_error)
+        }
+    }.asLiveData()
+
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
@@ -221,6 +247,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     initializeStreamerSources()
                 } else {
                     Log.i(TAG, "Service ready: $isReady, serviceStreamer: ${serviceStreamer != null}")
+                }
+            }
+        }
+
+        // Publish user-visible notification messages for status changes
+        viewModelScope.launch {
+            _streamStatus.collect { status ->
+                try {
+                    val text = when (status) {
+                        StreamStatus.NOT_STREAMING -> application.getString(R.string.status_not_streaming)
+                        StreamStatus.STARTING -> application.getString(R.string.status_starting)
+                        StreamStatus.CONNECTING -> application.getString(R.string.status_connecting)
+                        StreamStatus.STREAMING -> application.getString(R.string.status_streaming)
+                        StreamStatus.ERROR -> application.getString(R.string.status_error)
+                    }
+                    _notificationMessage.postValue(text)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to post status notification message: ${t.message}")
                 }
             }
         }
@@ -362,6 +406,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamerService = null
                 streamerFlow.value = null
                 _serviceReady.value = false
+                // Ensure UI status is cleared when the service disconnects
+                _streamStatus.value = StreamStatus.NOT_STREAMING
             }
         }
 
@@ -450,8 +496,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
-                    serviceStreamer?.isStreamingFlow?.collect {
-                        Log.i(TAG, "Streamer is streaming: $it")
+                    serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
+                        Log.i(TAG, "Streamer is streaming: $isStreaming")
+                        // Keep UI status in-sync with actual streamer state. When the streamer
+                        // reports it's streaming, show STREAMING; otherwise revert to NOT_STREAMING.
+                        if (isStreaming) {
+                            _streamStatus.value = StreamStatus.STREAMING
+                        } else {
+                            _streamStatus.value = StreamStatus.NOT_STREAMING
+                        }
                     }
                 }
             }
@@ -572,6 +625,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun startStream() {
         viewModelScope.launch {
+            _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
             val currentStreamer = serviceStreamer
             val serviceReady = _serviceReady.value
@@ -598,6 +652,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
 
             _isTryingConnectionLiveData.postValue(true)
+            _streamStatus.value = StreamStatus.CONNECTING
             try {
                 val descriptor = storageRepository.endpointDescriptorFlow.first()
                 Log.i(TAG, "Starting stream with descriptor: $descriptor")
@@ -605,9 +660,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (!success) {
                     Log.e(TAG, "Stream start failed - startServiceStreaming returned false")
                     _streamerErrorLiveData.postValue("Failed to start stream")
+                    _streamStatus.value = StreamStatus.ERROR
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
+                _streamStatus.value = StreamStatus.STREAMING
 
                 if (descriptor.type.sinkType == MediaSinkType.SRT) {
                     val bitrateRegulatorConfig =
@@ -627,8 +684,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             } catch (e: Throwable) {
                 Log.e(TAG, "startStream failed", e)
                 _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                _streamStatus.value = StreamStatus.ERROR
             } finally {
                 _isTryingConnectionLiveData.postValue(false)
+                if (_streamStatus.value != StreamStatus.STREAMING) {
+                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                }
             }
         }
     }
@@ -642,7 +703,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        _isTryingConnectionLiveData.postValue(true)
+    _isTryingConnectionLiveData.postValue(true)
+    _streamStatus.value = StreamStatus.STARTING
 
         mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mediaProjection ->
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")
@@ -674,6 +736,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
 
                         // Start the actual stream
+                        _streamStatus.value = StreamStatus.CONNECTING
                         startStreamInternal(onSuccess, onError)
                     } catch (e: Exception) {
                         _isTryingConnectionLiveData.postValue(false)
@@ -687,6 +750,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val error = "MediaProjection permission required for streaming"
                 Log.e(TAG, error)
                 onError(error)
+                _streamStatus.value = StreamStatus.ERROR
             }
         }
     }
@@ -702,11 +766,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "startServiceStreaming() completed successfully")
 
                 Log.i(TAG, "Stream setup completed successfully, calling onSuccess()")
+                _streamStatus.value = StreamStatus.STREAMING
                 onSuccess()
             } catch (e: Throwable) {
                 val error = "Stream start failed: ${e.message ?: "Unknown error"}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
                 onError(error)
+                _streamStatus.value = StreamStatus.ERROR
             } finally {
                 Log.i(TAG, "startStreamInternal finally block - setting isTryingConnection to false")
                 _isTryingConnectionLiveData.postValue(false)
@@ -785,6 +851,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamingMediaProjection = null
             } finally {
                 _isTryingConnectionLiveData.postValue(false)
+                // Make sure UI status is cleared after stop routine finishes
+                _streamStatus.value = StreamStatus.NOT_STREAMING
             }
         }
     }

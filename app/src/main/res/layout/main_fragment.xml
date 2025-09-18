@@ -54,17 +54,42 @@
 
         </LinearLayout>
 
-        <!-- Bitrate display -->
-        <TextView
-            android:id="@+id/bitrateText"
+        <!-- Bitrate and stream status on the same line (top-right) -->
+        <LinearLayout
+            android:id="@+id/bitrateStatusLayout"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@android:color/white"
-            android:textSize="12sp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_margin="8dp"
             app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:text="-" />
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <TextView
+                android:id="@+id/bitrateText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:text='@{viewmodel.bitrateLiveData}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp"
+                android:text=" " />
+
+            <TextView
+                android:id="@+id/streamStatusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:text='@{viewmodel.streamStatusTextLiveData}' />
+
+        </LinearLayout>
 
         <ToggleButton
             android:id="@+id/liveButton"

@@ -433,7 +433,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000)
                     } ?: "-"
 
-                    val notificationKey = listOf(streamer?.isStreamingFlow?.value, isMuted, content, bitrateText).joinToString("|")
+                    val statusText = if (streamer?.isStreamingFlow?.value == true) getString(R.string.status_streaming) else getString(R.string.status_not_streaming)
+                    val notificationKey = listOf(streamer?.isStreamingFlow?.value, isMuted, content, bitrateText, statusText).joinToString("|")
 
                     // Skip rebuilding the notification if nothing relevant changed.
                     if (notificationKey == lastNotificationKey) {
@@ -459,7 +460,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
                             "$content • $vb"
                         } else content
-                        setContentText(contentWithBitrate)
+                        // Append a small status label so the notification reflects current state
+                        val statusLabel = if (streamer?.isStreamingFlow?.value == true) getString(R.string.status_streaming) else getString(R.string.status_not_streaming)
+                        setContentText("$contentWithBitrate • $statusLabel")
                         setOngoing(true)
                         // Show Start when not streaming, Stop when streaming
                         if (streamer?.isStreamingFlow?.value == true) {
