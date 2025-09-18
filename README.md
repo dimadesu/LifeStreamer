@@ -63,3 +63,50 @@ Main features StreamPack provides out of the box that make sense to have as a ba
 ### Demo apps
 
 StreamPack includes 2 great demo apps that can use phone cameras or screen recorder for live streaming.
+
+## Project status update 18 September 2025
+
+Applies to [LifeStreamer v0.0.8](https://github.com/dimadesu/LifeStreamer/releases/tag/v0.0.8).
+
+- :white_check_mark: Dynamic bitrate - seems to work alright.
+
+- :warning: Background mode aka foreground service.
+
+  Can be a bit unstable and stuttery.
+
+  *Workaround:* either don't go into background at all OR stay in foreground as much as possible OR lower max bitrate to ~2000 kbps.
+
+  I have ideas how to approach fixing it.
+
+- :warning:  RTMP as source. Many things can glitch out. *Workaround* for now is to do only RTMP only in foreground, no switching sources/apps.
+
+  Example of what works for RTMP source.
+
+  I tested streaming from Dji action cam 4 riding bicycle. I found smth that worked.
+
+  It was very glitchy at first, but then I tried to exclude other things affecting it. Everything bare minimum. One SIM card. No Bond Bunny.
+
+  SRT to Belabox Cloud w/ Belabox "bitrate regulator" (all algorithms should work I think). Max bitrate 5000kbps.
+
+  Do only minimum steps required to start it.
+
+  - Run MediaMTX server.
+  - Start action cam stream to server.
+  - Kill LifeStreamer app/service.
+  - Start LifeStreamer app.
+  - Switch to RTMP source.
+  - Start stream.
+  - Keep it open, do not switch apps/sources. Do not go to settings screen. Do not lock the phone or turn screen off.
+  - It should work fine.
+
+Once you find configuration that works get a solid sample size of that and then you can start slowly adding things to it and see when it breaks.
+
+*There are many bugs... General workaround for all of them:* kill LifeStreamer app and service, start fresh.
+
+Minimise transitions between foreground/background and stay in foreground for better performance with screen on, phone unlocked until I figure it out it.
+
+Some settings can be changed on the fly, but best to kill app/service and restart to make sure they apply.
+
+Goal for near future is stabilising everything. Making sure it's solid. It will take some time to polish.
+
+MVP sort of works. There are workarounds for now.
