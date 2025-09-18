@@ -414,9 +414,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val title = getString(R.string.service_notification_title)
                     // Prefer canonical service-side status for notification content
                     val serviceStatus = _serviceStreamStatus.value
-                    val content = when (serviceStatus) {
+                    // Compute the canonical status label once and reuse it for both
+                    // the notification content and the small status label.
+                    val statusLabel = when (serviceStatus) {
                         ServiceStreamStatus.STREAMING -> {
-                            // show streaming and uptime (computed from streamingStartTime)
+                            // We might want to compute uptime here in the future; keep the
+                            // timestamp available if needed. For now the label is the same.
                             val uptime = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
                             getString(R.string.status_streaming)
                         }
@@ -425,6 +428,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         ServiceStreamStatus.ERROR -> getString(R.string.status_error)
                         else -> getString(R.string.status_not_streaming)
                     }
+
+                    // Use the same label as the base content for notifications to avoid
+                    // duplicated lookup and ensure canonical text across UI + notifications.
+                    val content = statusLabel
 
                     // Build notification with actions using NotificationCompat.Builder directly
                     // Use explicit service intent for Start so the service is started if not running
@@ -452,13 +459,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000)
                     } ?: "-"
 
-                    val statusText = when (serviceStatus) {
-                        ServiceStreamStatus.STREAMING -> getString(R.string.status_streaming)
-                        ServiceStreamStatus.STARTING -> getString(R.string.status_starting)
-                        ServiceStreamStatus.CONNECTING -> getString(R.string.status_connecting)
-                        ServiceStreamStatus.ERROR -> getString(R.string.status_error)
-                        else -> getString(R.string.status_not_streaming)
-                    }
+                    // Reuse the already computed statusLabel for the notification key
+                    val statusText = statusLabel
                     val notificationKey = listOf(serviceStatus.name, isMuted, content, bitrateText, statusText).joinToString("|")
 
                     // Skip rebuilding the notification if nothing relevant changed.
