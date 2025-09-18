@@ -388,9 +388,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                             }
                         }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to collect service status: ${t.message}")
-                    }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to collect service status: ${t.message}")
+                        }
+                        // Collect critical errors from service and show dialogs
+                        try {
+                            val errFlow = binder.criticalErrors()
+                            viewModelScope.launch {
+                                errFlow.collect { err ->
+                                    try {
+                                        _streamerErrorLiveData.postValue(err)
+                                    } catch (t: Throwable) {
+                                        Log.w(TAG, "Failed to post critical error: ${t.message}")
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to collect critical errors from service: ${t.message}")
+                        }
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }
             }

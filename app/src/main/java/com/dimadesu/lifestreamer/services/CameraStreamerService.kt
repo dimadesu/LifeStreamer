@@ -104,7 +104,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
-    // SharedFlow for UI messages (notification start feedback) - removed; UI no longer shows sliding panel
+    // Critical error flow for the UI to show dialogs (non-transient errors)
+    // Use a replay of 0 so only fresh errors are observed by listeners
+    private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0)
+    val criticalErrors = _criticalErrors.asSharedFlow()
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
@@ -651,9 +654,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } ?: run {
                 Log.w(TAG, "startStreamFromConfiguredEndpoint: streamer not available after waiting")
                 // Update notification to show error so user gets feedback
-                customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
-                // Broadcast result for UI
-                sendNotificationStartResult("Streamer not available")
+                    customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
+                    // Surface critical error for UI dialogs
+                    serviceScope.launch { _criticalErrors.emit("Streamer not available") }
                 return
             }
 
@@ -663,7 +666,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read endpoint descriptor from storage: ${e.message}")
                 customNotificationUtils.notify(onErrorNotification(Throwable("No endpoint configured")) ?: onCreateNotification())
-                sendNotificationStartResult("No endpoint configured")
                 return
             }
 
@@ -681,7 +683,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
                 try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.ERROR) } catch (_: Throwable) {}
                 customNotificationUtils.notify(onErrorNotification(Throwable("Open failed: ${e.message}")) ?: onCreateNotification())
-                sendNotificationStartResult("Open failed: ${e.message}")
+                serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
                 return
             }
 
@@ -695,7 +697,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
                 try { _serviceStreamStatus.tryEmit(ServiceStreamStatus.ERROR) } catch (_: Throwable) {}
                 customNotificationUtils.notify(onErrorNotification(Throwable("Start failed: ${e.message}")) ?: onCreateNotification())
-                sendNotificationStartResult("Start failed: ${e.message}")
+                serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
                 return
             }
 
@@ -722,19 +724,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
 
             Log.i(TAG, "startStreamFromConfiguredEndpoint: stream started successfully")
-            sendNotificationStartResult("Stream started")
+            // Notify UI of success via notification / status flow; no dialog needed
+            // Keep API surface unchanged for future use
         } catch (e: Exception) {
             Log.w(TAG, "startStreamFromConfiguredEndpoint error: ${e.message}")
         }
-    }
-
-    private fun sendNotificationStartResult(message: String) {
-        // Suppress emitting messages to `notificationMessages`.
-        // The app UI listens to this flow and shows a sliding panel from the bottom
-        // when a message is emitted. To remove that sliding panel, stop emitting
-        // messages here and keep the existing API surface intact so bound clients
-        // won't break.
-        Log.i(TAG, "sendNotificationStartResult suppressed message: $message")
     }
     
     /**
@@ -743,7 +737,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     inner class CameraStreamerServiceBinder : Binder() {
         fun getService(): CameraStreamerService = this@CameraStreamerService
         val streamer: ISingleStreamer get() = this@CameraStreamerService.streamer
-        // Previously exposed notification messages to bound clients; removed as UI no longer uses it
+        // Expose critical error flow to bound clients so the UI can show dialogs
+        fun criticalErrors() = this@CameraStreamerService.criticalErrors
         // Expose service status flow to bound clients for UI synchronization
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
     }
@@ -776,6 +771,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     override fun onErrorNotification(t: Throwable): Notification? {
         // Use the canonical status string and append the throwable message for details
         val errorMessage = "${getString(R.string.status_error)}: ${t.message ?: "Unknown error"}"
+        // Surface critical error to UI if someone is listening
+        try {
+            serviceScope.launch { _criticalErrors.emit(errorMessage) }
+        } catch (_: Throwable) {}
         return customNotificationUtils.createNotification(
             getString(R.string.service_notification_title),
             errorMessage,
