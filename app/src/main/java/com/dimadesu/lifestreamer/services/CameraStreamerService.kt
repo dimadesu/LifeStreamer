@@ -137,7 +137,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // by default. We want to keep the change local to this app and ensure the
         // camera service only requests CAMERA|MICROPHONE types.
 
-        Log.d(TAG, "onCreate: entering")
+        // onCreate: perform lightweight initialization and promote service to foreground early
 
         // Initialize power manager and other services
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -161,7 +161,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // and fallbacks so we always call startForeground quickly after
         // startForegroundService() to avoid ANRs.
         try {
-            Log.d(TAG, "onCreate: attempting startForeground with full attributes")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceCompat.startForeground(
                     this,
@@ -173,12 +172,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } else {
                 startForeground(1001, onCreateNotification())
             }
-            Log.d(TAG, "onCreate: startForeground succeeded (full)")
         } catch (t: Throwable) {
-            Log.w(TAG, "onCreate: full startForeground failed: ${t.message}")
             // Fallback: try a minimal startForeground() using a simple notification
             try {
-                Log.d(TAG, "onCreate: attempting fallback minimal startForeground")
                 val minimal = NotificationCompat.Builder(this, channelId)
                     .setSmallIcon(notificationIconResourceId)
                     .setContentTitle(getString(R.string.service_notification_title))
@@ -187,9 +183,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     .setSound(null)
                     .build()
                 startForeground(1001, minimal)
-                Log.d(TAG, "onCreate: startForeground succeeded (fallback)")
-            } catch (t2: Throwable) {
-                Log.e(TAG, "onCreate: fallback startForeground failed: ${t2.message}")
+            } catch (_: Throwable) {
+                // If fallback fails, there's not much we can do; service will log exceptions
             }
         }
 
@@ -427,7 +422,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // If we're suppressing updater (to keep a transient notification visible)
                     val now = System.currentTimeMillis()
                     if (suppressUpdaterUntil > now) {
-                        Log.d(TAG, "startStatusUpdater: suppression active until=${suppressUpdaterUntil}, now=$now - skipping update")
                         delay(500)
                         continue
                     }
@@ -482,17 +476,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Build notification and key using canonical helper so it's consistent
                     val (notification, notificationKey) = buildNotificationForStatus(serviceStatus)
 
-                    // Diagnostic logging: show decision and keys
-                    Log.d(TAG, "startStatusUpdater: effectiveStatus=$serviceStatus, notificationKey=$notificationKey, lastNotificationKey=$lastNotificationKey")
 
                     // Skip rebuilding the notification if nothing relevant changed.
                     if (notificationKey == lastNotificationKey) {
-                        Log.d(TAG, "startStatusUpdater: key unchanged, not reposting")
                         delay(2000)
                         continue
                     }
 
-                    Log.d(TAG, "startStatusUpdater: posting notification with key=$notificationKey")
                     customNotificationUtils.notify(notification)
                     lastNotificationKey = notificationKey
                 } catch (e: Exception) {
@@ -573,9 +563,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         )
 
         val key = listOf(status.name, isCurrentlyMuted(), content, bitrateText, statusLabel).joinToString("|")
-        try {
-            Log.d(TAG, "buildNotificationForStatus: status=${status.name}, isMuted=${isCurrentlyMuted()}, content='$content', bitrate='$bitrateText', key=$key")
-        } catch (_: Throwable) {}
         return Pair(notification, key)
     }
 
@@ -867,7 +854,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * refreshes the notification to reflect the new label.
      */
     fun setMuted(isMuted: Boolean) {
-        Log.d(TAG, "Service.setMuted called: requested=$isMuted, currentMuted=${isCurrentlyMuted()}, lastKeyBefore=$lastNotificationKey")
         serviceScope.launch(Dispatchers.Default) {
             try {
                 val audio = (streamer as? IWithAudioSource)?.audioInput
@@ -880,7 +866,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
 
                 // Rebuild and post canonical notification for the current effective status
-                try { Log.d(TAG, "Service.setMuted: about to refresh canonical notification for current state, requested=$isMuted") } catch (_: Throwable) {}
                 // notifyForCurrentState will compute the effective status and update lastNotificationKey
                 notifyForCurrentState()
             } catch (e: Exception) {

@@ -127,8 +127,6 @@ class NotificationUtils(
         content: String? = null,
         @DrawableRes iconResourceId: Int
     ): Notification {
-        // Diagnostic: log transient notification creation
-        try { android.util.Log.d("CameraStreamerService", "NotificationUtils.createTransientNotification: title='${title}', content='${content}'") } catch (_: Throwable) {}
         val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
             // Use the provided content as the primary notification title so the

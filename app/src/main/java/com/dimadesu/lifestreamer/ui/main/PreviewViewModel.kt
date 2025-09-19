@@ -874,13 +874,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     fun setMute(isMuted: Boolean) {
         // Perform mute operations off the main thread to avoid blocking UI.
         viewModelScope.launch(Dispatchers.Default) {
-            Log.d(TAG, "setMute called: isMuted=$isMuted, streamerService=${streamerService != null}")
             // Prefer calling the bound service to centralize mutation and notification updates
             val svc = streamerService
             if (svc != null) {
                 try {
                     svc.setMuted(isMuted)
-                    Log.d(TAG, "setMute: invoked service.setMuted($isMuted)")
                     return@launch
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to set mute via service: ${t.message}")
