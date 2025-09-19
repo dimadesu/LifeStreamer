@@ -167,8 +167,9 @@ class RTMPVideoSource (
                     }
                     playerListener = null
                 }
-                // Release the player
-                exoPlayer.release()
+                // Do NOT release the shared ExoPlayer here - caller owns the player.
+                // Only clear surfaces and listeners so the shared player can be reused.
+                // exoPlayer.release()
             } catch (e: Exception) {
                 Log.e(TAG, "Error releasing ExoPlayer: ${e.message}", e)
             }
