@@ -436,8 +436,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val openPending = openPendingIntent
 
                     // Determine mute/unmute state before building the notification key
-                    val audio = (streamer as? IWithAudioSource)?.audioInput
-                    val isMuted = audio?.isMuted ?: false
+                    val isMuted = isCurrentlyMuted()
 
                     // Only read/emit current encoder bitrate when streaming; otherwise clear it
                     val isStreamingNow = serviceStatus == StreamStatus.STREAMING
@@ -498,9 +497,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         }
 
                         // Determine mute/unmute label based on current audio state
-                        val audio = (streamer as? IWithAudioSource)?.audioInput
-                        val isMuted = audio?.isMuted ?: false
-                        val muteLabel = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+                        val muteLabel = currentMuteLabel()
                         addAction(notificationIconResourceId, muteLabel, mutePending)
                         // Exit button to stop service and close the app
                         addAction(notificationIconResourceId, getString(R.string.service_notification_action_exit), exitPending)
@@ -741,6 +738,20 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         return customBinder
     }
 
+    // Helper to read current mute state from the streamer audio source
+    private fun isCurrentlyMuted(): Boolean {
+        return try {
+            (streamer as? IWithAudioSource)?.audioInput?.isMuted ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    // Helper to compute the localized mute/unmute label based on current audio state
+    private fun currentMuteLabel(): String {
+        return if (isCurrentlyMuted()) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+    }
+
     override fun onCreateNotification(): Notification {
         return customNotificationUtils.createServiceNotification(
             title = getString(R.string.service_notification_title),
@@ -751,7 +762,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             showStop = false,
             startPending = startPendingIntent,
             stopPending = stopPendingIntent,
-            muteLabel = getString(R.string.service_notification_action_mute),
+            muteLabel = currentMuteLabel(),
             mutePending = mutePendingIntent,
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
@@ -759,8 +770,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onOpenNotification(): Notification? {
-        val isMuted = (streamer as? IWithAudioSource)?.audioInput?.isMuted ?: false
-        val muteLabel = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
         return customNotificationUtils.createServiceNotification(
             title = getString(R.string.service_notification_title),
             content = getString(R.string.status_streaming),
@@ -770,7 +779,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             showStop = true,
             startPending = startPendingIntent,
             stopPending = stopPendingIntent,
-            muteLabel = muteLabel,
+            muteLabel = currentMuteLabel(),
             mutePending = mutePendingIntent,
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
@@ -793,7 +802,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             showStop = false,
             startPending = startPendingIntent,
             stopPending = stopPendingIntent,
-            muteLabel = getString(R.string.service_notification_action_mute),
+            muteLabel = currentMuteLabel(),
             mutePending = mutePendingIntent,
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
@@ -810,12 +819,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             showStop = false,
             startPending = startPendingIntent,
             stopPending = stopPendingIntent,
-            muteLabel = getString(R.string.service_notification_action_mute),
+            muteLabel = currentMuteLabel(),
             mutePending = mutePendingIntent,
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
         )
     }
-
-    // Notification creation delegated to NotificationUtils.createServiceNotification
 }
