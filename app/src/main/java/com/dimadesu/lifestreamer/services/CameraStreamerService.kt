@@ -166,6 +166,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 )
             } else {
+                // For older versions, start foreground normally using Service API
+                // (the three-arg ServiceCompat overload resolution can be ambiguous
+                // with newer API shims). We're in a Service subclass so call directly.
                 startForeground(1001, onCreateNotification())
             }
         } catch (t: Throwable) {
