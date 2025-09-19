@@ -397,6 +397,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         releaseWakeLock()
         // clear start time
         streamingStartTime = null
+        // Clear uptime so UI hides the uptime display immediately
+        try { _uptimeFlow.tryEmit(null) } catch (_: Throwable) {}
         
         // Override the base class behavior to NOT stop the service when streaming stops
         // This allows the service to remain running for quick restart of streaming
@@ -818,6 +820,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
         // Expose isMuted flow so UI can reflect mute state changes performed externally
         fun isMutedFlow() = this@CameraStreamerService.isMutedFlow
+        // Expose uptime flow so UI can display runtime while streaming
+        fun uptimeFlow() = this@CameraStreamerService.uptimeFlow
         // Allow bound clients to set mute centrally in the service
         fun setMuted(isMuted: Boolean) {
             try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}

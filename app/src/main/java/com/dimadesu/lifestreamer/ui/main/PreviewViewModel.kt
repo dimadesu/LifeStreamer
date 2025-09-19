@@ -127,6 +127,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // UI-visible current bitrate string
     private val _bitrateLiveData = MutableLiveData<String?>()
     val bitrateLiveData: LiveData<String?> get() = _bitrateLiveData
+    // Uptime string exposed by the service (e.g., "00:01:23")
+    private val _uptimeLiveData = MutableLiveData<String?>(null)
+    val uptimeLiveData: LiveData<String?> get() = _uptimeLiveData
     // Expose current mute state to the UI
     private val _isMutedLiveData = MutableLiveData<Boolean>(false)
     val isMutedLiveData: LiveData<Boolean> get() = _isMutedLiveData
@@ -410,6 +413,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         } catch (t: Throwable) {
                             Log.w(TAG, "Failed to collect isMuted flow from service: ${t.message}")
                         }
+                            // Collect uptime flow to display runtime in UI
+                            try {
+                                val uptimeFlow = binder.uptimeFlow()
+                                viewModelScope.launch {
+                                    uptimeFlow.collect { uptime ->
+                                        try {
+                                            _uptimeLiveData.postValue(uptime)
+                                        } catch (t: Throwable) {
+                                            Log.w(TAG, "Failed to post uptime state: ${t.message}")
+                                        }
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to collect uptime flow from service: ${t.message}")
+                            }
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }
             }
