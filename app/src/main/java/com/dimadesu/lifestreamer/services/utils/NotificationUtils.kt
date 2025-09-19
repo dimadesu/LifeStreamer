@@ -195,13 +195,25 @@ class NotificationUtils(
     ): Notification {
             val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
-            // Ensure the notification's primary title reflects the current
-            // content/status so the system doesn't reuse a stale header.
-            val primary = content ?: title
-            primary?.let { setContentTitle(it) }
+            // Avoid duplicating the app label in the expanded view. If the
+            // provided title differs from the application label, use it as the
+            // contentTitle. Otherwise omit the contentTitle (the system header
+            // will already show the app name) and put the status/bitrate into
+            // contentText.
+            val appLabel = try { service.applicationInfo.loadLabel(service.packageManager).toString() } catch (_: Throwable) { null }
+            if (appLabel != null && title != null && title == appLabel) {
+                // App label equals provided title: avoid setting contentTitle to
+                // prevent duplication; show status/content in the secondary line.
+                content?.let { setContentText(it) }
+            } else {
+                // Either no app label was found or the provided title differs;
+                // use provided title as the contentTitle and put status in
+                // contentText when present.
+                val primary = title ?: content
+                primary?.let { setContentTitle(it) }
+                if (content != null && content != primary) setContentText(content)
+            }
             setContentIntent(openPending)
-            // Only set a secondary line if it differs from the primary title
-            if (content != null && content != primary) setContentText(content)
 
             if (isForeground) {
                 priority = NotificationCompat.PRIORITY_HIGH
