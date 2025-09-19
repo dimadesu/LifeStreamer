@@ -103,6 +103,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
+    // When non-zero, the periodic updater will skip posting notifications until this
+    // epoch millis to avoid overwriting transient notifications (e.g., mute toast)
+    @Volatile
+    private var suppressUpdaterUntil: Long = 0L
     // Critical error flow for the UI to show dialogs (non-transient errors)
     // Use a replay of 0 so only fresh errors are observed by listeners
     private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0)
@@ -299,17 +303,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Toggle mute on streamer if available - run off the main thread
                     serviceScope.launch(Dispatchers.Default) {
                         try {
-                            val audio = (streamer as? IWithAudioSource)?.audioInput
-                            val current = audio?.isMuted ?: false
-                            if (audio != null) {
-                                audio.isMuted = !current
-                                try { _isMutedFlow.tryEmit(audio.isMuted) } catch (_: Throwable) {}
-                            }
-                            // Rebuild notification in background, post notify on Main
-                            val notification = onOpenNotification() ?: onCreateNotification()
-                            withContext(Dispatchers.Main) {
-                                customNotificationUtils.notify(notification)
-                            }
+                            // Delegate mute toggle to the centralized service API to avoid races
+                            val current = isCurrentlyMuted()
+                            setMuted(!current)
                         } catch (e: Exception) {
                             Log.w(TAG, "Toggle mute failed: ${e.message}")
                         }
@@ -358,15 +354,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification receiver: TOGGLE_MUTE")
                     serviceScope.launch(Dispatchers.Default) {
                         try {
-                            val audio = (streamer as? IWithAudioSource)?.audioInput
-                            val current = audio?.isMuted ?: false
-                            if (audio != null) {
-                                audio.isMuted = !current
-                                try { _isMutedFlow.tryEmit(audio.isMuted) } catch (_: Throwable) {}
-                            }
-                            // Refresh notification to reflect mute state
-                            val notification = onOpenNotification() ?: onCreateNotification()
-                            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
+                            // Delegate mute toggle to centralized service API to avoid races
+                            val current = isCurrentlyMuted()
+                            setMuted(!current)
                         } catch (e: Exception) {
                             Log.w(TAG, "Toggle mute from receiver failed: ${e.message}")
                         }
@@ -419,9 +409,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         statusUpdaterJob = serviceScope.launch {
             while (isActive) {
                 try {
+                    // If we're suppressing updater (to keep a transient notification visible)
+                    val now = System.currentTimeMillis()
+                    if (suppressUpdaterUntil > now) {
+                        Log.d(TAG, "startStatusUpdater: suppression active until=${suppressUpdaterUntil}, now=$now - skipping update")
+                        delay(500)
+                        continue
+                    }
                     val title = getString(R.string.service_notification_title)
-                    // Prefer canonical service-side status for notification content
-                    val serviceStatus = _serviceStreamStatus.value
+                    // Prefer the streamer's immediate state when possible to avoid stale service status
+                    val serviceStatus = getEffectiveServiceStatus()
                     // Compute the canonical status label once and reuse it for both
                     // the notification content and the small status label.
                     val statusLabel = when (serviceStatus) {
@@ -467,42 +464,20 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     } ?: "-"
 
                     // Reuse the already computed statusLabel for the notification key
-                    val statusText = statusLabel
-                    val notificationKey = listOf(serviceStatus.name, isMuted, content, bitrateText, statusText).joinToString("|")
+                    // Build notification and key using canonical helper so it's consistent
+                    val (notification, notificationKey) = buildNotificationForStatus(serviceStatus)
+
+                    // Diagnostic logging: show decision and keys
+                    Log.d(TAG, "startStatusUpdater: effectiveStatus=$serviceStatus, notificationKey=$notificationKey, lastNotificationKey=$lastNotificationKey")
 
                     // Skip rebuilding the notification if nothing relevant changed.
                     if (notificationKey == lastNotificationKey) {
-                        // No visual change needed
+                        Log.d(TAG, "startStatusUpdater: key unchanged, not reposting")
                         delay(2000)
                         continue
                     }
 
-                    // Build the content text and status parts (append bitrate when streaming)
-                    val contentWithBitrate = if (serviceStatus == StreamStatus.STREAMING) {
-                        val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
-                        "$content • $vb"
-                    } else content
-                    val finalContentText = if (content == statusText) contentWithBitrate else "$contentWithBitrate • $statusText"
-
-                    val muteLabel = currentMuteLabel()
-                    val showStart = serviceStatus != StreamStatus.STREAMING
-                    val showStop = serviceStatus == StreamStatus.STREAMING
-
-                    val notification = customNotificationUtils.createServiceNotification(
-                        title = title,
-                        content = finalContentText,
-                        iconResourceId = notificationIconResourceId,
-                        isForeground = true,
-                        showStart = showStart,
-                        showStop = showStop,
-                        startPending = startPending,
-                        stopPending = stopPending,
-                        muteLabel = muteLabel,
-                        mutePending = mutePending,
-                        exitPending = exitPending,
-                        openPending = openPending
-                    )
-
+                    Log.d(TAG, "startStatusUpdater: posting notification with key=$notificationKey")
                     customNotificationUtils.notify(notification)
                     lastNotificationKey = notificationKey
                 } catch (e: Exception) {
@@ -518,6 +493,123 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private fun stopStatusUpdater() {
         statusUpdaterJob?.cancel()
         statusUpdaterJob = null
+    }
+
+    // Post a notification that is appropriate for the current service status
+    private suspend fun notifyForCurrentState() {
+        try {
+            val status = getEffectiveServiceStatus()
+            val (notification, key) = buildNotificationForStatus(status)
+            // Update cached key so the periodic updater won't overwrite immediately
+            lastNotificationKey = key
+            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
+        } catch (e: Exception) {
+            Log.w(TAG, "notifyForCurrentState failed: ${e.message}")
+        }
+    }
+
+    // Build the notification and its key in the same way as the status updater
+    private fun buildNotificationForStatus(status: StreamStatus): Pair<Notification, String> {
+        val title = getString(R.string.service_notification_title)
+
+        // Compute canonical status label
+        val statusLabel = when (status) {
+            StreamStatus.STREAMING -> getString(R.string.status_streaming)
+            StreamStatus.STARTING -> getString(R.string.status_starting)
+            StreamStatus.CONNECTING -> getString(R.string.status_connecting)
+            StreamStatus.ERROR -> getString(R.string.status_error)
+            else -> getString(R.string.status_not_streaming)
+        }
+
+        val content = statusLabel
+
+        // Determine mute/unmute label and pending intents
+        val muteLabel = currentMuteLabel()
+        val showStart = status != StreamStatus.STREAMING
+        val showStop = status == StreamStatus.STREAMING
+
+        // Only read bitrate when streaming
+        val videoBitrate = if (status == StreamStatus.STREAMING) {
+            (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
+        } else null
+
+        val bitrateText = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+
+        val contentWithBitrate = if (status == StreamStatus.STREAMING) {
+            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+            "$content • $vb"
+        } else content
+
+        val finalContentText = if (content == statusLabel) contentWithBitrate else "$contentWithBitrate • $statusLabel"
+
+        val notification = customNotificationUtils.createServiceNotification(
+            title = title,
+            content = finalContentText,
+            iconResourceId = notificationIconResourceId,
+            isForeground = status == StreamStatus.STREAMING,
+            showStart = showStart,
+            showStop = showStop,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = muteLabel,
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
+        )
+
+        val key = listOf(status.name, isCurrentlyMuted(), content, bitrateText, statusLabel).joinToString("|")
+        try {
+            Log.d(TAG, "buildNotificationForStatus: status=${status.name}, isMuted=${isCurrentlyMuted()}, content='$content', bitrate='$bitrateText', key=$key")
+        } catch (_: Throwable) {}
+        return Pair(notification, key)
+    }
+
+    // Decide the effective status using streamer immediate state when available,
+    // otherwise fall back to the service-level status. Default to NOT_STREAMING
+    // if neither is available.
+    private fun getEffectiveServiceStatus(): StreamStatus {
+        return try {
+            val streamerInstance = streamer
+            if (streamerInstance != null) {
+                val streamingNow = streamerInstance.isStreamingFlow.value
+                if (streamingNow) StreamStatus.STREAMING else StreamStatus.NOT_STREAMING
+            } else {
+                // Conservative: if streamer is null but service still reports STREAMING,
+                // treat as NOT_STREAMING to avoid flashing 'live' when no active streamer.
+                val svc = _serviceStreamStatus.value
+                if (svc == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svc
+            }
+        } catch (_: Throwable) {
+            _serviceStreamStatus.value
+        }
+    }
+
+    // Post a short-lived notification showing just the mute/unmute state so the
+    // user gets immediate feedback without risking the periodic updater flashing
+    // stale stream labels.
+    private suspend fun postTransientMuteNotification(isMuted: Boolean) {
+        try {
+            val label = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+            val title = getString(R.string.service_notification_title)
+            val content = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+            // Diagnostic logging: emit current service/streamer state and suppression window
+            val svcStatus = try { _serviceStreamStatus.value } catch (_: Throwable) { null }
+            val streamerState = try { streamer?.isStreamingFlow?.value } catch (_: Throwable) { null }
+            Log.d(TAG, "Posting transient mute notification: $label; svcStatus=$svcStatus, streamerState=$streamerState, suppressUntil=${suppressUpdaterUntil}, lastNotificationKey=$lastNotificationKey")
+            // Suppress the periodic updater briefly so it doesn't overwrite this
+            // transient notification with stale labels.
+            suppressUpdaterUntil = System.currentTimeMillis() + 1200L
+            val transient = customNotificationUtils.createTransientNotification(
+                title = title,
+                content = content,
+                iconResourceId = notificationIconResourceId
+            )
+            // Also log transient payload for diagnosis
+            try { Log.d(TAG, "Transient notification built (hash=${transient.hashCode()}), content='$content', title='$title'") } catch (_: Throwable) {}
+            withContext(Dispatchers.Main) { customNotificationUtils.notify(transient) }
+        } catch (e: Exception) {
+            Log.w(TAG, "postTransientMuteNotification failed: ${e.message}")
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
@@ -732,7 +824,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Expose isMuted flow so UI can reflect mute state changes performed externally
         fun isMutedFlow() = this@CameraStreamerService.isMutedFlow
         // Allow bound clients to set mute centrally in the service
-        fun setMuted(isMuted: Boolean) = this@CameraStreamerService.setMuted(isMuted)
+        fun setMuted(isMuted: Boolean) {
+            try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}
+            this@CameraStreamerService.setMuted(isMuted)
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -757,6 +852,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * refreshes the notification to reflect the new label.
      */
     fun setMuted(isMuted: Boolean) {
+        Log.d(TAG, "Service.setMuted called: requested=$isMuted, currentMuted=${isCurrentlyMuted()}, lastKeyBefore=$lastNotificationKey")
         serviceScope.launch(Dispatchers.Default) {
             try {
                 val audio = (streamer as? IWithAudioSource)?.audioInput
@@ -768,11 +864,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     try { _isMutedFlow.tryEmit(isMuted) } catch (_: Throwable) {}
                 }
 
-                // Rebuild and post notification on main
-                val notification = onOpenNotification() ?: onCreateNotification()
-                withContext(Dispatchers.Main) {
-                    customNotificationUtils.notify(notification)
-                }
+                // Rebuild and post canonical notification for the current effective status
+                try { Log.d(TAG, "Service.setMuted: about to refresh canonical notification for current state, requested=$isMuted") } catch (_: Throwable) {}
+                // notifyForCurrentState will compute the effective status and update lastNotificationKey
+                notifyForCurrentState()
             } catch (e: Exception) {
                 Log.w(TAG, "setMuted failed: ${e.message}")
             }

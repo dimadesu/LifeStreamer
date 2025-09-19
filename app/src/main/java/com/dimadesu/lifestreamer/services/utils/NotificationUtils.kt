@@ -26,7 +26,6 @@ import android.os.Build
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import com.dimadesu.lifestreamer.ui.main.MainActivity
 
 /**
@@ -43,28 +42,8 @@ class NotificationUtils(
         service.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
 
-    fun cancel() {
-        notificationManager.cancel(notificationId)
-    }
-
     fun notify(notification: Notification) {
         notificationManager.notify(notificationId, notification)
-    }
-
-    fun createNotification(
-        @StringRes titleResourceId: Int,
-        @StringRes contentResourceId: Int,
-        @DrawableRes iconResourceId: Int
-    ): Notification {
-        return createNotification(
-            service.getString(titleResourceId),
-            if (contentResourceId != 0) {
-                service.getString(contentResourceId)
-            } else {
-                null
-            },
-            iconResourceId
-        )
     }
 
     fun createNotification(
@@ -136,6 +115,33 @@ class NotificationUtils(
             setDefaults(0)
         }
 
+        return builder.build()
+    }
+
+    /**
+     * Create a small transient notification that always sets the content title
+     * to ensure it replaces previous notification header content.
+     */
+    fun createTransientNotification(
+        title: String,
+        content: String? = null,
+        @DrawableRes iconResourceId: Int
+    ): Notification {
+        // Diagnostic: log transient notification creation
+        try { android.util.Log.d("CameraStreamerService", "NotificationUtils.createTransientNotification: title='${title}', content='${content}'") } catch (_: Throwable) {}
+        val builder = NotificationCompat.Builder(service, channelId).apply {
+            setSmallIcon(iconResourceId)
+            // Force the content title to avoid residual header text from previous notifications
+            setContentTitle(title)
+            content?.let { setContentText(it) }
+            setOnlyAlertOnce(true)
+            setSound(null)
+            setVibrate(null)
+            setLights(0, 0, 0)
+            setDefaults(0)
+            setAutoCancel(true)
+            setOngoing(false)
+        }
         return builder.build()
     }
 
