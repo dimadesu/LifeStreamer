@@ -110,6 +110,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
+    // Current audio mute state exposed as a StateFlow for UI synchronization
+    private val _isMutedFlow = MutableStateFlow(false)
+    val isMutedFlow = _isMutedFlow.asStateFlow()
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -298,7 +301,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         try {
                             val audio = (streamer as? IWithAudioSource)?.audioInput
                             val current = audio?.isMuted ?: false
-                            if (audio != null) audio.isMuted = !current
+                            if (audio != null) {
+                                audio.isMuted = !current
+                                try { _isMutedFlow.tryEmit(audio.isMuted) } catch (_: Throwable) {}
+                            }
                             // Rebuild notification in background, post notify on Main
                             val notification = onOpenNotification() ?: onCreateNotification()
                             withContext(Dispatchers.Main) {
@@ -354,7 +360,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         try {
                             val audio = (streamer as? IWithAudioSource)?.audioInput
                             val current = audio?.isMuted ?: false
-                            if (audio != null) audio.isMuted = !current
+                            if (audio != null) {
+                                audio.isMuted = !current
+                                try { _isMutedFlow.tryEmit(audio.isMuted) } catch (_: Throwable) {}
+                            }
                             // Refresh notification to reflect mute state
                             val notification = onOpenNotification() ?: onCreateNotification()
                             withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
@@ -720,6 +729,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun criticalErrors() = this@CameraStreamerService.criticalErrors
         // Expose service status flow to bound clients for UI synchronization
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
+        // Expose isMuted flow so UI can reflect mute state changes performed externally
+        fun isMutedFlow() = this@CameraStreamerService.isMutedFlow
+        // Allow bound clients to set mute centrally in the service
+        fun setMuted(isMuted: Boolean) = this@CameraStreamerService.setMuted(isMuted)
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -735,6 +748,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             (streamer as? IWithAudioSource)?.audioInput?.isMuted ?: false
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    /**
+     * Set mute state centrally in the service. This updates the streamer audio
+     * source (if available), emits the `isMuted` flow for observers, and
+     * refreshes the notification to reflect the new label.
+     */
+    fun setMuted(isMuted: Boolean) {
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                val audio = (streamer as? IWithAudioSource)?.audioInput
+                if (audio != null) {
+                    audio.isMuted = isMuted
+                    try { _isMutedFlow.tryEmit(audio.isMuted) } catch (_: Throwable) {}
+                } else {
+                    // Still emit desired state so UI can update even if streamer not ready
+                    try { _isMutedFlow.tryEmit(isMuted) } catch (_: Throwable) {}
+                }
+
+                // Rebuild and post notification on main
+                val notification = onOpenNotification() ?: onCreateNotification()
+                withContext(Dispatchers.Main) {
+                    customNotificationUtils.notify(notification)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "setMuted failed: ${e.message}")
+            }
         }
     }
 
