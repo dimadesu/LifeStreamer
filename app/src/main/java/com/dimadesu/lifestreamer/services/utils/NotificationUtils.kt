@@ -192,4 +192,61 @@ class NotificationUtils(
             }
         }
     }
+
+    /**
+     * Create a service-style notification that includes common actions used by
+     * the streaming service (Start/Stop, Mute/Unmute, Exit) and consistent
+     * foreground attributes. The PendingIntents are provided by the caller so
+     * this utility remains stateless.
+     */
+    fun createServiceNotification(
+        title: String?,
+        content: String?,
+        @DrawableRes iconResourceId: Int,
+        isForeground: Boolean,
+        showStart: Boolean,
+        showStop: Boolean,
+        startPending: PendingIntent?,
+        stopPending: PendingIntent?,
+        muteLabel: String,
+        mutePending: PendingIntent?,
+        exitPending: PendingIntent?,
+        openPending: PendingIntent?
+    ): Notification {
+        val builder = NotificationCompat.Builder(service, channelId).apply {
+            setSmallIcon(iconResourceId)
+            val safeTitle = try { title } catch (_: Throwable) { null }
+            val appLabel = try { service.applicationInfo.loadLabel(service.packageManager).toString() } catch (_: Throwable) { null }
+            if (safeTitle != null && (appLabel == null || safeTitle != appLabel)) setContentTitle(safeTitle)
+            setContentIntent(openPending)
+            content?.let { setContentText(it) }
+
+            if (isForeground) {
+                priority = NotificationCompat.PRIORITY_HIGH
+                setOngoing(true)
+                setAutoCancel(false)
+                setShowWhen(true)
+                setUsesChronometer(true)
+                setCategory(NotificationCompat.CATEGORY_SERVICE)
+                setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                setLocalOnly(true)
+            } else {
+                setOngoing(false)
+            }
+
+            if (showStop && stopPending != null) addAction(iconResourceId, "Stop", stopPending)
+            if (showStart && startPending != null) addAction(iconResourceId, "Start", startPending)
+            // Always include mute and exit actions where provided
+            if (mutePending != null) addAction(iconResourceId, muteLabel, mutePending)
+            if (exitPending != null) addAction(iconResourceId, service.getString(com.dimadesu.lifestreamer.R.string.service_notification_action_exit), exitPending)
+
+            setOnlyAlertOnce(true)
+            setSound(null)
+            setVibrate(null)
+            setLights(0, 0, 0)
+            setDefaults(0)
+        }
+
+        return builder.build()
+    }
 }
