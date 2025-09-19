@@ -87,6 +87,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 
@@ -126,6 +127,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // UI-visible current bitrate string
     private val _bitrateLiveData = MutableLiveData<String?>()
     val bitrateLiveData: LiveData<String?> get() = _bitrateLiveData
+    // Expose current mute state to the UI
+    private val _isMutedLiveData = MutableLiveData<Boolean>(false)
+    val isMutedLiveData: LiveData<Boolean> get() = _isMutedLiveData
 
     // Streamer access through service (with fallback for backward compatibility)
     val streamer: SingleStreamer?
@@ -390,6 +394,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             }
                         } catch (t: Throwable) {
                             Log.w(TAG, "Failed to collect critical errors from service: ${t.message}")
+                        }
+                        // Collect isMuted flow to keep UI toggle in sync when mute is toggled via notification
+                        try {
+                            val isMutedFlow = binder.isMutedFlow()
+                            viewModelScope.launch {
+                                isMutedFlow.collect { muted ->
+                                    try {
+                                        _isMutedLiveData.postValue(muted)
+                                    } catch (t: Throwable) {
+                                        Log.w(TAG, "Failed to post isMuted state: ${t.message}")
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to collect isMuted flow from service: ${t.message}")
                         }
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }
@@ -853,7 +872,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     fun setMute(isMuted: Boolean) {
-        streamer?.audioInput?.isMuted = isMuted
+        // Perform mute operations off the main thread to avoid blocking UI.
+        viewModelScope.launch(Dispatchers.Default) {
+            // Prefer calling the bound service to centralize mutation and notification updates
+            val svc = streamerService
+            if (svc != null) {
+                try {
+                    svc.setMuted(isMuted)
+                    return@launch
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to set mute via service: ${t.message}")
+                }
+            }
+
+            // Fallback: directly write to streamer audio input for backward compatibility
+            try {
+                streamer?.audioInput?.isMuted = isMuted
+                // Ensure UI reflects the change immediately even if service wasn't bound
+                _isMutedLiveData.postValue(isMuted)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to set mute directly on streamer: ${t.message}")
+            }
+        }
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)

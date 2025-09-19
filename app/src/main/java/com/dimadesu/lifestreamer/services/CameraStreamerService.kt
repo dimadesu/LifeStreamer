@@ -110,6 +110,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
+    // Current audio mute state exposed as a StateFlow for UI synchronization
+    private val _isMutedFlow = MutableStateFlow(false)
+    val isMutedFlow = _isMutedFlow.asStateFlow()
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -130,36 +133,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // by default. We want to keep the change local to this app and ensure the
         // camera service only requests CAMERA|MICROPHONE types.
 
+        // onCreate: perform lightweight initialization and promote service to foreground early
+
         // Initialize power manager and other services
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
 
         // Detect current device rotation
         detectCurrentRotation()
-
-        // Add rotation provider listener similar to StreamerService's behavior
-        try {
-            // Create a local SensorRotationProvider and register a listener that
-            // forwards rotation updates to the streamer inside a coroutine (the
-            // streamer API is suspend).
-            val rotationProvider = SensorRotationProvider(this)
-            val listener = object : IRotationProvider.Listener {
-                override fun onOrientationChanged(rotation: Int) {
-                    // Forward rotation to the streamer's rotation handler in a coroutine
-                    try {
-                        serviceScope.launch {
-                            try {
-                                (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
-                            } catch (_: Throwable) {}
-                        }
-                    } catch (_: Throwable) {}
-                }
-            }
-            rotationProvider.addListener(listener)
-            localRotationProvider = rotationProvider
-            localRotationListener = listener
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to register rotation provider: ${t.message}")
-        }
 
         // Ensure our app-level notification channel (silent) is created before
         // starting foreground notification. This prevents the system from using
@@ -173,20 +153,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.w(TAG, "Failed to create custom notification channel: ${t.message}")
         }
 
-        // Register a small receiver for notification actions handled via intents to the service
-        val filter = IntentFilter().apply {
-            addAction(ACTION_STOP_STREAM)
-            addAction(ACTION_START_STREAM)
-            addAction(ACTION_OPEN_FROM_NOTIFICATION)
-            addAction(ACTION_TOGGLE_MUTE)
-        }
-        try {
-            registerReceiver(notificationActionReceiver, filter)
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to register notification action receiver: ${t.message}")
-        }
-
-        // Start foreground with CAMERA and MICROPHONE types on Android 14+
+        // Call startForeground as early as possible. Use a conservative try/catch
+        // and fallbacks so we always call startForeground quickly after
+        // startForegroundService() to avoid ANRs.
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceCompat.startForeground(
@@ -203,14 +172,61 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 startForeground(1001, onCreateNotification())
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to start foreground in CameraStreamerService.onCreate(): ${t.message}")
+            // Fallback: try a minimal startForeground() using a simple notification
+            try {
+                val minimal = NotificationCompat.Builder(this, channelId)
+                    .setSmallIcon(notificationIconResourceId)
+                    .setContentTitle(getString(R.string.service_notification_title))
+                    .setContentText(getString(R.string.service_notification_text_created))
+                    .setOnlyAlertOnce(true)
+                    .setSound(null)
+                    .build()
+                startForeground(1001, minimal)
+            } catch (_: Throwable) {
+                // If fallback fails, there's not much we can do; service will log exceptions
+            }
         }
 
+        // Register a small receiver for notification actions handled via intents to the service
+        val filter = IntentFilter().apply {
+            addAction(ACTION_STOP_STREAM)
+            addAction(ACTION_START_STREAM)
+            addAction(ACTION_OPEN_FROM_NOTIFICATION)
+            addAction(ACTION_TOGGLE_MUTE)
+        }
+        try {
+            registerReceiver(notificationActionReceiver, filter)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to register notification action receiver: ${t.message}")
+        }
         Log.i(TAG, "CameraStreamerService created and configured for background camera access")
 
         // Prepare cached PendingIntents for notification actions so updates don't
         // cancel/recreate them which sometimes causes the UI to render a disabled state.
         initNotificationPendingIntents()
+
+        // Register rotation provider off the main thread to avoid blocking onCreate()
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                val rotationProvider = SensorRotationProvider(this@CameraStreamerService)
+                val listener = object : IRotationProvider.Listener {
+                    override fun onOrientationChanged(rotation: Int) {
+                        try {
+                            serviceScope.launch {
+                                try {
+                                    (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+                                } catch (_: Throwable) {}
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                }
+                rotationProvider.addListener(listener)
+                localRotationProvider = rotationProvider
+                localRotationListener = listener
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to register rotation provider: ${t.message}")
+            }
+        }
 
         // Start periodic notification updater to reflect runtime status
         startStatusUpdater()
@@ -272,7 +288,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             when (action) {
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification action: START_STREAM")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             startStreamFromConfiguredEndpoint()
                         } catch (e: Exception) {
@@ -283,7 +299,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ACTION_STOP_STREAM -> {
                     Log.i(TAG, "Notification action: STOP_STREAM")
                     // stop streaming but keep service alive
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
                         } catch (e: Exception) {
@@ -293,13 +309,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
                 ACTION_TOGGLE_MUTE -> {
                     Log.i(TAG, "Notification action: TOGGLE_MUTE")
-                    // Toggle mute on streamer if available
-                    serviceScope.launch {
+                    // Toggle mute on streamer if available - run off the main thread
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
-                            val audio = (streamer as? IWithAudioSource)?.audioInput
-                            val current = audio?.isMuted ?: false
-                            if (audio != null) audio.isMuted = !current
-                            customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
+                            // Delegate mute toggle to the centralized service API to avoid races
+                            val current = isCurrentlyMuted()
+                            setMuted(!current)
                         } catch (e: Exception) {
                             Log.w(TAG, "Toggle mute failed: ${e.message}")
                         }
@@ -316,11 +331,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             when (action) {
                 ACTION_STOP_STREAM -> {
                     Log.i(TAG, "Notification receiver: STOP_STREAM")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
-                            // Refresh notification to show Start action
-                            customNotificationUtils.notify(onCloseNotification() ?: onCreateNotification())
+                            // Refresh notification to show Start action on main thread
+                            val notification = onCloseNotification() ?: onCreateNotification()
+                            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
                         } catch (e: Exception) {
                             Log.w(TAG, "Stop from notification receiver failed: ${e.message}")
                         }
@@ -328,14 +344,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification receiver: START_STREAM")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             val isStreaming = streamer?.isStreamingFlow?.value ?: false
                             if (!isStreaming) {
                                 // Start using configured endpoint from DataStore
                                 startStreamFromConfiguredEndpoint()
                                 // Refresh notification to show Stop action
-                                customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
+                                val notification = onOpenNotification() ?: onCreateNotification()
+                                withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification receiver failed: ${e.message}")
@@ -344,13 +361,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
                 ACTION_TOGGLE_MUTE -> {
                     Log.i(TAG, "Notification receiver: TOGGLE_MUTE")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
-                            val audio = (streamer as? IWithAudioSource)?.audioInput
-                            val current = audio?.isMuted ?: false
-                            if (audio != null) audio.isMuted = !current
-                            // Refresh notification to reflect mute state
-                            customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
+                            // Delegate mute toggle to centralized service API to avoid races
+                            val current = isCurrentlyMuted()
+                            setMuted(!current)
                         } catch (e: Exception) {
                             Log.w(TAG, "Toggle mute from receiver failed: ${e.message}")
                         }
@@ -404,8 +419,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             while (isActive) {
                 try {
                     val title = getString(R.string.service_notification_title)
-                    // Prefer canonical service-side status for notification content
-                    val serviceStatus = _serviceStreamStatus.value
+                    // Prefer the streamer's immediate state when possible to avoid stale service status
+                    val serviceStatus = getEffectiveServiceStatus()
                     // Compute the canonical status label once and reuse it for both
                     // the notification content and the small status label.
                     val statusLabel = when (serviceStatus) {
@@ -436,8 +451,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val openPending = openPendingIntent
 
                     // Determine mute/unmute state before building the notification key
-                    val audio = (streamer as? IWithAudioSource)?.audioInput
-                    val isMuted = audio?.isMuted ?: false
+                    val isMuted = isCurrentlyMuted()
 
                     // Only read/emit current encoder bitrate when streaming; otherwise clear it
                     val isStreamingNow = serviceStatus == StreamStatus.STREAMING
@@ -452,61 +466,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     } ?: "-"
 
                     // Reuse the already computed statusLabel for the notification key
-                    val statusText = statusLabel
-                    val notificationKey = listOf(serviceStatus.name, isMuted, content, bitrateText, statusText).joinToString("|")
+                    // Build notification and key using canonical helper so it's consistent
+                    val (notification, notificationKey) = buildNotificationForStatus(serviceStatus)
+
 
                     // Skip rebuilding the notification if nothing relevant changed.
                     if (notificationKey == lastNotificationKey) {
-                        // No visual change needed
                         delay(2000)
                         continue
                     }
 
-                    val builder = NotificationCompat.Builder(this@CameraStreamerService, "camera_streaming_channel").apply {
-                        // Make subsequent updates silent to avoid visual rips/press animations
-                        setOnlyAlertOnce(true)
-                        setContentIntent(openPending)
-                        setSmallIcon(notificationIconResourceId)
-                        // Avoid duplicate app label in expanded notification.
-                        val appLabel = try {
-                            applicationInfo.loadLabel(packageManager).toString()
-                        } catch (_: Throwable) { null }
-                        if (appLabel == null || title != appLabel) {
-                            setContentTitle(title)
-                        }
-                        // Append bitrate to content when streaming
-                        val contentWithBitrate = if (serviceStatus == StreamStatus.STREAMING) {
-                            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
-                            "$content • $vb"
-                        } else content
-                        // Append a small status label so the notification reflects current state
-                        val statusLabel = statusText
-                        // Avoid duplicating the status if the content already equals the status (e.g. "Live")
-                        val finalContentText = if (content == statusLabel) {
-                            // contentWithBitrate already includes status for streaming case ("Live • 1.2 Mbps")
-                            contentWithBitrate
-                        } else {
-                            "$contentWithBitrate • $statusLabel"
-                        }
-                        setContentText(finalContentText)
-                        setOngoing(true)
-                        // Show Start when not streaming, Stop when streaming
-                        if (serviceStatus == StreamStatus.STREAMING) {
-                            addAction(notificationIconResourceId, "Stop", stopPending)
-                        } else {
-                            addAction(notificationIconResourceId, "Start", startPending)
-                        }
-
-                        // Determine mute/unmute label based on current audio state
-                        val audio = (streamer as? IWithAudioSource)?.audioInput
-                        val isMuted = audio?.isMuted ?: false
-                        val muteLabel = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
-                        addAction(notificationIconResourceId, muteLabel, mutePending)
-                        // Exit button to stop service and close the app
-                        addAction(notificationIconResourceId, getString(R.string.service_notification_action_exit), exitPending)
-                    }
-
-                    customNotificationUtils.notify(builder.build())
+                    customNotificationUtils.notify(notification)
                     lastNotificationKey = notificationKey
                 } catch (e: Exception) {
                     Log.w(TAG, "Status updater failed: ${e.message}")
@@ -522,6 +492,93 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         statusUpdaterJob?.cancel()
         statusUpdaterJob = null
     }
+
+    // Post a notification that is appropriate for the current service status
+    private suspend fun notifyForCurrentState() {
+        try {
+            val status = getEffectiveServiceStatus()
+            val (notification, key) = buildNotificationForStatus(status)
+            // Update cached key so the periodic updater won't overwrite immediately
+            lastNotificationKey = key
+            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
+        } catch (e: Exception) {
+            Log.w(TAG, "notifyForCurrentState failed: ${e.message}")
+        }
+    }
+
+    // Build the notification and its key in the same way as the status updater
+    private fun buildNotificationForStatus(status: StreamStatus): Pair<Notification, String> {
+        val title = getString(R.string.service_notification_title)
+
+        // Compute canonical status label
+        val statusLabel = when (status) {
+            StreamStatus.STREAMING -> getString(R.string.status_streaming)
+            StreamStatus.STARTING -> getString(R.string.status_starting)
+            StreamStatus.CONNECTING -> getString(R.string.status_connecting)
+            StreamStatus.ERROR -> getString(R.string.status_error)
+            else -> getString(R.string.status_not_streaming)
+        }
+
+        val content = statusLabel
+
+        // Determine mute/unmute label and pending intents
+        val muteLabel = currentMuteLabel()
+        val showStart = status != StreamStatus.STREAMING
+        val showStop = status == StreamStatus.STREAMING
+
+        // Only read bitrate when streaming
+        val videoBitrate = if (status == StreamStatus.STREAMING) {
+            (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
+        } else null
+
+        val bitrateText = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+
+        val contentWithBitrate = if (status == StreamStatus.STREAMING) {
+            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+            "$content • $vb"
+        } else content
+
+        val finalContentText = if (content == statusLabel) contentWithBitrate else "$contentWithBitrate • $statusLabel"
+
+        val notification = customNotificationUtils.createServiceNotification(
+            title = title,
+            content = finalContentText,
+            iconResourceId = notificationIconResourceId,
+            isForeground = status == StreamStatus.STREAMING,
+            showStart = showStart,
+            showStop = showStop,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = muteLabel,
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
+        )
+
+        val key = listOf(status.name, isCurrentlyMuted(), content, bitrateText, statusLabel).joinToString("|")
+        return Pair(notification, key)
+    }
+
+    // Decide the effective status using streamer immediate state when available,
+    // otherwise fall back to the service-level status. Default to NOT_STREAMING
+    // if neither is available.
+    private fun getEffectiveServiceStatus(): StreamStatus {
+        return try {
+            val streamerInstance = streamer
+            if (streamerInstance != null) {
+                val streamingNow = streamerInstance.isStreamingFlow.value
+                if (streamingNow) StreamStatus.STREAMING else StreamStatus.NOT_STREAMING
+            } else {
+                // Conservative: if streamer is null but service still reports STREAMING,
+                // treat as NOT_STREAMING to avoid flashing 'live' when no active streamer.
+                val svc = _serviceStreamStatus.value
+                if (svc == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svc
+            }
+        } catch (_: Throwable) {
+            _serviceStreamStatus.value
+        }
+    }
+
 
     @RequiresApi(Build.VERSION_CODES.R)
     override fun onStreamingStart() {
@@ -732,6 +789,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun criticalErrors() = this@CameraStreamerService.criticalErrors
         // Expose service status flow to bound clients for UI synchronization
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
+        // Expose isMuted flow so UI can reflect mute state changes performed externally
+        fun isMutedFlow() = this@CameraStreamerService.isMutedFlow
+        // Allow bound clients to set mute centrally in the service
+        fun setMuted(isMuted: Boolean) {
+            try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}
+            this@CameraStreamerService.setMuted(isMuted)
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -741,21 +805,77 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         return customBinder
     }
 
+    // Helper to read current mute state from the streamer audio source
+    private fun isCurrentlyMuted(): Boolean {
+        return try {
+            (streamer as? IWithAudioSource)?.audioInput?.isMuted ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Set mute state centrally in the service. This updates the streamer audio
+     * source (if available), emits the `isMuted` flow for observers, and
+     * refreshes the notification to reflect the new label.
+     */
+    fun setMuted(isMuted: Boolean) {
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                val audio = (streamer as? IWithAudioSource)?.audioInput
+                if (audio != null) {
+                    audio.isMuted = isMuted
+                    try { _isMutedFlow.tryEmit(audio.isMuted) } catch (_: Throwable) {}
+                } else {
+                    // Still emit desired state so UI can update even if streamer not ready
+                    try { _isMutedFlow.tryEmit(isMuted) } catch (_: Throwable) {}
+                }
+
+                // Rebuild and post canonical notification for the current effective status
+                // notifyForCurrentState will compute the effective status and update lastNotificationKey
+                notifyForCurrentState()
+            } catch (e: Exception) {
+                Log.w(TAG, "setMuted failed: ${e.message}")
+            }
+        }
+    }
+
+    // Helper to compute the localized mute/unmute label based on current audio state
+    private fun currentMuteLabel(): String {
+        return if (isCurrentlyMuted()) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
+    }
+
     override fun onCreateNotification(): Notification {
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            getString(R.string.service_notification_text_created),
-            R.drawable.ic_baseline_linked_camera_24,
-            isForgroundService = true // Enable enhanced foreground service attributes
+        return customNotificationUtils.createServiceNotification(
+            title = getString(R.string.service_notification_title),
+            content = getString(R.string.service_notification_text_created),
+            iconResourceId = notificationIconResourceId,
+            isForeground = true,
+            showStart = true,
+            showStop = false,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = currentMuteLabel(),
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
         )
     }
 
     override fun onOpenNotification(): Notification? {
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            getString(R.string.status_streaming),
-            R.drawable.ic_baseline_linked_camera_24,
-            isForgroundService = true // Enable enhanced foreground service attributes
+        return customNotificationUtils.createServiceNotification(
+            title = getString(R.string.service_notification_title),
+            content = getString(R.string.status_streaming),
+            iconResourceId = notificationIconResourceId,
+            isForeground = true,
+            showStart = false,
+            showStop = true,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = currentMuteLabel(),
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
         )
     }
 
@@ -766,18 +886,36 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try {
             serviceScope.launch { _criticalErrors.emit(errorMessage) }
         } catch (_: Throwable) {}
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            errorMessage,
-            R.drawable.ic_baseline_linked_camera_24
+        return customNotificationUtils.createServiceNotification(
+            title = getString(R.string.service_notification_title),
+            content = errorMessage,
+            iconResourceId = notificationIconResourceId,
+            isForeground = false,
+            showStart = true,
+            showStop = false,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = currentMuteLabel(),
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
         )
     }
 
     override fun onCloseNotification(): Notification? {
-        return customNotificationUtils.createNotification(
-            getString(R.string.service_notification_title),
-            getString(R.string.status_not_streaming),
-            R.drawable.ic_baseline_linked_camera_24
+        return customNotificationUtils.createServiceNotification(
+            title = getString(R.string.service_notification_title),
+            content = getString(R.string.status_not_streaming),
+            iconResourceId = notificationIconResourceId,
+            isForeground = false,
+            showStart = true,
+            showStop = false,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = currentMuteLabel(),
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
         )
     }
 }
