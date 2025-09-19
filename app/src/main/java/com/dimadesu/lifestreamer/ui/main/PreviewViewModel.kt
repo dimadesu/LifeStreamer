@@ -87,6 +87,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 
@@ -871,19 +872,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     fun setMute(isMuted: Boolean) {
-        // Prefer calling the bound service to centralize mutation and notification updates
-        val svc = streamerService
-        if (svc != null) {
+        // Perform mute operations off the main thread to avoid blocking UI.
+        viewModelScope.launch(Dispatchers.Default) {
+            // Prefer calling the bound service to centralize mutation and notification updates
+            val svc = streamerService
+            if (svc != null) {
+                try {
+                    svc.setMuted(isMuted)
+                    return@launch
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to set mute via service: ${t.message}")
+                }
+            }
+
+            // Fallback: directly write to streamer audio input for backward compatibility
             try {
-                svc.setMuted(isMuted)
-                return
+                streamer?.audioInput?.isMuted = isMuted
+                // Ensure UI reflects the change immediately even if service wasn't bound
+                _isMutedLiveData.postValue(isMuted)
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to set mute via service: ${t.message}")
+                Log.w(TAG, "Failed to set mute directly on streamer: ${t.message}")
             }
         }
-
-        // Fallback: directly write to streamer audio input for backward compatibility
-        streamer?.audioInput?.isMuted = isMuted
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
