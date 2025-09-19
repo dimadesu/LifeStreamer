@@ -131,9 +131,14 @@ class NotificationUtils(
         try { android.util.Log.d("CameraStreamerService", "NotificationUtils.createTransientNotification: title='${title}', content='${content}'") } catch (_: Throwable) {}
         val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
-            // Force the content title to avoid residual header text from previous notifications
-            setContentTitle(title)
-            content?.let { setContentText(it) }
+            // Use the provided content as the primary notification title so the
+            // system doesn't reuse an older header (which previously caused the
+            // 'Live' label to briefly appear). If content is null, fall back to
+            // the supplied title.
+            val primary = content ?: title
+            primary?.let { setContentTitle(it) }
+            // Only set content text when it's different from the primary title
+            if (content != null && content != primary) setContentText(content)
             setOnlyAlertOnce(true)
             setSound(null)
             setVibrate(null)
@@ -219,13 +224,15 @@ class NotificationUtils(
         exitPending: PendingIntent?,
         openPending: PendingIntent?
     ): Notification {
-        val builder = NotificationCompat.Builder(service, channelId).apply {
+            val builder = NotificationCompat.Builder(service, channelId).apply {
             setSmallIcon(iconResourceId)
-            val safeTitle = try { title } catch (_: Throwable) { null }
-            val appLabel = try { service.applicationInfo.loadLabel(service.packageManager).toString() } catch (_: Throwable) { null }
-            if (safeTitle != null && (appLabel == null || safeTitle != appLabel)) setContentTitle(safeTitle)
+            // Ensure the notification's primary title reflects the current
+            // content/status so the system doesn't reuse a stale header.
+            val primary = content ?: title
+            primary?.let { setContentTitle(it) }
             setContentIntent(openPending)
-            content?.let { setContentText(it) }
+            // Only set a secondary line if it differs from the primary title
+            if (content != null && content != primary) setContentText(content)
 
             if (isForeground) {
                 priority = NotificationCompat.PRIORITY_HIGH
