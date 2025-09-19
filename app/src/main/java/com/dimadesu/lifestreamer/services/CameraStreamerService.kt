@@ -272,7 +272,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             when (action) {
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification action: START_STREAM")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             startStreamFromConfiguredEndpoint()
                         } catch (e: Exception) {
@@ -283,7 +283,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ACTION_STOP_STREAM -> {
                     Log.i(TAG, "Notification action: STOP_STREAM")
                     // stop streaming but keep service alive
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
                         } catch (e: Exception) {
@@ -293,13 +293,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
                 ACTION_TOGGLE_MUTE -> {
                     Log.i(TAG, "Notification action: TOGGLE_MUTE")
-                    // Toggle mute on streamer if available
-                    serviceScope.launch {
+                    // Toggle mute on streamer if available - run off the main thread
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             val audio = (streamer as? IWithAudioSource)?.audioInput
                             val current = audio?.isMuted ?: false
                             if (audio != null) audio.isMuted = !current
-                            customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
+                            // Rebuild notification in background, post notify on Main
+                            val notification = onOpenNotification() ?: onCreateNotification()
+                            withContext(Dispatchers.Main) {
+                                customNotificationUtils.notify(notification)
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "Toggle mute failed: ${e.message}")
                         }
@@ -316,11 +320,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             when (action) {
                 ACTION_STOP_STREAM -> {
                     Log.i(TAG, "Notification receiver: STOP_STREAM")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
-                            // Refresh notification to show Start action
-                            customNotificationUtils.notify(onCloseNotification() ?: onCreateNotification())
+                            // Refresh notification to show Start action on main thread
+                            val notification = onCloseNotification() ?: onCreateNotification()
+                            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
                         } catch (e: Exception) {
                             Log.w(TAG, "Stop from notification receiver failed: ${e.message}")
                         }
@@ -328,14 +333,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification receiver: START_STREAM")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             val isStreaming = streamer?.isStreamingFlow?.value ?: false
                             if (!isStreaming) {
                                 // Start using configured endpoint from DataStore
                                 startStreamFromConfiguredEndpoint()
                                 // Refresh notification to show Stop action
-                                customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
+                                val notification = onOpenNotification() ?: onCreateNotification()
+                                withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification receiver failed: ${e.message}")
@@ -344,13 +350,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
                 ACTION_TOGGLE_MUTE -> {
                     Log.i(TAG, "Notification receiver: TOGGLE_MUTE")
-                    serviceScope.launch {
+                    serviceScope.launch(Dispatchers.Default) {
                         try {
                             val audio = (streamer as? IWithAudioSource)?.audioInput
                             val current = audio?.isMuted ?: false
                             if (audio != null) audio.isMuted = !current
                             // Refresh notification to reflect mute state
-                            customNotificationUtils.notify(onOpenNotification() ?: onCreateNotification())
+                            val notification = onOpenNotification() ?: onCreateNotification()
+                            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
                         } catch (e: Exception) {
                             Log.w(TAG, "Toggle mute from receiver failed: ${e.message}")
                         }
