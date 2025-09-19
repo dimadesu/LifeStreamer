@@ -97,6 +97,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
     // Track streaming start time for uptime display
     private var streamingStartTime: Long? = null
+    // Uptime flow (milliseconds since streamingStartTime) for UI consumption
+    private val _uptimeFlow = MutableStateFlow<String?>(null)
+    val uptimeFlow = _uptimeFlow.asStateFlow()
 
     // Coroutine scope for periodic notification updates
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -427,7 +430,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         StreamStatus.STREAMING -> {
                             // We might want to compute uptime here in the future; keep the
                             // timestamp available if needed. For now the label is the same.
-                            val uptime = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
+                            val uptimeMillis = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
+                            // Emit formatted uptime for UI
+                            try { _uptimeFlow.emit(formatUptime(uptimeMillis)) } catch (_: Throwable) {}
                             getString(R.string.status_streaming)
                         }
                         StreamStatus.STARTING -> getString(R.string.status_starting)
@@ -467,6 +472,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
                     // Reuse the already computed statusLabel for the notification key
                     // Build notification and key using canonical helper so it's consistent
+                    // Build notification; include uptime when streaming
                     val (notification, notificationKey) = buildNotificationForStatus(serviceStatus)
 
 
@@ -519,7 +525,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             else -> getString(R.string.status_not_streaming)
         }
 
-        val content = statusLabel
+        // When streaming, append uptime to the content (e.g., "Live • 00:01:23")
+        val content = if (status == StreamStatus.STREAMING) {
+            val uptimeMillis = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
+            val uptime = try { formatUptime(uptimeMillis) } catch (_: Throwable) { "" }
+            if (uptime.isNotEmpty()) "$statusLabel • $uptime" else statusLabel
+        } else statusLabel
 
         // Determine mute/unmute label and pending intents
         val muteLabel = currentMuteLabel()
@@ -535,10 +546,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         val contentWithBitrate = if (status == StreamStatus.STREAMING) {
             val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+            // content already contains statusLabel when streaming (e.g., "Live • 00:01:23"),
+            // so avoid appending the statusLabel again. Just add bitrate after whatever
+            // content we've computed.
             "$content • $vb"
         } else content
 
-        val finalContentText = if (content == statusLabel) contentWithBitrate else "$contentWithBitrate • $statusLabel"
+        // Avoid duplicating the status label. Use contentWithBitrate directly as the
+        // notification's content text; the small status label (statusLabel) is used by
+        // the collapsed header where appropriate via NotificationUtils.
+        val finalContentText = contentWithBitrate
 
         val notification = customNotificationUtils.createServiceNotification(
             title = title,
@@ -577,6 +594,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (_: Throwable) {
             _serviceStreamStatus.value
         }
+    }
+
+    // Format uptime milliseconds to a human readable H:MM:SS or M:SS string
+    private fun formatUptime(ms: Long): String {
+        if (ms <= 0) return ""
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) String.format("%d:%02d:%02d", hours, minutes, seconds) else String.format("%d:%02d", minutes, seconds)
     }
 
 

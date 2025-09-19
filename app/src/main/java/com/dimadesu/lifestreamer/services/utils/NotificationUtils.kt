@@ -90,7 +90,6 @@ class NotificationUtils(
                 setOngoing(true) // Prevents user dismissal
                 setAutoCancel(false) // Notification stays until explicitly removed
                 setShowWhen(true)
-                setUsesChronometer(true) // Shows elapsed time
                 setCategory(NotificationCompat.CATEGORY_SERVICE)
                 
                 // For Android 8.0+, ensure foreground service behavior
@@ -220,7 +219,6 @@ class NotificationUtils(
                 setOngoing(true)
                 setAutoCancel(false)
                 setShowWhen(true)
-                setUsesChronometer(true)
                 setCategory(NotificationCompat.CATEGORY_SERVICE)
                 setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 setLocalOnly(true)
