@@ -137,36 +137,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // by default. We want to keep the change local to this app and ensure the
         // camera service only requests CAMERA|MICROPHONE types.
 
+        Log.d(TAG, "onCreate: entering")
+
         // Initialize power manager and other services
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
 
         // Detect current device rotation
         detectCurrentRotation()
-
-        // Add rotation provider listener similar to StreamerService's behavior
-        try {
-            // Create a local SensorRotationProvider and register a listener that
-            // forwards rotation updates to the streamer inside a coroutine (the
-            // streamer API is suspend).
-            val rotationProvider = SensorRotationProvider(this)
-            val listener = object : IRotationProvider.Listener {
-                override fun onOrientationChanged(rotation: Int) {
-                    // Forward rotation to the streamer's rotation handler in a coroutine
-                    try {
-                        serviceScope.launch {
-                            try {
-                                (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
-                            } catch (_: Throwable) {}
-                        }
-                    } catch (_: Throwable) {}
-                }
-            }
-            rotationProvider.addListener(listener)
-            localRotationProvider = rotationProvider
-            localRotationListener = listener
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to register rotation provider: ${t.message}")
-        }
 
         // Ensure our app-level notification channel (silent) is created before
         // starting foreground notification. This prevents the system from using
@@ -178,6 +155,42 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             )
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to create custom notification channel: ${t.message}")
+        }
+
+        // Call startForeground as early as possible. Use a conservative try/catch
+        // and fallbacks so we always call startForeground quickly after
+        // startForegroundService() to avoid ANRs.
+        try {
+            Log.d(TAG, "onCreate: attempting startForeground with full attributes")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceCompat.startForeground(
+                    this,
+                    1001,
+                    onCreateNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(1001, onCreateNotification())
+            }
+            Log.d(TAG, "onCreate: startForeground succeeded (full)")
+        } catch (t: Throwable) {
+            Log.w(TAG, "onCreate: full startForeground failed: ${t.message}")
+            // Fallback: try a minimal startForeground() using a simple notification
+            try {
+                Log.d(TAG, "onCreate: attempting fallback minimal startForeground")
+                val minimal = NotificationCompat.Builder(this, channelId)
+                    .setSmallIcon(notificationIconResourceId)
+                    .setContentTitle(getString(R.string.service_notification_title))
+                    .setContentText(getString(R.string.service_notification_text_created))
+                    .setOnlyAlertOnce(true)
+                    .setSound(null)
+                    .build()
+                startForeground(1001, minimal)
+                Log.d(TAG, "onCreate: startForeground succeeded (fallback)")
+            } catch (t2: Throwable) {
+                Log.e(TAG, "onCreate: fallback startForeground failed: ${t2.message}")
+            }
         }
 
         // Register a small receiver for notification actions handled via intents to the service
@@ -192,32 +205,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to register notification action receiver: ${t.message}")
         }
-
-        // Start foreground with CAMERA and MICROPHONE types on Android 14+
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceCompat.startForeground(
-                    this,
-                    1001,
-                    onCreateNotification(),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
-            } else {
-                // For older versions, start foreground normally using Service API
-                // (the three-arg ServiceCompat overload resolution can be ambiguous
-                // with newer API shims). We're in a Service subclass so call directly.
-                startForeground(1001, onCreateNotification())
-            }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to start foreground in CameraStreamerService.onCreate(): ${t.message}")
-        }
-
         Log.i(TAG, "CameraStreamerService created and configured for background camera access")
 
         // Prepare cached PendingIntents for notification actions so updates don't
         // cancel/recreate them which sometimes causes the UI to render a disabled state.
         initNotificationPendingIntents()
+
+        // Register rotation provider off the main thread to avoid blocking onCreate()
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                val rotationProvider = SensorRotationProvider(this@CameraStreamerService)
+                val listener = object : IRotationProvider.Listener {
+                    override fun onOrientationChanged(rotation: Int) {
+                        try {
+                            serviceScope.launch {
+                                try {
+                                    (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+                                } catch (_: Throwable) {}
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                }
+                rotationProvider.addListener(listener)
+                localRotationProvider = rotationProvider
+                localRotationListener = listener
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to register rotation provider: ${t.message}")
+            }
+        }
 
         // Start periodic notification updater to reflect runtime status
         startStatusUpdater()
