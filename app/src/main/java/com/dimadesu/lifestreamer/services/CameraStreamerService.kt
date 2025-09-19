@@ -461,49 +461,33 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         continue
                     }
 
-                    val builder = NotificationCompat.Builder(this@CameraStreamerService, "camera_streaming_channel").apply {
-                        // Make subsequent updates silent to avoid visual rips/press animations
-                        setOnlyAlertOnce(true)
-                        setContentIntent(openPending)
-                        setSmallIcon(notificationIconResourceId)
-                        // Avoid duplicate app label in expanded notification.
-                        val appLabel = try {
-                            applicationInfo.loadLabel(packageManager).toString()
-                        } catch (_: Throwable) { null }
-                        if (appLabel == null || title != appLabel) {
-                            setContentTitle(title)
-                        }
-                        // Append bitrate to content when streaming
-                        val contentWithBitrate = if (serviceStatus == StreamStatus.STREAMING) {
-                            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
-                            "$content • $vb"
-                        } else content
-                        // Append a small status label so the notification reflects current state
-                        val statusLabel = statusText
-                        // Avoid duplicating the status if the content already equals the status (e.g. "Live")
-                        val finalContentText = if (content == statusLabel) {
-                            // contentWithBitrate already includes status for streaming case ("Live • 1.2 Mbps")
-                            contentWithBitrate
-                        } else {
-                            "$contentWithBitrate • $statusLabel"
-                        }
-                        setContentText(finalContentText)
-                        setOngoing(true)
-                        // Show Start when not streaming, Stop when streaming
-                        if (serviceStatus == StreamStatus.STREAMING) {
-                            addAction(notificationIconResourceId, "Stop", stopPending)
-                        } else {
-                            addAction(notificationIconResourceId, "Start", startPending)
-                        }
+                    // Build the content text and status parts (append bitrate when streaming)
+                    val contentWithBitrate = if (serviceStatus == StreamStatus.STREAMING) {
+                        val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: "-"
+                        "$content • $vb"
+                    } else content
+                    val finalContentText = if (content == statusText) contentWithBitrate else "$contentWithBitrate • $statusText"
 
-                        // Determine mute/unmute label based on current audio state
-                        val muteLabel = currentMuteLabel()
-                        addAction(notificationIconResourceId, muteLabel, mutePending)
-                        // Exit button to stop service and close the app
-                        addAction(notificationIconResourceId, getString(R.string.service_notification_action_exit), exitPending)
-                    }
+                    val muteLabel = currentMuteLabel()
+                    val showStart = serviceStatus != StreamStatus.STREAMING
+                    val showStop = serviceStatus == StreamStatus.STREAMING
 
-                    customNotificationUtils.notify(builder.build())
+                    val notification = customNotificationUtils.createServiceNotification(
+                        title = title,
+                        content = finalContentText,
+                        iconResourceId = notificationIconResourceId,
+                        isForeground = true,
+                        showStart = showStart,
+                        showStop = showStop,
+                        startPending = startPending,
+                        stopPending = stopPending,
+                        muteLabel = muteLabel,
+                        mutePending = mutePending,
+                        exitPending = exitPending,
+                        openPending = openPending
+                    )
+
+                    customNotificationUtils.notify(notification)
                     lastNotificationKey = notificationKey
                 } catch (e: Exception) {
                     Log.w(TAG, "Status updater failed: ${e.message}")
