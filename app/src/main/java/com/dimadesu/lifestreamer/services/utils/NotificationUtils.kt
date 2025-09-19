@@ -118,35 +118,6 @@ class NotificationUtils(
         return builder.build()
     }
 
-    /**
-     * Create a small transient notification that always sets the content title
-     * to ensure it replaces previous notification header content.
-     */
-    fun createTransientNotification(
-        title: String,
-        content: String? = null,
-        @DrawableRes iconResourceId: Int
-    ): Notification {
-        val builder = NotificationCompat.Builder(service, channelId).apply {
-            setSmallIcon(iconResourceId)
-            // Use the provided content as the primary notification title so the
-            // system doesn't reuse an older header (which previously caused the
-            // 'Live' label to briefly appear). If content is null, fall back to
-            // the supplied title.
-            val primary = content ?: title
-            primary?.let { setContentTitle(it) }
-            // Only set content text when it's different from the primary title
-            if (content != null && content != primary) setContentText(content)
-            setOnlyAlertOnce(true)
-            setSound(null)
-            setVibrate(null)
-            setLights(0, 0, 0)
-            setDefaults(0)
-            setAutoCancel(true)
-            setOngoing(false)
-        }
-        return builder.build()
-    }
 
     fun createNotificationChannel(
         @StringRes nameResourceId: Int,

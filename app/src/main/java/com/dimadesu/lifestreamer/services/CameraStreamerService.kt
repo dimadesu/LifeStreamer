@@ -103,10 +103,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
-    // When non-zero, the periodic updater will skip posting notifications until this
-    // epoch millis to avoid overwriting transient notifications (e.g., mute toast)
-    @Volatile
-    private var suppressUpdaterUntil: Long = 0L
     // Critical error flow for the UI to show dialogs (non-transient errors)
     // Use a replay of 0 so only fresh errors are observed by listeners
     private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0)
@@ -419,12 +415,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         statusUpdaterJob = serviceScope.launch {
             while (isActive) {
                 try {
-                    // If we're suppressing updater (to keep a transient notification visible)
-                    val now = System.currentTimeMillis()
-                    if (suppressUpdaterUntil > now) {
-                        delay(500)
-                        continue
-                    }
                     val title = getString(R.string.service_notification_title)
                     // Prefer the streamer's immediate state when possible to avoid stale service status
                     val serviceStatus = getEffectiveServiceStatus()
@@ -586,33 +576,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
     }
 
-    // Post a short-lived notification showing just the mute/unmute state so the
-    // user gets immediate feedback without risking the periodic updater flashing
-    // stale stream labels.
-    private suspend fun postTransientMuteNotification(isMuted: Boolean) {
-        try {
-            val label = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
-            val title = getString(R.string.service_notification_title)
-            val content = if (isMuted) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)
-            // Diagnostic logging: emit current service/streamer state and suppression window
-            val svcStatus = try { _serviceStreamStatus.value } catch (_: Throwable) { null }
-            val streamerState = try { streamer?.isStreamingFlow?.value } catch (_: Throwable) { null }
-            Log.d(TAG, "Posting transient mute notification: $label; svcStatus=$svcStatus, streamerState=$streamerState, suppressUntil=${suppressUpdaterUntil}, lastNotificationKey=$lastNotificationKey")
-            // Suppress the periodic updater briefly so it doesn't overwrite this
-            // transient notification with stale labels.
-            suppressUpdaterUntil = System.currentTimeMillis() + 1200L
-            val transient = customNotificationUtils.createTransientNotification(
-                title = title,
-                content = content,
-                iconResourceId = notificationIconResourceId
-            )
-            // Also log transient payload for diagnosis
-            try { Log.d(TAG, "Transient notification built (hash=${transient.hashCode()}), content='$content', title='$title'") } catch (_: Throwable) {}
-            withContext(Dispatchers.Main) { customNotificationUtils.notify(transient) }
-        } catch (e: Exception) {
-            Log.w(TAG, "postTransientMuteNotification failed: ${e.message}")
-        }
-    }
 
     @RequiresApi(Build.VERSION_CODES.R)
     override fun onStreamingStart() {
