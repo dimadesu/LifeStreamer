@@ -953,7 +953,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
-    fun toggleVideoSource() {
+    fun toggleVideoSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null) {
         val currentStreamer = serviceStreamer
         if (currentStreamer == null) {
             Log.e(TAG, "Streamer service not available for video source toggle")
@@ -968,6 +968,48 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             when (videoSource) {
                 is ICameraSource -> {
                     Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
+
+                    // If MediaProjection is required for RTMP audio and we don't have it yet,
+                    // request projection via provided launcher and continue once granted.
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+                        && streamingMediaProjection == null
+                        && mediaProjectionHelper.getMediaProjection() == null
+                    ) {
+                        if (mediaProjectionLauncher != null) {
+                            Log.i(TAG, "Requesting MediaProjection permission before switching to RTMP")
+                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
+                                viewModelScope.launch {
+                                    streamingMediaProjection = projection
+                                    // Retry the RTMP switch now that projection state changed
+                                    try {
+                                        val switched = RtmpSourceSwitchHelper.switchToRtmpSource(
+                                            application = application,
+                                            currentStreamer = currentStreamer,
+                                            testBitmap = testBitmap,
+                                            storageRepository = storageRepository,
+                                            mediaProjectionHelper = mediaProjectionHelper,
+                                            streamingMediaProjection = streamingMediaProjection,
+                                            startServiceStreaming = { descriptor -> startServiceStreaming(descriptor) },
+                                            stopServiceStreaming = { stopServiceStreaming() },
+                                            postError = { msg -> _streamerErrorLiveData.postValue(msg) }
+                                        )
+                                        if (!switched) {
+                                            Log.w(TAG, "RTMP switch failed after projection callback")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "RTMP switch retry after projection failed: ${e.message}")
+                                    }
+                                }
+                            }
+                            // Don't proceed synchronously - the projection callback will handle switching
+                            return@launch
+                        } else {
+                            Log.w(TAG, "MediaProjection required but no launcher available to request it")
+                            _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
+                            return@launch
+                        }
+                    }
 
                     val switched = RtmpSourceSwitchHelper.switchToRtmpSource(
                         application = application,
