@@ -990,8 +990,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                             storageRepository = storageRepository,
                                             mediaProjectionHelper = mediaProjectionHelper,
                                             streamingMediaProjection = streamingMediaProjection,
-                                            startServiceStreaming = { descriptor -> startServiceStreaming(descriptor) },
-                                            stopServiceStreaming = { stopServiceStreaming() },
                                             postError = { msg -> _streamerErrorLiveData.postValue(msg) }
                                         )
                                         if (!switched) {
@@ -1018,8 +1016,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         storageRepository = storageRepository,
                         mediaProjectionHelper = mediaProjectionHelper,
                         streamingMediaProjection = streamingMediaProjection,
-                        startServiceStreaming = { descriptor -> startServiceStreaming(descriptor) },
-                        stopServiceStreaming = { stopServiceStreaming() },
                         postError = { msg -> _streamerErrorLiveData.postValue(msg) }
                     )
                     if (!switched) {

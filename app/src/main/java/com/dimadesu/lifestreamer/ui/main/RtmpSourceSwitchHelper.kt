@@ -110,8 +110,6 @@ internal object RtmpSourceSwitchHelper {
         storageRepository: DataStoreRepository,
         mediaProjectionHelper: MediaProjectionHelper,
         streamingMediaProjection: MediaProjection?,
-        startServiceStreaming: suspend (MediaDescriptor) -> Boolean,
-        stopServiceStreaming: suspend () -> Boolean,
         postError: (String) -> Unit
     ): Boolean {
         var wasStreaming = false
@@ -120,7 +118,8 @@ internal object RtmpSourceSwitchHelper {
                 Log.i(TAG, "Temporarily stopping camera stream for source switch")
                 wasStreaming = true
                 try {
-                    stopServiceStreaming()
+                    // Stop the streamer directly (service-level stop helper was removed).
+                    currentStreamer.stopStream()
                     delay(100)
                 } catch (e: Exception) {
                     Log.w(TAG, "Error stopping stream during source switch: ${e.message}")
@@ -149,7 +148,9 @@ internal object RtmpSourceSwitchHelper {
                 if (wasStreaming) {
                     try {
                         val descriptor = storageRepository.endpointDescriptorFlow.first()
-                        startServiceStreaming(descriptor)
+                        // Attempt to restart streaming using descriptor
+                        currentStreamer.open(descriptor)
+                        currentStreamer.startStream()
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to restart streaming with bitmap after RTMP prep failure: ${e.message}")
                     }
@@ -186,7 +187,8 @@ internal object RtmpSourceSwitchHelper {
                     if (wasStreaming) {
                         try {
                             val descriptor = storageRepository.endpointDescriptorFlow.first()
-                            startServiceStreaming(descriptor)
+                            currentStreamer.open(descriptor)
+                            currentStreamer.startStream()
                         } catch (se: Exception) {
                             Log.e(TAG, "Failed to restart streaming with bitmap after attach failure: ${se.message}")
                         }
@@ -197,7 +199,8 @@ internal object RtmpSourceSwitchHelper {
                 if (wasStreaming) {
                     try {
                         val descriptor = storageRepository.endpointDescriptorFlow.first()
-                        startServiceStreaming(descriptor)
+                        currentStreamer.open(descriptor)
+                        currentStreamer.startStream()
                     } catch (e: Exception) {
                         Log.e(TAG, "Error restarting stream with RTMP: ${e.message}")
                         postError("Failed to restart stream with RTMP: ${e.message}")
@@ -211,7 +214,8 @@ internal object RtmpSourceSwitchHelper {
                 if (wasStreaming) {
                     try {
                         val descriptor = storageRepository.endpointDescriptorFlow.first()
-                        startServiceStreaming(descriptor)
+                        currentStreamer.open(descriptor)
+                        currentStreamer.startStream()
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to restart streaming with bitmap after RTMP preview timeout: ${e.message}")
                     }
