@@ -961,39 +961,40 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
 
-        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
-        val isCurrentlyStreaming = isStreamingLiveData.value == true
+    val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+    // Prefer the streamer's own state flow for an up-to-date streaming state.
+    val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
 
         viewModelScope.launch {
             when (videoSource) {
                 is ICameraSource -> {
                     Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
 
-                    // If MediaProjection is required for RTMP audio and we don't have it yet,
-                    // request projection via provided launcher and continue once granted.
+                    // Only request MediaProjection when switching to RTMP while streaming.
+                    // Requesting projection while not streaming leads to poor UX (unexpected
+                    // permission prompts). If not streaming, skip the request — audio can be
+                    // upgraded later when the user starts streaming or explicitly requests it.
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+                        && isCurrentlyStreaming
                         && streamingMediaProjection == null
                         && mediaProjectionHelper.getMediaProjection() == null
                     ) {
                         if (mediaProjectionLauncher != null) {
-                                Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP")
-                                // Fire the projection request but do not wait for it — video switching
-                                // does not require MediaProjection. The helper will try to upgrade audio
-                                // in the background if MediaProjection becomes available.
-                                mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
-                                    Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
-                                    viewModelScope.launch {
-                                        // Store the granted projection for future upgrades. The helper
-                                        // will consult MediaProjectionHelper.getMediaProjection() or
-                                        // this variable when attempting to upgrade audio.
-                                        streamingMediaProjection = projection
-                                    }
+                            Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
+                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
+                                viewModelScope.launch {
+                                    streamingMediaProjection = projection
                                 }
-                                // Continue immediately to switch video; audio will be upgraded later.
+                            }
                         } else {
                             Log.w(TAG, "MediaProjection required but no launcher available to request it")
                             _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
                             return@launch
+                        }
+                    } else {
+                        if (!isCurrentlyStreaming) {
+                            Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
                         }
                     }
 
