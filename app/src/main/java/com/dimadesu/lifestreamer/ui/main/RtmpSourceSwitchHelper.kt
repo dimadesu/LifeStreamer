@@ -96,7 +96,6 @@ internal object RtmpSourceSwitchHelper {
     suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
-            Log.i(TAG, "Switched streamer to bitmap fallback")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set bitmap fallback source: ${e.message}")
         }
@@ -126,14 +125,12 @@ internal object RtmpSourceSwitchHelper {
             switchToBitmapFallback(currentStreamer, testBitmap)
 
             val videoSourceUrl = try {
-                storageRepository.rtmpVideoSourceUrlFlow.first().also { Log.i(TAG, "RTMP preview URL read from storage: $it") }
+                storageRepository.rtmpVideoSourceUrlFlow.first()
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to read RTMP video source URL from storage: ${e.message}")
-                application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url).also { Log.i(TAG, "Using default RTMP preview URL: $it") }
+                application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
             }
 
             val exoPlayerInstance = try {
-                Log.i(TAG, "Creating ExoPlayer for RTMP preview: $videoSourceUrl")
                 createExoPlayer(application, videoSourceUrl)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
@@ -147,19 +144,14 @@ internal object RtmpSourceSwitchHelper {
 
             try {
                 withTimeout(6000) {
-                    Log.i(TAG, "Preparing ExoPlayer (preview)")
                     exoPlayerInstance.prepare()
                     exoPlayerInstance.playWhenReady = true
                     val ready = awaitReady(exoPlayerInstance)
-                    Log.i(TAG, "awaitReady returned: $ready")
                     if (!ready) throw Exception("ExoPlayer did not become ready")
                 }
-                Log.i(TAG, "ExoPlayer signaled ready - switching StreamPack source to RTMP")
 
                 try {
-                    Log.i(TAG, "Attaching RTMP ExoPlayer instance to StreamPack video source")
                     currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
-                    Log.i(TAG, "Video source attached successfully")
                     val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
                     if (mediaProjection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                         try {
@@ -181,8 +173,8 @@ internal object RtmpSourceSwitchHelper {
                 // We do not stop/start the streamer here; caller owns streaming lifecycle.
                 return true
             } catch (t: Throwable) {
-                Log.e(TAG, "RTMP preview failed or timed out: ${t.message}", t)
-                postError("RTMP preview failed - staying on fallback source")
+                Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
+                postError("RTMP playback failed - staying on fallback source")
                 try { exoPlayerInstance.release() } catch (_: Exception) {}
                 return false
             }
