@@ -1026,20 +1026,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 else -> {
                     Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
 
-                    // If we're currently streaming, we need to stop the current source first
-                    var wasStreaming = false
-                    if (isCurrentlyStreaming) {
-                        Log.i(TAG, "Stopping RTMP streaming before switch")
-                        wasStreaming = true
-                        try {
-                            stopServiceStreaming()
-                            // Small delay to ensure stream stops properly
-                            kotlinx.coroutines.delay(100)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error stopping stream during source switch: ${e.message}")
-                        }
-                    }
-
                     // Don't release streaming MediaProjection here - it's managed by stream lifecycle
                     if (streamingMediaProjection == null) {
                         mediaProjectionHelper.release()
@@ -1048,20 +1034,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Switch to camera source
                     currentStreamer.setVideoSource(CameraSourceFactory())
                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
-
-                    // If we were streaming before, restart with camera
-                    if (wasStreaming) {
-                        Log.i(TAG, "Restarting stream with camera source")
-                        try {
-                            // Small delay to let camera source initialize
-                            kotlinx.coroutines.delay(200)
-                            val descriptor = storageRepository.endpointDescriptorFlow.first()
-                            startServiceStreaming(descriptor)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error restarting stream with camera: ${e.message}")
-                            _streamerErrorLiveData.postValue("Failed to restart stream with camera: ${e.message}")
-                        }
-                    }
                 }
             }
 //            when (videoSource) {

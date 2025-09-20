@@ -64,13 +64,22 @@ internal object RtmpSourceSwitchHelper {
                     val listener = object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                                try { player.removeListener(this) } catch (_: Exception) {}
                                 if (cont.isActive) cont.resume(true) {}
                             }
                         }
 
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            try { player.removeListener(this) } catch (_: Exception) {}
                             if (cont.isActive) cont.resume(false) {}
                         }
+                    }
+                    // If the player is already ready, avoid registering the listener which
+                    // could miss the READY event if it happened before listener registration.
+                    val currentState = try { player.playbackState } catch (_: Exception) { -1 }
+                    if (currentState == androidx.media3.common.Player.STATE_READY) {
+                        if (cont.isActive) cont.resume(true) {}
+                        return@suspendCancellableCoroutine
                     }
                     player.addListener(listener)
                     cont.invokeOnCancellation {
@@ -94,13 +103,12 @@ internal object RtmpSourceSwitchHelper {
     }
 
     /**
-     * Full flow to switch a streamer from camera to an RTMP source:
-     * - stop streaming if necessary
-     * - switch to bitmap fallback immediately
-     * - prepare ExoPlayer
+     * Full flow to switch a streamer from camera to an RTMP source without
+     * stopping or restarting the streamer service itself:
+     * - switch to bitmap fallback immediately (so UI doesn't freeze)
+     * - prepare ExoPlayer for RTMP preview
      * - wait until ready (with timeout)
      * - attach RTMP video and appropriate audio source
-     * - restart streaming if it was running before
      * Returns true if RTMP attach succeeded, false otherwise.
      */
     suspend fun switchToRtmpSource(
@@ -112,63 +120,46 @@ internal object RtmpSourceSwitchHelper {
         streamingMediaProjection: MediaProjection?,
         postError: (String) -> Unit
     ): Boolean {
-        var wasStreaming = false
         try {
-            if (currentStreamer.isStreamingFlow.value == true) {
-                Log.i(TAG, "Temporarily stopping camera stream for source switch")
-                wasStreaming = true
-                try {
-                    // Stop the streamer directly (service-level stop helper was removed).
-                    currentStreamer.stopStream()
-                    delay(100)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping stream during source switch: ${e.message}")
-                }
-            }
 
             // Immediately switch to bitmap fallback
             switchToBitmapFallback(currentStreamer, testBitmap)
 
             val videoSourceUrl = try {
-                storageRepository.rtmpVideoSourceUrlFlow.first()
+                storageRepository.rtmpVideoSourceUrlFlow.first().also { Log.i(TAG, "RTMP preview URL read from storage: $it") }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read RTMP video source URL from storage: ${e.message}")
-                application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
+                application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url).also { Log.i(TAG, "Using default RTMP preview URL: $it") }
             }
 
             val exoPlayerInstance = try {
+                Log.i(TAG, "Creating ExoPlayer for RTMP preview: $videoSourceUrl")
                 createExoPlayer(application, videoSourceUrl)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}")
+                Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
                 null
             }
 
             if (exoPlayerInstance == null) {
                 postError("RTMP preview preparation failed, staying on bitmap")
-                if (wasStreaming) {
-                    try {
-                        val descriptor = storageRepository.endpointDescriptorFlow.first()
-                        // Attempt to restart streaming using descriptor
-                        currentStreamer.open(descriptor)
-                        currentStreamer.startStream()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to restart streaming with bitmap after RTMP prep failure: ${e.message}")
-                    }
-                }
                 return false
             }
 
             try {
                 withTimeout(6000) {
+                    Log.i(TAG, "Preparing ExoPlayer (preview)")
                     exoPlayerInstance.prepare()
                     exoPlayerInstance.playWhenReady = true
                     val ready = awaitReady(exoPlayerInstance)
+                    Log.i(TAG, "awaitReady returned: $ready")
                     if (!ready) throw Exception("ExoPlayer did not become ready")
                 }
                 Log.i(TAG, "ExoPlayer signaled ready - switching StreamPack source to RTMP")
 
                 try {
+                    Log.i(TAG, "Attaching RTMP ExoPlayer instance to StreamPack video source")
                     currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
+                    Log.i(TAG, "Video source attached successfully")
                     val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
                     if (mediaProjection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                         try {
@@ -181,45 +172,18 @@ internal object RtmpSourceSwitchHelper {
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}")
+                    Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
                     postError("Failed to attach RTMP source: ${e.message}")
                     try { exoPlayerInstance.release() } catch (_: Exception) {}
-                    if (wasStreaming) {
-                        try {
-                            val descriptor = storageRepository.endpointDescriptorFlow.first()
-                            currentStreamer.open(descriptor)
-                            currentStreamer.startStream()
-                        } catch (se: Exception) {
-                            Log.e(TAG, "Failed to restart streaming with bitmap after attach failure: ${se.message}")
-                        }
-                    }
                     return false
                 }
 
-                if (wasStreaming) {
-                    try {
-                        val descriptor = storageRepository.endpointDescriptorFlow.first()
-                        currentStreamer.open(descriptor)
-                        currentStreamer.startStream()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error restarting stream with RTMP: ${e.message}")
-                        postError("Failed to restart stream with RTMP: ${e.message}")
-                    }
-                }
+                // We do not stop/start the streamer here; caller owns streaming lifecycle.
                 return true
             } catch (t: Throwable) {
-                Log.e(TAG, "RTMP preview failed or timed out: ${t.message}")
+                Log.e(TAG, "RTMP preview failed or timed out: ${t.message}", t)
                 postError("RTMP preview failed - staying on fallback source")
                 try { exoPlayerInstance.release() } catch (_: Exception) {}
-                if (wasStreaming) {
-                    try {
-                        val descriptor = storageRepository.endpointDescriptorFlow.first()
-                        currentStreamer.open(descriptor)
-                        currentStreamer.startStream()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to restart streaming with bitmap after RTMP preview timeout: ${e.message}")
-                    }
-                }
                 return false
             }
         } catch (e: Exception) {
