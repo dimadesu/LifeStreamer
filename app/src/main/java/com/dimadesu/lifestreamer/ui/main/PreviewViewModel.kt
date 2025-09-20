@@ -976,32 +976,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         && mediaProjectionHelper.getMediaProjection() == null
                     ) {
                         if (mediaProjectionLauncher != null) {
-                            Log.i(TAG, "Requesting MediaProjection permission before switching to RTMP")
-                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
-                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
-                                viewModelScope.launch {
-                                    streamingMediaProjection = projection
-                                    // Retry the RTMP switch now that projection state changed
-                                    try {
-                                        val switched = RtmpSourceSwitchHelper.switchToRtmpSource(
-                                            application = application,
-                                            currentStreamer = currentStreamer,
-                                            testBitmap = testBitmap,
-                                            storageRepository = storageRepository,
-                                            mediaProjectionHelper = mediaProjectionHelper,
-                                            streamingMediaProjection = streamingMediaProjection,
-                                            postError = { msg -> _streamerErrorLiveData.postValue(msg) }
-                                        )
-                                        if (!switched) {
-                                            Log.w(TAG, "RTMP switch failed after projection callback")
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "RTMP switch retry after projection failed: ${e.message}")
+                                Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP")
+                                // Fire the projection request but do not wait for it — video switching
+                                // does not require MediaProjection. The helper will try to upgrade audio
+                                // in the background if MediaProjection becomes available.
+                                mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                                    Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
+                                    viewModelScope.launch {
+                                        // Store the granted projection for future upgrades. The helper
+                                        // will consult MediaProjectionHelper.getMediaProjection() or
+                                        // this variable when attempting to upgrade audio.
+                                        streamingMediaProjection = projection
                                     }
                                 }
-                            }
-                            // Don't proceed synchronously - the projection callback will handle switching
-                            return@launch
+                                // Continue immediately to switch video; audio will be upgraded later.
                         } else {
                             Log.w(TAG, "MediaProjection required but no launcher available to request it")
                             _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")

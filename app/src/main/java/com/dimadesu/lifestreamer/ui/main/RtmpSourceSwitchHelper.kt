@@ -15,6 +15,8 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.Bitma
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import android.media.projection.MediaProjection
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
@@ -151,17 +153,45 @@ internal object RtmpSourceSwitchHelper {
                 }
 
                 try {
+                    // Attach RTMP video immediately
                     currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
-                    val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                    if (mediaProjection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                        try {
-                            currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
-                        } catch (ae: Exception) {
-                            Log.w(TAG, "MediaProjection audio attach failed, using microphone: ${ae.message}")
-                            currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                        }
-                    } else {
+
+                    // Attach microphone immediately as a safe default for audio so we don't
+                    // block video switch on MediaProjection permission/state. We'll try to
+                    // upgrade to MediaProjection audio in the background if it becomes
+                    // available shortly.
+                    try {
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                    } catch (ae: Exception) {
+                        Log.w(TAG, "Attaching microphone audio failed: ${ae.message}")
+                    }
+
+                    // Background task: attempt to upgrade to MediaProjection audio for a short
+                    // period (10s) if MediaProjection becomes available.
+                    CoroutineScope(Dispatchers.Default).launch {
+                        try {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                val deadline = System.currentTimeMillis() + 10_000L
+                                var projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                                if (projection == null) {
+                                    while (System.currentTimeMillis() < deadline) {
+                                        delay(500L)
+                                        projection = mediaProjectionHelper.getMediaProjection()
+                                        if (projection != null) break
+                                    }
+                                }
+                                projection?.let { mp ->
+                                    try {
+                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
+                                        Log.d(TAG, "Upgraded audio source to MediaProjection")
+                                    } catch (upgradeEx: Exception) {
+                                        Log.w(TAG, "MediaProjection audio attach failed on upgrade, keeping microphone: ${upgradeEx.message}")
+                                    }
+                                }
+                            }
+                        } catch (bgEx: Exception) {
+                            Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
