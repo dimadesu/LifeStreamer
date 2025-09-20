@@ -129,7 +129,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.switchSourceButton.setOnClickListener {
-            previewViewModel.toggleVideoSource()
+            previewViewModel.toggleVideoSource(mediaProjectionLauncher)
         }
 
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) {

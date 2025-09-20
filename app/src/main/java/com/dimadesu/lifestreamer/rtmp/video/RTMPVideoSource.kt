@@ -71,26 +71,31 @@ class RTMPVideoSource (
                     Log.w("RTMPVideoSource", "ExoPlayer preparation failed, but streaming can continue: ${e.message}")
                 }
                 
-                // Add a listener to monitor playback state changes
-                    exoPlayer.addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        Log.d(TAG, "Playback state changed to: $playbackState")
-                        when (playbackState) {
-                            Player.STATE_READY -> {
-                                Log.i(TAG, "ExoPlayer is ready and playing")
-                            }
-                            Player.STATE_ENDED -> {
-                                Log.w(TAG, "ExoPlayer playback ended")
+                // Add a listener to monitor playback state changes. Use a single stored
+                // listener instance to avoid adding multiple anonymous listeners on
+                // repeated start/stop calls.
+                if (playerListener == null) {
+                    playerListener = object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            Log.d(TAG, "Playback state changed to: $playbackState")
+                            when (playbackState) {
+                                Player.STATE_READY -> {
+                                    Log.i(TAG, "ExoPlayer is ready and playing")
+                                }
+                                Player.STATE_ENDED -> {
+                                    Log.w(TAG, "ExoPlayer playback ended")
+                                }
                             }
                         }
-                    }
 
-                    override fun onPlayerError(error: PlaybackException) {
-                        Log.e(TAG, "ExoPlayer error: ${error.message}", error)
-                        // Don't stop streaming on ExoPlayer error - it might be used as surface target only
-                        Log.w(TAG, "Continuing streaming despite ExoPlayer error")
+                        override fun onPlayerError(error: PlaybackException) {
+                            Log.e(TAG, "ExoPlayer error: ${error.message}", error)
+                            // Don't stop streaming on ExoPlayer error - it might be used as surface target only
+                            Log.w(TAG, "Continuing streaming despite ExoPlayer error")
+                        }
                     }
-                })
+                    exoPlayer.addListener(playerListener!!)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting stream: ${e.message}", e)
                 _isStreamingFlow.value = false
@@ -115,6 +120,14 @@ class RTMPVideoSource (
                         if (!_isStreamingFlow.value) {
                             exoPlayer.stop()
                             exoPlayer.setVideoSurface(null)
+                            // Remove any attached listener to prevent leaks
+                            playerListener?.let { listener ->
+                                try {
+                                    exoPlayer.removeListener(listener)
+                                } catch (ignored: Exception) {
+                                }
+                                playerListener = null
+                            }
                             Log.d(TAG, "Stream stopped and surface cleared")
                         }
                     } catch (e: Exception) {
@@ -146,8 +159,17 @@ class RTMPVideoSource (
                 if (exoPlayer.playbackState != Player.STATE_IDLE) {
                     exoPlayer.stop()
                 }
-                // Release the player
-                exoPlayer.release()
+                // Remove listener if present to avoid leaks
+                playerListener?.let { listener ->
+                    try {
+                        exoPlayer.removeListener(listener)
+                    } catch (ignored: Exception) {
+                    }
+                    playerListener = null
+                }
+                // Do NOT release the shared ExoPlayer here - caller owns the player.
+                // Only clear surfaces and listeners so the shared player can be reused.
+                // exoPlayer.release()
             } catch (e: Exception) {
                 Log.e(TAG, "Error releasing ExoPlayer: ${e.message}", e)
             }
@@ -164,6 +186,8 @@ class RTMPVideoSource (
 
     private var outputSurface: Surface? = null
     private var previewSurface: Surface? = null
+    // Single listener instance to avoid leaks from multiple anonymous listeners
+    private var playerListener: Player.Listener? = null
 
     override suspend fun getOutput(): Surface? {
         return outputSurface
