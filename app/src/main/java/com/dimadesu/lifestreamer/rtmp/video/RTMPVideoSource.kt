@@ -90,6 +90,7 @@ class RTMPVideoSource (
                 Log.d(TAG, "Starting stream - playbackState: ${exoPlayer.playbackState}")
                 Log.d(TAG, "MediaItem count: ${exoPlayer.mediaItemCount}")
                 Log.d(TAG, "Output surface: $outputSurface")
+                Log.d(TAG, "RTMPVideoSource.startStream invoked (thread=${Thread.currentThread().name})")
                 
                 // Ensure we have an output surface before starting
                 if (outputSurface == null) {
@@ -99,6 +100,7 @@ class RTMPVideoSource (
                 }
                 
                 outputSurface?.let { surface ->
+                    Log.d(TAG, "Attaching output surface to ExoPlayer: $surface")
                     exoPlayer.setVideoSurface(surface)
                     Log.d(TAG, "Set video surface to output")
                 }
@@ -170,6 +172,7 @@ class RTMPVideoSource (
                         try {
                         // Only stop and clear surface if we're still not streaming
                         if (!_isStreamingFlow.value) {
+                            Log.d(TAG, "Delaying full stop: stopping ExoPlayer and clearing surface")
                             exoPlayer.stop()
                             exoPlayer.setVideoSurface(null)
                             // Remove any attached listener to prevent leaks

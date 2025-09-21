@@ -123,9 +123,6 @@ internal object RtmpSourceSwitchHelper {
     ): Boolean {
         try {
 
-            // Immediately switch to bitmap fallback
-            switchToBitmapFallback(currentStreamer, testBitmap)
-
             val videoSourceUrl = try {
                 storageRepository.rtmpVideoSourceUrlFlow.first()
             } catch (e: Exception) {
@@ -140,11 +137,14 @@ internal object RtmpSourceSwitchHelper {
             }
 
             if (exoPlayerInstance == null) {
+                // Nothing we can do, fallback to bitmap
                 postError("RTMP preview preparation failed, staying on bitmap")
+                switchToBitmapFallback(currentStreamer, testBitmap)
                 return false
             }
 
             try {
+                // Prepare and wait for the RTMP player to be ready before touching streamer
                 withTimeout(6000) {
                     exoPlayerInstance.prepare()
                     exoPlayerInstance.playWhenReady = true
@@ -152,8 +152,10 @@ internal object RtmpSourceSwitchHelper {
                     if (!ready) throw Exception("ExoPlayer did not become ready")
                 }
 
+                // ExoPlayer appears ready. Attach RTMP video to the streamer. Only fall
+                // back to bitmap if attaching fails. This avoids multiple setVideoSource
+                // calls during an active stream which can cause the pipeline to stop.
                 try {
-                    // Attach RTMP video immediately
                     currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
 
                     // Attach microphone immediately as a safe default for audio so we don't
@@ -197,15 +199,19 @@ internal object RtmpSourceSwitchHelper {
                     Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
                     postError("Failed to attach RTMP source: ${e.message}")
                     try { exoPlayerInstance.release() } catch (_: Exception) {}
+                    // Fall back to bitmap now that RTMP attach failed
+                    switchToBitmapFallback(currentStreamer, testBitmap)
                     return false
                 }
 
-                // We do not stop/start the streamer here; caller owns streaming lifecycle.
+                // Success
                 return true
             } catch (t: Throwable) {
                 Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
                 postError("RTMP playback failed - staying on fallback source")
                 try { exoPlayerInstance.release() } catch (_: Exception) {}
+                // Fall back to bitmap if prepare/ready failed
+                switchToBitmapFallback(currentStreamer, testBitmap)
                 return false
             }
         } catch (e: Exception) {
