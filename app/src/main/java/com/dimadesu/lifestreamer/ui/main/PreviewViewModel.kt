@@ -67,7 +67,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.Camer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
-import com.dimadesu.lifestreamer.model.StreamStatus
+import com.dimadesu.lifestreamer.models.StreamStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop

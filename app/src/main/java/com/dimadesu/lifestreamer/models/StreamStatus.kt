@@ -1,4 +1,4 @@
-package com.dimadesu.lifestreamer.model
+package com.dimadesu.lifestreamer.models
 
 /**
  * Shared streaming status enum used by both service and ViewModel to avoid duplication.
