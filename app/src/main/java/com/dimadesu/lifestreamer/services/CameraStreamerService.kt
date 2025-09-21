@@ -26,7 +26,7 @@ import com.dimadesu.lifestreamer.ui.main.MainActivity
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
-import com.dimadesu.lifestreamer.model.StreamStatus
+import com.dimadesu.lifestreamer.models.StreamStatus
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
