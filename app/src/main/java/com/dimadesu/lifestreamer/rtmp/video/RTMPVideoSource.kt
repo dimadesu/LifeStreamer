@@ -40,9 +40,11 @@ class RTMPVideoSource (
     private val cachedFormatHeight = AtomicInteger(0)
     private val cachedRotation = AtomicInteger(0)
 
-    override val infoProviderFlow: StateFlow<ISourceInfoProvider> = MutableStateFlow(object : ISourceInfoProvider {
+    // Expose the current provider via a MutableStateFlow. We recreate and emit a
+    // new provider instance whenever cached format values change so consumers
+    // (the rendering pipeline) can react and recompute viewports immediately.
+    private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(object : ISourceInfoProvider {
         override fun getSurfaceSize(targetResolution: Size): Size {
-            // Use cached values when present, otherwise fall back to targetResolution
             val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
             val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
             val rotation = cachedRotation.get()
@@ -54,6 +56,23 @@ class RTMPVideoSource (
 
         override val isMirror: Boolean = false
     })
+    override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
+
+    private fun makeInfoProvider(): ISourceInfoProvider {
+        return object : ISourceInfoProvider {
+            override fun getSurfaceSize(targetResolution: Size): Size {
+                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+                val rotation = cachedRotation.get()
+                return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
+            }
+
+            override val rotationDegrees: Int
+                get() = cachedRotation.get()
+
+            override val isMirror: Boolean = false
+        }
+    }
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow: StateFlow<Boolean> get() = _isStreamingFlow
     override suspend fun startStream() {
@@ -257,9 +276,18 @@ class RTMPVideoSource (
             val w = format?.width ?: 0
             val h = format?.height ?: 0
             val rot = format?.rotationDegrees ?: 0
-            cachedFormatWidth.set(w)
-            cachedFormatHeight.set(h)
-            cachedRotation.set(rot)
+            val prevW = cachedFormatWidth.get()
+            val prevH = cachedFormatHeight.get()
+            val prevRot = cachedRotation.get()
+            if (prevW != w || prevH != h || prevRot != rot) {
+                cachedFormatWidth.set(w)
+                cachedFormatHeight.set(h)
+                cachedRotation.set(rot)
+                try {
+                    _infoProviderFlow.value = makeInfoProvider()
+                } catch (ignored: Exception) {
+                }
+            }
         } catch (ignored: Exception) {
         }
     }
