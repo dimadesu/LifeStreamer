@@ -315,77 +315,77 @@ class RTMPVideoSource (
     }
 
     override suspend fun setPreview(surface: Surface) {
-        previewSurface = surface
-        // Use main exoPlayer for preview - no separate instance needed
-        Handler(Looper.getMainLooper()).post {
-            try {
-                // Do not override the output surface while streaming. If streaming is active,
-                // the output surface must stay attached so the encoded stream receives frames.
-                if (!_isStreamingFlow.value) {
-                    exoPlayer.setVideoSurface(surface)
-                } else {
-                    Log.d(TAG, "setPreview called while streaming - not attaching preview surface to avoid overriding output")
-                }
-            } catch (e: Exception) {
-                Log.e("RTMPVideoSource", "Error setting preview surface: ${e.message}", e)
-            }
-        }
+//        previewSurface = surface
+//        // Use main exoPlayer for preview - no separate instance needed
+//        Handler(Looper.getMainLooper()).post {
+//            try {
+//                // Do not override the output surface while streaming. If streaming is active,
+//                // the output surface must stay attached so the encoded stream receives frames.
+//                if (!_isStreamingFlow.value) {
+//                    exoPlayer.setVideoSurface(surface)
+//                } else {
+//                    Log.d(TAG, "setPreview called while streaming - not attaching preview surface to avoid overriding output")
+//                }
+//            } catch (e: Exception) {
+//                Log.e("RTMPVideoSource", "Error setting preview surface: ${e.message}", e)
+//            }
+//        }
     }
 
     override suspend fun startPreview() {
-        previewSurface?.let { surface ->
-            Handler(Looper.getMainLooper()).post {
-                try {
-                    // Only attach preview surface and start playback when not streaming.
-                    if (!_isStreamingFlow.value) {
-                        exoPlayer.setVideoSurface(surface)
-                        // Only prepare and start playback if we have media items for preview
-                        if (exoPlayer.mediaItemCount > 0) {
-                            Log.d(TAG, "Starting preview with media items")
-                            if (exoPlayer.playbackState == Player.STATE_IDLE) {
-                                exoPlayer.prepare()
-                            }
-                            exoPlayer.playWhenReady = true
-                        } else {
-                            Log.d(TAG, "Starting preview without media items - surface target only")
-                        }
-                    } else {
-                        Log.d(TAG, "startPreview called while streaming - deferring preview to keep output surface attached")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error starting preview: ${e.message}", e)
-                }
-            }
-            // Preview is considered active only when it is actually attached (i.e. not streaming)
-            _isPreviewingFlow.value = !_isStreamingFlow.value
-        } ?: run {
-            _isPreviewingFlow.value = false
-        }
+//        previewSurface?.let { surface ->
+//            Handler(Looper.getMainLooper()).post {
+//                try {
+//                    // Only attach preview surface and start playback when not streaming.
+//                    if (!_isStreamingFlow.value) {
+//                        exoPlayer.setVideoSurface(surface)
+//                        // Only prepare and start playback if we have media items for preview
+//                        if (exoPlayer.mediaItemCount > 0) {
+//                            Log.d(TAG, "Starting preview with media items")
+//                            if (exoPlayer.playbackState == Player.STATE_IDLE) {
+//                                exoPlayer.prepare()
+//                            }
+//                            exoPlayer.playWhenReady = true
+//                        } else {
+//                            Log.d(TAG, "Starting preview without media items - surface target only")
+//                        }
+//                    } else {
+//                        Log.d(TAG, "startPreview called while streaming - deferring preview to keep output surface attached")
+//                    }
+//                } catch (e: Exception) {
+//                    Log.e(TAG, "Error starting preview: ${e.message}", e)
+//                }
+//            }
+//            // Preview is considered active only when it is actually attached (i.e. not streaming)
+//            _isPreviewingFlow.value = !_isStreamingFlow.value
+//        } ?: run {
+//            _isPreviewingFlow.value = false
+//        }
     }
 
     override suspend fun startPreview(previewSurface: Surface) {
-        setPreview(previewSurface)
-        startPreview()
+//        setPreview(previewSurface)
+//        startPreview()
     }
 
     override suspend fun stopPreview() {
-        _isPreviewingFlow.value = false
-        Handler(Looper.getMainLooper()).post {
-            try {
-                // Only stop if we're not streaming - if streaming, keep playing but just remove preview surface
-                if (!_isStreamingFlow.value) {
-                    exoPlayer.setVideoSurface(null)
-                    exoPlayer.stop()
-                } else {
-                    // If streaming, switch back to output surface if different from preview
-                    if (outputSurface != previewSurface && outputSurface != null) {
-                        exoPlayer.setVideoSurface(outputSurface)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("RTMPVideoSource", "Error stopping preview: ${e.message}", e)
-            }
-        }
+//        _isPreviewingFlow.value = false
+//        Handler(Looper.getMainLooper()).post {
+//            try {
+//                // Only stop if we're not streaming - if streaming, keep playing but just remove preview surface
+//                if (!_isStreamingFlow.value) {
+//                    exoPlayer.setVideoSurface(null)
+//                    exoPlayer.stop()
+//                } else {
+//                    // If streaming, switch back to output surface if different from preview
+//                    if (outputSurface != previewSurface && outputSurface != null) {
+//                        exoPlayer.setVideoSurface(outputSurface)
+//                    }
+//                }
+//            } catch (e: Exception) {
+//                Log.e("RTMPVideoSource", "Error stopping preview: ${e.message}", e)
+//            }
+//        }
     }
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
