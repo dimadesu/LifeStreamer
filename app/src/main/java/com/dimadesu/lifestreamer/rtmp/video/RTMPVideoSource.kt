@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import io.github.thibaultbee.streampack.core.elements.sources.video.AbstractPreviewableSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
+import androidx.media3.common.VideoSize
 
 class RTMPVideoSource (
     private val exoPlayer: ExoPlayer,
@@ -25,16 +27,66 @@ class RTMPVideoSource (
     companion object {
         private const val TAG = "RTMPVideoSource"
     }
-    override val infoProviderFlow: StateFlow<ISourceInfoProvider> = MutableStateFlow(object : ISourceInfoProvider {
-        override fun getSurfaceSize(targetResolution: Size): Size = targetResolution
-        override val rotationDegrees: Int = 0
+    /*
+     * ExoPlayer must be accessed from the main thread (see ExoPlayer docs).
+     * Reading `exoPlayer.videoFormat` from background coroutines/threads can
+     * throw "Player is accessed on the wrong thread". To avoid that, we
+     * register a small `Player.Listener` on the main thread that caches the
+     * current video width/height/rotation into atomic fields. Background
+     * callers (the pipeline and preview sizing) then read those cached values
+     * instead of touching ExoPlayer directly.
+     */
+    private val cachedFormatWidth = AtomicInteger(0)
+    private val cachedFormatHeight = AtomicInteger(0)
+    private val cachedRotation = AtomicInteger(0)
+
+    // Expose the current provider via a MutableStateFlow. We recreate and emit a
+    // new provider instance whenever cached format values change so consumers
+    // (the rendering pipeline) can react and recompute viewports immediately.
+    private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(object : ISourceInfoProvider {
+        override fun getSurfaceSize(targetResolution: Size): Size {
+            val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+            val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+            val rotation = cachedRotation.get()
+            return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
+        }
+
+        override val rotationDegrees: Int
+            get() = cachedRotation.get()
+
         override val isMirror: Boolean = false
     })
+    override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
+
+    private fun makeInfoProvider(): ISourceInfoProvider {
+        return object : ISourceInfoProvider {
+            override fun getSurfaceSize(targetResolution: Size): Size {
+                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+                val rotation = cachedRotation.get()
+                return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
+            }
+
+            override val rotationDegrees: Int
+                get() = cachedRotation.get()
+
+            override val isMirror: Boolean = false
+        }
+    }
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow: StateFlow<Boolean> get() = _isStreamingFlow
     override suspend fun startStream() {
         Handler(Looper.getMainLooper()).post {
                 try {
+                // Ensure format listener is registered early so cached values are populated
+                try {
+                    if (!isFormatListenerRegistered) {
+                        exoPlayer.addListener(formatListener)
+                        isFormatListenerRegistered = true
+                    }
+                    updateCachedFormat()
+                } catch (ignored: Exception) {
+                }
                 Log.d(TAG, "Starting stream - playbackState: ${exoPlayer.playbackState}")
                 Log.d(TAG, "MediaItem count: ${exoPlayer.mediaItemCount}")
                 Log.d(TAG, "Output surface: $outputSurface")
@@ -128,6 +180,14 @@ class RTMPVideoSource (
                                 }
                                 playerListener = null
                             }
+                                // Also remove formatListener if it was added
+                                if (isFormatListenerRegistered) {
+                                    try {
+                                        exoPlayer.removeListener(formatListener)
+                                    } catch (ignored: Exception) {
+                                    }
+                                    isFormatListenerRegistered = false
+                                }
                             Log.d(TAG, "Stream stopped and surface cleared")
                         }
                     } catch (e: Exception) {
@@ -167,6 +227,14 @@ class RTMPVideoSource (
                     }
                     playerListener = null
                 }
+                // Remove format listener if present
+                if (isFormatListenerRegistered) {
+                    try {
+                        exoPlayer.removeListener(formatListener)
+                    } catch (ignored: Exception) {
+                    }
+                    isFormatListenerRegistered = false
+                }
                 // Do NOT release the shared ExoPlayer here - caller owns the player.
                 // Only clear surfaces and listeners so the shared player can be reused.
                 // exoPlayer.release()
@@ -188,6 +256,41 @@ class RTMPVideoSource (
     private var previewSurface: Surface? = null
     // Single listener instance to avoid leaks from multiple anonymous listeners
     private var playerListener: Player.Listener? = null
+    // Listener to update cached format values on main thread.
+    private val formatListener = object : Player.Listener {
+        override fun onVideoSizeChanged(videoSize: VideoSize) {
+            updateCachedFormat()
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // Format info may become available when playback starts/changes
+            updateCachedFormat()
+        }
+    }
+    // Track whether formatListener has been added to avoid duplicate registration
+    private var isFormatListenerRegistered = false
+
+    private fun updateCachedFormat() {
+        try {
+            val format = exoPlayer.videoFormat
+            val w = format?.width ?: 0
+            val h = format?.height ?: 0
+            val rot = format?.rotationDegrees ?: 0
+            val prevW = cachedFormatWidth.get()
+            val prevH = cachedFormatHeight.get()
+            val prevRot = cachedRotation.get()
+            if (prevW != w || prevH != h || prevRot != rot) {
+                cachedFormatWidth.set(w)
+                cachedFormatHeight.set(h)
+                cachedRotation.set(rot)
+                try {
+                    _infoProviderFlow.value = makeInfoProvider()
+                } catch (ignored: Exception) {
+                }
+            }
+        } catch (ignored: Exception) {
+        }
+    }
 
     override suspend fun getOutput(): Surface? {
         return outputSurface
@@ -286,13 +389,10 @@ class RTMPVideoSource (
     }
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
-    Log.d(TAG, "exoPlayer.videoFormat ${exoPlayer.videoFormat}")
-    Log.d(TAG, "targetSize $targetSize")
-        val width = exoPlayer.videoFormat?.width ?: 1920
-        val height = exoPlayer.videoFormat?.height ?: 1080
-        val previewSize = Size(width, height)
-    Log.d(TAG, "previewSize: $previewSize")
-        return previewSize
+        // Use cached format values to avoid accessing ExoPlayer from non-main threads.
+        val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
+        val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
+        return Size(width, height)
     }
 
     override suspend fun resetPreviewImpl() {
