@@ -974,19 +974,41 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Requesting projection while not streaming leads to poor UX (unexpected
                     // permission prompts). If not streaming, skip the request — audio can be
                     // upgraded later when the user starts streaming or explicitly requests it.
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
-                        && isCurrentlyStreaming
-                        && streamingMediaProjection == null
-                        && mediaProjectionHelper.getMediaProjection() == null
-                    ) {
+                    val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+                            && isCurrentlyStreaming
+                            && streamingMediaProjection == null
+                            && mediaProjectionHelper.getMediaProjection() == null
+
+                    if (needProjection) {
                         if (mediaProjectionLauncher != null) {
                             Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
                             mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
                                 Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
                                 viewModelScope.launch {
                                     streamingMediaProjection = projection
+                                    if (projection == null) {
+                                        _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
+                                        return@launch
+                                    }
+
+                                    // Now that we have projection, perform the RTMP source switch
+                                    val switchedNow = RtmpSourceSwitchHelper.switchToRtmpSource(
+                                        application = application,
+                                        currentStreamer = currentStreamer,
+                                        testBitmap = testBitmap,
+                                        storageRepository = storageRepository,
+                                        mediaProjectionHelper = mediaProjectionHelper,
+                                        streamingMediaProjection = streamingMediaProjection,
+                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) }
+                                    )
+                                    if (!switchedNow) {
+                                        // switchToRtmpSource already handled fallback and errors
+                                        return@launch
+                                    }
                                 }
                             }
+                            // Return early; the actual switch will happen in the projection callback
+                            return@launch
                         } else {
                             Log.w(TAG, "MediaProjection required but no launcher available to request it")
                             _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
@@ -996,20 +1018,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (!isCurrentlyStreaming) {
                             Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
                         }
-                    }
 
-                    val switched = RtmpSourceSwitchHelper.switchToRtmpSource(
-                        application = application,
-                        currentStreamer = currentStreamer,
-                        testBitmap = testBitmap,
-                        storageRepository = storageRepository,
-                        mediaProjectionHelper = mediaProjectionHelper,
-                        streamingMediaProjection = streamingMediaProjection,
-                        postError = { msg -> _streamerErrorLiveData.postValue(msg) }
-                    )
-                    if (!switched) {
-                        // switchToRtmpSource already handled fallback and errors
-                        return@launch
+                        val switched = RtmpSourceSwitchHelper.switchToRtmpSource(
+                            application = application,
+                            currentStreamer = currentStreamer,
+                            testBitmap = testBitmap,
+                            storageRepository = storageRepository,
+                            mediaProjectionHelper = mediaProjectionHelper,
+                            streamingMediaProjection = streamingMediaProjection,
+                            postError = { msg -> _streamerErrorLiveData.postValue(msg) }
+                        )
+                        if (!switched) {
+                            // switchToRtmpSource already handled fallback and errors
+                            return@launch
+                        }
                     }
                 }
                 else -> {

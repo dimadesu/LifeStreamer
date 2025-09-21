@@ -76,6 +76,10 @@ class RTMPVideoSource (
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow: StateFlow<Boolean> get() = _isStreamingFlow
     override suspend fun startStream() {
+        // Emit streaming=true synchronously so listeners in the pipeline don't
+        // observe a transient 'not streaming' state when startStream is called.
+        _isStreamingFlow.value = true
+
         Handler(Looper.getMainLooper()).post {
                 try {
                 // Ensure format listener is registered early so cached values are populated
@@ -90,6 +94,7 @@ class RTMPVideoSource (
                 Log.d(TAG, "Starting stream - playbackState: ${exoPlayer.playbackState}")
                 Log.d(TAG, "MediaItem count: ${exoPlayer.mediaItemCount}")
                 Log.d(TAG, "Output surface: $outputSurface")
+                Log.d(TAG, "RTMPVideoSource.startStream invoked (thread=${Thread.currentThread().name})")
                 
                 // Ensure we have an output surface before starting
                 if (outputSurface == null) {
@@ -99,14 +104,14 @@ class RTMPVideoSource (
                 }
                 
                 outputSurface?.let { surface ->
+                    Log.d(TAG, "Attaching output surface to ExoPlayer: $surface")
                     exoPlayer.setVideoSurface(surface)
                     Log.d(TAG, "Set video surface to output")
                 }
                 
-                // Set streaming to true - streaming pipeline can work even if ExoPlayer preview fails
-                _isStreamingFlow.value = true
+                // Streaming already marked true; pipeline can proceed even if ExoPlayer playback fails
                 
-                // Try to prepare and start ExoPlayer for preview, but don't fail streaming if it doesn't work
+                // Try to prepare and start ExoPlayer playback, but don't fail streaming if it doesn't work
                 try {
                     if (exoPlayer.mediaItemCount > 0) {
                         Log.d(TAG, "ExoPlayer has media items - preparing for playback")
@@ -170,6 +175,7 @@ class RTMPVideoSource (
                         try {
                         // Only stop and clear surface if we're still not streaming
                         if (!_isStreamingFlow.value) {
+                            Log.d(TAG, "Delaying full stop: stopping ExoPlayer and clearing surface")
                             exoPlayer.stop()
                             exoPlayer.setVideoSurface(null)
                             // Remove any attached listener to prevent leaks
