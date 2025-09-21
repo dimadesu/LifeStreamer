@@ -27,9 +27,15 @@ class RTMPVideoSource (
     companion object {
         private const val TAG = "RTMPVideoSource"
     }
-    // Cached format values updated on main thread by formatListener. This avoids
-    // accessing ExoPlayer.videoFormat from background threads which causes
-    // "Player is accessed on the wrong thread" exceptions.
+    /*
+     * ExoPlayer must be accessed from the main thread (see ExoPlayer docs).
+     * Reading `exoPlayer.videoFormat` from background coroutines/threads can
+     * throw "Player is accessed on the wrong thread". To avoid that, we
+     * register a small `Player.Listener` on the main thread that caches the
+     * current video width/height/rotation into atomic fields. Background
+     * callers (the pipeline and preview sizing) then read those cached values
+     * instead of touching ExoPlayer directly.
+     */
     private val cachedFormatWidth = AtomicInteger(0)
     private val cachedFormatHeight = AtomicInteger(0)
     private val cachedRotation = AtomicInteger(0)
@@ -55,7 +61,10 @@ class RTMPVideoSource (
                 try {
                 // Ensure format listener is registered early so cached values are populated
                 try {
-                    exoPlayer.addListener(formatListener)
+                    if (!isFormatListenerRegistered) {
+                        exoPlayer.addListener(formatListener)
+                        isFormatListenerRegistered = true
+                    }
                     updateCachedFormat()
                 } catch (ignored: Exception) {
                 }
@@ -152,6 +161,14 @@ class RTMPVideoSource (
                                 }
                                 playerListener = null
                             }
+                                // Also remove formatListener if it was added
+                                if (isFormatListenerRegistered) {
+                                    try {
+                                        exoPlayer.removeListener(formatListener)
+                                    } catch (ignored: Exception) {
+                                    }
+                                    isFormatListenerRegistered = false
+                                }
                             Log.d(TAG, "Stream stopped and surface cleared")
                         }
                     } catch (e: Exception) {
@@ -191,6 +208,14 @@ class RTMPVideoSource (
                     }
                     playerListener = null
                 }
+                // Remove format listener if present
+                if (isFormatListenerRegistered) {
+                    try {
+                        exoPlayer.removeListener(formatListener)
+                    } catch (ignored: Exception) {
+                    }
+                    isFormatListenerRegistered = false
+                }
                 // Do NOT release the shared ExoPlayer here - caller owns the player.
                 // Only clear surfaces and listeners so the shared player can be reused.
                 // exoPlayer.release()
@@ -223,6 +248,8 @@ class RTMPVideoSource (
             updateCachedFormat()
         }
     }
+    // Track whether formatListener has been added to avoid duplicate registration
+    private var isFormatListenerRegistered = false
 
     private fun updateCachedFormat() {
         try {
