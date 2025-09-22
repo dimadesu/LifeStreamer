@@ -6,7 +6,7 @@ Can stream SRT with dynamic/adaptive bitrate alrogrithm as well as RTMP. A lot o
 
 Can have bonding via [Bond Bunny app](https://github.com/dimadesu/bond-bunny).
 
-Discord server: https://discord.gg/3ejS5Eqx
+Discord server: https://discord.gg/2UzEkU2AJW
 
 ## How to install
 
