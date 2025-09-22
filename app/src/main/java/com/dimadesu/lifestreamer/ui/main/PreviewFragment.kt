@@ -390,10 +390,36 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             if (newSource?.isPreviewingFlow?.value == true) {
                 Log.w(TAG, "New streamer's video source is already previewing - skipping set to avoid exception")
             } else {
+                // Wait till streamer exists to set it to the SurfaceView. Setting the
+                // `streamer` property requires the PreviewView to have its internal
+                // coroutine scope (set in onAttachedToWindow). If the view is not yet
+                // attached, posting the assignment ensures it happens on the UI
+                // thread after attachment, preventing "lifecycleScope is not
+                // available" errors.
                 try {
-                    // Wait till streamer exists to set it to the SurfaceView.
-                    preview.streamer = streamer
-                    assignedStreamer = true
+                    if (preview.isAttachedToWindow) {
+                        preview.streamer = streamer
+                        assignedStreamer = true
+                    } else {
+                        preview.post {
+                            try {
+                                preview.streamer = streamer
+                                Log.d(TAG, "Preview streamer assigned via post after attach")
+                                // Start preview asynchronously after assignment
+                                lifecycleScope.launch {
+                                    try {
+                                        startPreviewWhenReady(preview, streamer, posted = true)
+                                    } catch (t: Throwable) {
+                                        Log.w(TAG, "Posted preview start failed: ${t.message}")
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to set streamer on preview (posted): ${t.message}")
+                            }
+                        }
+                        // We optimistically mark as assigned since assignment will occur shortly
+                        assignedStreamer = true
+                    }
                 } catch (e: IllegalArgumentException) {
                     // Defensive catch: if PreviewView rejects the streamer because the
                     // source is already previewing, log and continue without crashing.
@@ -405,61 +431,64 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // Only start preview if we actually have the streamer assigned (or it was
         // already assigned). This prevents calling startPreview() when the view
         // hasn't been bound and would throw "Streamer is not set".
-    // If streamer was assigned, try to start preview when both the UI surface and
-    // the video source are ready. This adds an app-level readiness gate without
-    // modifying StreamPack.
-    if (assignedStreamer && PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
+        // If streamer was assigned, try to start preview when both the UI surface and
+        // the video source are ready. This adds an app-level readiness gate without
+        // modifying StreamPack.
+        if (assignedStreamer && PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // Retry starting preview locally without modifying StreamPack.
             // Check common surface readiness signals (view attached + surface holder valid)
             lifecycleScope.launch {
-                val maxAttempts = 10
-                var attempt = 1
-                var started = false
-                // Read the source instance once here (may be null for non-previewable sources)
-                val source = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
-
-                while (attempt <= maxAttempts && !started) {
-                    try {
-                        // Quick heuristics: SurfaceView is attached and has non-zero size
-                        val isAttached = preview.isAttachedToWindow
-                        val hasSize = preview.width > 0 && preview.height > 0
-                        // Check surface readiness
-                        if (!isAttached || !hasSize) {
-                            Log.d(TAG, "Preview not attached or has no size (attempt=$attempt) - will retry")
-                        } else {
-                            // If we have a previewable source, ensure it is not already previewing
-                            val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
-                            if (sourceAlreadyPreviewing) {
-                                Log.w(TAG, "Source is already previewing elsewhere - skipping startPreview")
-                                started = true
-                                break
-                            }
-                            try {
-                                preview.startPreview()
-                                Log.d(TAG, "Preview started (attempt=$attempt)")
-                                started = true
-                                break
-                            } catch (t: Throwable) {
-                                Log.w(TAG, "startPreview attempt=$attempt failed: ${t.message}")
-                            }
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Error checking/starting preview on attempt=$attempt: ${t.message}")
-                    }
-
-                    attempt++
-                    delay(250)
-                }
-
-                if (!started) {
-                    Log.e(TAG, "Failed to start preview after $maxAttempts attempts")
-                }
+                startPreviewWhenReady(preview, streamer, posted = false)
             }
-        } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
         } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             Log.e(TAG, "Camera permission not granted. Preview will not start.")
         } else {
             Log.d(TAG, "Preview streamer not assigned - skipping startPreview()")
+        }
+    }
+
+    // Helper: tries to start preview when the view is attached and sized.
+    // If `posted` is true, the helper logs slightly different messages to
+    // make the log traces easier to read. Behavior mirrors the previous loops
+    // (same delays and attempt counts).
+    private suspend fun startPreviewWhenReady(preview: PreviewView, streamer: SingleStreamer, posted: Boolean) {
+        val maxAttempts = if (posted) 6 else 10
+        var attempt = 1
+        var started = false
+        val source = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
+
+        while (attempt <= maxAttempts && !started) {
+            try {
+                val isAttached = preview.isAttachedToWindow
+                val hasSize = preview.width > 0 && preview.height > 0
+                if (!isAttached || !hasSize) {
+                    val which = if (posted) "posted start" else "start"
+                    Log.d(TAG, "Preview not attached or has no size ($which attempt=$attempt) - will retry")
+                } else {
+                    val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
+                    if (sourceAlreadyPreviewing) {
+                        Log.w(TAG, "Source is already previewing elsewhere - skipping startPreview${if (posted) " (posted)" else ""}")
+                        started = true
+                        break
+                    }
+                    try {
+                        preview.startPreview()
+                        Log.d(TAG, "Preview started (${if (posted) "posted " else ""}attempt=$attempt)")
+                        started = true
+                        break
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${t.message}")
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Error checking/starting preview on attempt=$attempt: ${t.message}")
+            }
+            attempt++
+            delay(250)
+        }
+
+        if (!started) {
+            Log.e(TAG, "Failed to start preview after $maxAttempts attempts")
         }
     }
 

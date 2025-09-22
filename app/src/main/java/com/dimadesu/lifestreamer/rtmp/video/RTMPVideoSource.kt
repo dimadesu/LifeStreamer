@@ -88,8 +88,10 @@ class RTMPVideoSource (
         // observe a transient 'not streaming' state when startStream is called.
         _isStreamingFlow.value = true
 
-        Handler(Looper.getMainLooper()).post {
-                try {
+        // Cancel any pending cleanup because we're starting streaming now
+        mainHandler.post {
+            cancelPendingCleanup("before startStream")
+            try {
                 // Ensure format listener is registered early so cached values are populated
                 try {
                     if (!isFormatListenerRegistered) {
@@ -194,36 +196,32 @@ class RTMPVideoSource (
                 // Give a small delay before performing a full stop/cleanup. Only
                 // perform the full stop if both streaming and previewing are
                 // inactive to avoid interrupting an ongoing preview.
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
-                            Log.d(TAG, "Delaying full stop: stopping ExoPlayer and clearing surface")
-                            exoPlayer.stop()
-                            exoPlayer.setVideoSurface(null)
-                            // Remove any attached listener to prevent leaks
-                            playerListener?.let { listener ->
-                                try {
-                                    exoPlayer.removeListener(listener)
-                                } catch (ignored: Exception) {
-                                }
-                                playerListener = null
+                schedulePendingCleanup(500) {
+                    if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
+                        Log.d(TAG, "Delayed full stop: stopping ExoPlayer and clearing surface")
+                        exoPlayer.stop()
+                        exoPlayer.setVideoSurface(null)
+                        // Remove any attached listener to prevent leaks
+                        playerListener?.let { listener ->
+                            try {
+                                exoPlayer.removeListener(listener)
+                            } catch (ignored: Exception) {
                             }
-                            // Also remove formatListener if it was added
-                            if (isFormatListenerRegistered) {
-                                try {
-                                    exoPlayer.removeListener(formatListener)
-                                } catch (ignored: Exception) {
-                                }
-                                isFormatListenerRegistered = false
-                            }
-                            Log.d(TAG, "Stream stopped and surface cleared")
-                        } else {
-                            Log.d(TAG, "Skipping full stop because preview or streaming became active")
+                            playerListener = null
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error in delayed stop: ${e.message}", e)
+                        // Also remove formatListener if it was added
+                        if (isFormatListenerRegistered) {
+                            try {
+                                exoPlayer.removeListener(formatListener)
+                            } catch (ignored: Exception) {
+                            }
+                            isFormatListenerRegistered = false
+                        }
+                        Log.d(TAG, "Stream stopped and surface cleared")
+                    } else {
+                        Log.d(TAG, "Skipping full stop because preview or streaming became active")
                     }
-                }, 100) // Slightly longer delay to avoid immediate restarts
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping ExoPlayer: ${e.message}", e)
             }
@@ -305,6 +303,34 @@ class RTMPVideoSource (
     private var inputSurface: Surface? = null
     private var outputSurfaceOutput: SurfaceOutput? = null
     private var previewSurfaceOutput: SurfaceOutput? = null
+    // Main thread handler used for scheduling/cancelling delayed cleanup
+    private val mainHandler = Handler(Looper.getMainLooper())
+    // Single pending cleanup runnable reference so we can cancel it if preview/stream restarts
+    private var pendingCleanupRunnable: Runnable? = null
+    // Cancel and scheduling helpers to reduce duplication
+    private fun cancelPendingCleanup(reason: String? = null) {
+        pendingCleanupRunnable?.let {
+            Log.d(TAG, "Cancelling pending cleanup${reason?.let { r -> ": $r" } ?: ""}")
+            mainHandler.removeCallbacks(it)
+            pendingCleanupRunnable = null
+        }
+    }
+
+    private fun schedulePendingCleanup(delayMs: Long = 500L, action: () -> Unit) {
+        cancelPendingCleanup("scheduling new cleanup")
+        val runnable = Runnable {
+            try {
+                action()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in scheduled cleanup: ${e.message}", e)
+            } finally {
+                pendingCleanupRunnable = null
+            }
+        }
+        pendingCleanupRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+        Log.d(TAG, "Scheduled pending cleanup in ${delayMs}ms")
+    }
     // Single listener instance to avoid leaks from multiple anonymous listeners
     private var playerListener: Player.Listener? = null
     // Listener to update cached format values on main thread.
@@ -352,6 +378,7 @@ class RTMPVideoSource (
         initializeSurfaceProcessor()
         Handler(Looper.getMainLooper()).post {
             try {
+                cancelPendingCleanup("setOutput called")
                 // Set the input surface (from surface processor) to ExoPlayer
                 // The surface processor will copy frames to both output and preview surfaces
                 inputSurface?.let { input ->
@@ -372,12 +399,16 @@ class RTMPVideoSource (
         previewSurface = surface
         initializeSurfaceProcessor()
         Log.d(TAG, "Preview surface set: $surface")
+        cancelPendingCleanup("setPreview called")
     }
 
     override suspend fun startPreview() {
         previewSurface?.let { surface ->
             _isPreviewingFlow.value = true
             Log.d(TAG, "Starting preview with surface processor")
+
+            // Cancel any pending cleanup because we're starting preview
+            cancelPendingCleanup("before startPreview")
 
             Handler(Looper.getMainLooper()).post {
                 try {
@@ -433,35 +464,32 @@ class RTMPVideoSource (
         }
 
         // If both previewing and streaming are now inactive, schedule a full stop
-        // to cleanup surfaces/listeners.
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
-                    Log.d(TAG, "Both streaming and preview inactive - performing full stop cleanup")
+        // to cleanup surfaces/listeners. Use a cancelable pending runnable so
+        // surface recreation or quick restarts cancel the cleanup.
+        schedulePendingCleanup(500) {
+            if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
+                Log.d(TAG, "Both streaming and preview inactive - performing full stop cleanup")
+                try {
+                    exoPlayer.stop()
+                    exoPlayer.setVideoSurface(null)
+                } catch (ignored: Exception) {
+                }
+                playerListener?.let { listener ->
                     try {
-                        exoPlayer.stop()
-                        exoPlayer.setVideoSurface(null)
+                        exoPlayer.removeListener(listener)
                     } catch (ignored: Exception) {
                     }
-                    playerListener?.let { listener ->
-                        try {
-                            exoPlayer.removeListener(listener)
-                        } catch (ignored: Exception) {
-                        }
-                        playerListener = null
-                    }
-                    if (isFormatListenerRegistered) {
-                        try {
-                            exoPlayer.removeListener(formatListener)
-                        } catch (ignored: Exception) {
-                        }
-                        isFormatListenerRegistered = false
-                    }
+                    playerListener = null
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in stopPreview delayed cleanup: ${e.message}", e)
+                if (isFormatListenerRegistered) {
+                    try {
+                        exoPlayer.removeListener(formatListener)
+                    } catch (ignored: Exception) {
+                    }
+                    isFormatListenerRegistered = false
+                }
             }
-        }, 100)
+        }
     }
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
@@ -489,6 +517,9 @@ class RTMPVideoSource (
     }
 
     private fun initializeSurfaceProcessor() {
+        // Cancel any pending cleanup because we're initializing/updating surfaces
+        cancelPendingCleanup("initializeSurfaceProcessor called")
+
         if (surfaceProcessor == null && (outputSurface != null || previewSurface != null)) {
             try {
                 Log.d(TAG, "Initializing surface processor for dual output")
@@ -519,9 +550,26 @@ class RTMPVideoSource (
     }
 
     private fun addSurfacesToProcessor() {
+        // Cancel any pending cleanup because we're adding/updating surfaces
+        cancelPendingCleanup("addSurfacesToProcessor called")
         surfaceProcessor?.let { processor ->
             // Add output surface for streaming if available
             outputSurface?.let { surface ->
+                // If an output SurfaceOutput exists but the underlying Surface
+                // instance changed (e.g. due to orientation / view recreation),
+                // remove and recreate it so the processor uses the new Surface.
+                if (outputSurfaceOutput != null) {
+                    try {
+                        val existingSurface = outputSurfaceOutput?.descriptor?.surface
+                        if (existingSurface != surface) {
+                            processor.removeOutputSurface(outputSurfaceOutput!!)
+                            outputSurfaceOutput = null
+                            Log.d(TAG, "Recreated output surface output due to surface change")
+                        }
+                    } catch (ignored: Exception) {
+                    }
+                }
+
                 if (outputSurfaceOutput == null) {
                     val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
@@ -550,6 +598,21 @@ class RTMPVideoSource (
 
             // Add preview surface if available
             previewSurface?.let { surface ->
+                // If preview output exists but the surface changed (view recreated),
+                // remove and recreate the preview output so the processor uses the
+                // new Surface instance.
+                if (previewSurfaceOutput != null) {
+                    try {
+                        val existingSurface = previewSurfaceOutput?.descriptor?.surface
+                        if (existingSurface != surface) {
+                            processor.removeOutputSurface(previewSurfaceOutput!!)
+                            previewSurfaceOutput = null
+                            Log.d(TAG, "Recreated preview surface output due to surface change")
+                        }
+                    } catch (ignored: Exception) {
+                    }
+                }
+
                 if (previewSurfaceOutput == null) {
                     val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
