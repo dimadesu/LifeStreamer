@@ -50,6 +50,7 @@ import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
+import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import io.github.thibaultbee.streampack.core.interfaces.IStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewableSource
@@ -185,11 +186,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.e(TAG, "Streamer is not a ICoroutineStreamer")
             }
             if (streamer is IWithVideoSource) {
-                    // If streamer is currently streaming, skip attaching preview to avoid
-                    // preview overriding the encoder/output surface. Rebind preview after
-                    // streaming stops.
-                    if (streamer.isStreamingFlow.value == true) {
-                        Log.i(TAG, "Streamer is streaming - skipping preview while live")
+                    val videoSource = streamer.videoInput?.sourceFlow?.value
+                    val isRtmpSource = videoSource is RTMPVideoSource
+
+                    // For RTMP sources, we can enable preview alongside streaming
+                    // thanks to the surface processor that handles dual output
+                    if (streamer.isStreamingFlow.value == true && !isRtmpSource) {
+                        Log.i(TAG, "Streamer is streaming - skipping preview while live (non-RTMP source)")
                         // Ensure preview view has no streamer assigned while streaming
                         try {
                             if (binding.preview.streamer == streamer) {
@@ -199,6 +202,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                             Log.w(TAG, "Failed to clear preview streamer while streaming: ${t.message}")
                         }
                     } else {
+                        if (isRtmpSource && streamer.isStreamingFlow.value == true) {
+                            Log.i(TAG, "RTMP source streaming - preview enabled alongside streaming")
+                        }
                         inflateStreamerPreview(streamer)
                     }
             } else {
@@ -207,13 +213,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         // Rebind preview when streaming stops so the UI preview returns to normal
+        // For RTMP sources, preview continues during streaming, so no need to rebind
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
             if (isStreaming == false) {
                 Log.d(TAG, "Streaming stopped - re-attaching preview if possible")
-                try {
-                    inflateStreamerPreview()
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
+                val streamer = previewViewModel.streamerLiveData.value
+                val videoSource = (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
+                val isRtmpSource = videoSource is RTMPVideoSource
+
+                if (!isRtmpSource) {
+                    // Only rebind for non-RTMP sources since RTMP sources maintain preview during streaming
+                    try {
+                        inflateStreamerPreview()
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
+                    }
+                } else {
+                    Log.d(TAG, "RTMP source - preview was maintained during streaming, no rebind needed")
                 }
             }
         }

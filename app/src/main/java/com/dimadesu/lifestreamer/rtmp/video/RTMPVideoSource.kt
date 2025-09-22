@@ -20,6 +20,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 import androidx.media3.common.VideoSize
+import io.github.thibaultbee.streampack.core.elements.processing.video.ISurfaceProcessorInternal
+import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
+import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.SurfaceOutput
+import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.ViewPortUtils
+import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.AspectRatioMode
+import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
+import io.github.thibaultbee.streampack.core.pipelines.outputs.SurfaceDescriptor
+import android.graphics.Rect
 
 class RTMPVideoSource (
     private val exoPlayer: ExoPlayer,
@@ -248,6 +256,21 @@ class RTMPVideoSource (
                 Log.e(TAG, "Error releasing ExoPlayer: ${e.message}", e)
             }
         }
+
+        // Release surface processor resources
+        try {
+            inputSurface?.let { surface ->
+                surfaceProcessor?.removeInputSurface(surface)
+                inputSurface = null
+            }
+            surfaceProcessor?.release()
+            surfaceProcessor = null
+            outputSurfaceOutput = null
+            previewSurfaceOutput = null
+            Log.d(TAG, "Surface processor released")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing surface processor: ${e.message}", e)
+        }
     }
 
     // AbstractPreviewableSource required members (stubbed for RTMP source)
@@ -260,6 +283,12 @@ class RTMPVideoSource (
 
     private var outputSurface: Surface? = null
     private var previewSurface: Surface? = null
+
+    // Surface processor for dual output (streaming + preview)
+    private var surfaceProcessor: ISurfaceProcessorInternal? = null
+    private var inputSurface: Surface? = null
+    private var outputSurfaceOutput: SurfaceOutput? = null
+    private var previewSurfaceOutput: SurfaceOutput? = null
     // Single listener instance to avoid leaks from multiple anonymous listeners
     private var playerListener: Player.Listener? = null
     // Listener to update cached format values on main thread.
@@ -304,14 +333,17 @@ class RTMPVideoSource (
 
     override suspend fun setOutput(surface: Surface) {
         outputSurface = surface
+        initializeSurfaceProcessor()
         Handler(Looper.getMainLooper()).post {
             try {
-                // Always attach output surface: streaming must render to encoder output.
-                exoPlayer.setVideoSurface(surface)
-                // Since an output surface is attached, preview should be considered inactive
-                _isPreviewingFlow.value = false
+                // Set the input surface (from surface processor) to ExoPlayer
+                // The surface processor will copy frames to both output and preview surfaces
+                inputSurface?.let { input ->
+                    exoPlayer.setVideoSurface(input)
+                    Log.d(TAG, "Set ExoPlayer surface to surface processor input surface")
+                }
             } catch (e: Exception) {
-                Log.e("RTMPVideoSource", "Error setting output surface: ${e.message}", e)
+                Log.e(TAG, "Error setting output surface: ${e.message}", e)
             }
         }
     }
@@ -321,77 +353,64 @@ class RTMPVideoSource (
     }
 
     override suspend fun setPreview(surface: Surface) {
-//        previewSurface = surface
-//        // Use main exoPlayer for preview - no separate instance needed
-//        Handler(Looper.getMainLooper()).post {
-//            try {
-//                // Do not override the output surface while streaming. If streaming is active,
-//                // the output surface must stay attached so the encoded stream receives frames.
-//                if (!_isStreamingFlow.value) {
-//                    exoPlayer.setVideoSurface(surface)
-//                } else {
-//                    Log.d(TAG, "setPreview called while streaming - not attaching preview surface to avoid overriding output")
-//                }
-//            } catch (e: Exception) {
-//                Log.e("RTMPVideoSource", "Error setting preview surface: ${e.message}", e)
-//            }
-//        }
+        previewSurface = surface
+        initializeSurfaceProcessor()
+        Log.d(TAG, "Preview surface set: $surface")
     }
 
     override suspend fun startPreview() {
-//        previewSurface?.let { surface ->
-//            Handler(Looper.getMainLooper()).post {
-//                try {
-//                    // Only attach preview surface and start playback when not streaming.
-//                    if (!_isStreamingFlow.value) {
-//                        exoPlayer.setVideoSurface(surface)
-//                        // Only prepare and start playback if we have media items for preview
-//                        if (exoPlayer.mediaItemCount > 0) {
-//                            Log.d(TAG, "Starting preview with media items")
-//                            if (exoPlayer.playbackState == Player.STATE_IDLE) {
-//                                exoPlayer.prepare()
-//                            }
-//                            exoPlayer.playWhenReady = true
-//                        } else {
-//                            Log.d(TAG, "Starting preview without media items - surface target only")
-//                        }
-//                    } else {
-//                        Log.d(TAG, "startPreview called while streaming - deferring preview to keep output surface attached")
-//                    }
-//                } catch (e: Exception) {
-//                    Log.e(TAG, "Error starting preview: ${e.message}", e)
-//                }
-//            }
-//            // Preview is considered active only when it is actually attached (i.e. not streaming)
-//            _isPreviewingFlow.value = !_isStreamingFlow.value
-//        } ?: run {
-//            _isPreviewingFlow.value = false
-//        }
+        previewSurface?.let { surface ->
+            _isPreviewingFlow.value = true
+            Log.d(TAG, "Starting preview with surface processor")
+
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    // Start ExoPlayer playback if not already running
+                    // The surface processor will handle distributing frames to both surfaces
+                    if (exoPlayer.mediaItemCount > 0) {
+                        Log.d(TAG, "Starting preview with media items")
+                        if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                            exoPlayer.prepare()
+                        }
+                        exoPlayer.playWhenReady = true
+                    } else {
+                        Log.d(TAG, "Starting preview without media items - surface target only")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error starting preview: ${e.message}", e)
+                    _isPreviewingFlow.value = false
+                }
+            }
+        } ?: run {
+            _isPreviewingFlow.value = false
+        }
     }
 
     override suspend fun startPreview(previewSurface: Surface) {
-//        setPreview(previewSurface)
-//        startPreview()
+        setPreview(previewSurface)
+        startPreview()
     }
 
     override suspend fun stopPreview() {
-//        _isPreviewingFlow.value = false
-//        Handler(Looper.getMainLooper()).post {
-//            try {
-//                // Only stop if we're not streaming - if streaming, keep playing but just remove preview surface
-//                if (!_isStreamingFlow.value) {
-//                    exoPlayer.setVideoSurface(null)
-//                    exoPlayer.stop()
-//                } else {
-//                    // If streaming, switch back to output surface if different from preview
-//                    if (outputSurface != previewSurface && outputSurface != null) {
-//                        exoPlayer.setVideoSurface(outputSurface)
-//                    }
-//                }
-//            } catch (e: Exception) {
-//                Log.e("RTMPVideoSource", "Error stopping preview: ${e.message}", e)
-//            }
-//        }
+        _isPreviewingFlow.value = false
+        Log.d(TAG, "Stopping preview")
+
+        // Remove preview surface from surface processor
+        previewSurfaceOutput?.let { surfaceOutput ->
+            surfaceProcessor?.removeOutputSurface(surfaceOutput)
+            previewSurfaceOutput = null
+        }
+
+        // Don't stop ExoPlayer if streaming is active
+        if (!_isStreamingFlow.value) {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    exoPlayer.playWhenReady = false
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping preview playback: ${e.message}", e)
+                }
+            }
+        }
     }
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
@@ -402,9 +421,109 @@ class RTMPVideoSource (
     }
 
     override suspend fun resetPreviewImpl() {
+        previewSurface = null
+        previewSurfaceOutput?.let { surfaceOutput ->
+            surfaceProcessor?.removeOutputSurface(surfaceOutput)
+        }
+        previewSurfaceOutput = null
     }
 
     override suspend fun resetOutputImpl() {
+        outputSurface = null
+        outputSurfaceOutput?.let { surfaceOutput ->
+            surfaceProcessor?.removeOutputSurface(surfaceOutput)
+        }
+        outputSurfaceOutput = null
+    }
+
+    private fun initializeSurfaceProcessor() {
+        if (surfaceProcessor == null && (outputSurface != null || previewSurface != null)) {
+            try {
+                Log.d(TAG, "Initializing surface processor for dual output")
+
+                // Create surface processor with SDR profile (most RTMP streams are SDR)
+                val processorFactory = DefaultSurfaceProcessorFactory()
+                surfaceProcessor = processorFactory.create(DynamicRangeProfile.sdr)
+
+                // Create input surface that ExoPlayer will render to
+                val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
+                val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
+                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timestampOffsetInNs)
+
+                Log.d(TAG, "Created input surface: $inputSurface with size ${width}x${height}")
+
+                // Add output surfaces
+                addSurfacesToProcessor()
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize surface processor: ${e.message}", e)
+                surfaceProcessor?.release()
+                surfaceProcessor = null
+            }
+        } else if (surfaceProcessor != null) {
+            // Update surfaces if processor already exists
+            addSurfacesToProcessor()
+        }
+    }
+
+    private fun addSurfacesToProcessor() {
+        surfaceProcessor?.let { processor ->
+            // Add output surface for streaming if available
+            outputSurface?.let { surface ->
+                if (outputSurfaceOutput == null) {
+                    val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
+                    val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
+                    val surfaceDescriptor = SurfaceDescriptor(
+                        surface = surface,
+                        resolution = Size(width, height),
+                        targetRotation = 0,
+                        isEncoderInputSurface = true
+                    )
+                    val transformationInfo = SurfaceOutput.TransformationInfo(
+                        aspectRatioMode = AspectRatioMode.PRESERVE,
+                        targetRotation = 0,
+                        cropRect = Rect(0, 0, width, height),
+                        needMirroring = false,
+                        infoProvider = _infoProviderFlow.value
+                    )
+                    outputSurfaceOutput = SurfaceOutput(
+                        surfaceDescriptor,
+                        { _isStreamingFlow.value },
+                        transformationInfo
+                    )
+                    processor.addOutputSurface(outputSurfaceOutput!!)
+                    Log.d(TAG, "Added output surface to processor: $surface")
+                }
+            }
+
+            // Add preview surface if available
+            previewSurface?.let { surface ->
+                if (previewSurfaceOutput == null) {
+                    val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
+                    val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
+                    val surfaceDescriptor = SurfaceDescriptor(
+                        surface = surface,
+                        resolution = Size(width, height),
+                        targetRotation = 0,
+                        isEncoderInputSurface = false
+                    )
+                    val transformationInfo = SurfaceOutput.TransformationInfo(
+                        aspectRatioMode = AspectRatioMode.PRESERVE,
+                        targetRotation = 0,
+                        cropRect = Rect(0, 0, width, height),
+                        needMirroring = false,
+                        infoProvider = _infoProviderFlow.value
+                    )
+                    previewSurfaceOutput = SurfaceOutput(
+                        surfaceDescriptor,
+                        { _isPreviewingFlow.value },
+                        transformationInfo
+                    )
+                    processor.addOutputSurface(previewSurfaceOutput!!)
+                    Log.d(TAG, "Added preview surface to processor: $surface")
+                }
+            }
+        }
     }
 
     class Factory(
