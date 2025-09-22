@@ -104,17 +104,25 @@ class RTMPVideoSource (
                 Log.d(TAG, "Output surface: $outputSurface")
                 Log.d(TAG, "RTMPVideoSource.startStream invoked (thread=${Thread.currentThread().name})")
                 
-                // Ensure we have an output surface before starting
-                if (outputSurface == null) {
-                    Log.w(TAG, "No output surface set - cannot start streaming")
-                    _isStreamingFlow.value = false
-                    return@post
-                }
-                
-                outputSurface?.let { surface ->
-                    Log.d(TAG, "Attaching output surface to ExoPlayer: $surface")
-                    exoPlayer.setVideoSurface(surface)
-                    Log.d(TAG, "Set video surface to output")
+                // If a surface processor is initialized we must attach ExoPlayer to
+                // the processor input surface so frames are copied to both the
+                // encoder output and the preview output. Otherwise attach the
+                // provided output surface directly.
+                if (surfaceProcessor != null && inputSurface != null) {
+                    Log.d(TAG, "Attaching ExoPlayer to surface processor input: $inputSurface")
+                    exoPlayer.setVideoSurface(inputSurface)
+                } else {
+                    // Ensure we have an output surface before starting if no processor
+                    if (outputSurface == null) {
+                        Log.w(TAG, "No output surface set - cannot start streaming")
+                        _isStreamingFlow.value = false
+                        return@post
+                    }
+                    outputSurface?.let { surface ->
+                        Log.d(TAG, "Attaching output surface to ExoPlayer: $surface")
+                        exoPlayer.setVideoSurface(surface)
+                        Log.d(TAG, "Set video surface to output")
+                    }
                 }
                 
                 // Streaming already marked true; pipeline can proceed even if ExoPlayer playback fails
@@ -415,9 +423,10 @@ class RTMPVideoSource (
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
         // Use cached format values to avoid accessing ExoPlayer from non-main threads.
-        val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
-        val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
-        return Size(width, height)
+        val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetSize.width
+        val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetSize.height
+        val rotation = cachedRotation.get()
+        return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
     }
 
     override suspend fun resetPreviewImpl() {
