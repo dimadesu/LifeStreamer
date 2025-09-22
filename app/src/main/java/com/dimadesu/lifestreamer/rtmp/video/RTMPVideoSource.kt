@@ -181,16 +181,22 @@ class RTMPVideoSource (
         _isStreamingFlow.value = false
         Handler(Looper.getMainLooper()).post {
             try {
-        Log.d(TAG, "Stopping stream - current state: ${exoPlayer.playbackState}")
-                // Only stop playback, don't clear surface immediately to avoid rebuffering
-                exoPlayer.playWhenReady = false
-        Log.d(TAG, "Set playWhenReady = false")
-                
-                // Give a small delay before stopping completely
+                Log.d(TAG, "Stopping stream - current state: ${exoPlayer.playbackState}")
+                // If preview is active, keep playback running for the preview.
+                // Only pause playback immediately if no preview is active.
+                if (!_isPreviewingFlow.value) {
+                    exoPlayer.playWhenReady = false
+                    Log.d(TAG, "Set playWhenReady = false (no preview active)")
+                } else {
+                    Log.d(TAG, "Preview active - keeping playback for preview")
+                }
+
+                // Give a small delay before performing a full stop/cleanup. Only
+                // perform the full stop if both streaming and previewing are
+                // inactive to avoid interrupting an ongoing preview.
                 Handler(Looper.getMainLooper()).postDelayed({
-                        try {
-                        // Only stop and clear surface if we're still not streaming
-                        if (!_isStreamingFlow.value) {
+                    try {
+                        if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
                             Log.d(TAG, "Delaying full stop: stopping ExoPlayer and clearing surface")
                             exoPlayer.stop()
                             exoPlayer.setVideoSurface(null)
@@ -202,15 +208,17 @@ class RTMPVideoSource (
                                 }
                                 playerListener = null
                             }
-                                // Also remove formatListener if it was added
-                                if (isFormatListenerRegistered) {
-                                    try {
-                                        exoPlayer.removeListener(formatListener)
-                                    } catch (ignored: Exception) {
-                                    }
-                                    isFormatListenerRegistered = false
+                            // Also remove formatListener if it was added
+                            if (isFormatListenerRegistered) {
+                                try {
+                                    exoPlayer.removeListener(formatListener)
+                                } catch (ignored: Exception) {
                                 }
+                                isFormatListenerRegistered = false
+                            }
                             Log.d(TAG, "Stream stopped and surface cleared")
+                        } else {
+                            Log.d(TAG, "Skipping full stop because preview or streaming became active")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in delayed stop: ${e.message}", e)
@@ -409,16 +417,51 @@ class RTMPVideoSource (
             previewSurfaceOutput = null
         }
 
-        // Don't stop ExoPlayer if streaming is active
-        if (!_isStreamingFlow.value) {
-            Handler(Looper.getMainLooper()).post {
-                try {
+        // If streaming is active, keep playback running for streaming; only
+        // pause/cleanup if neither streaming nor previewing are active.
+        Handler(Looper.getMainLooper()).post {
+            try {
+                if (!_isStreamingFlow.value) {
                     exoPlayer.playWhenReady = false
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error stopping preview playback: ${e.message}", e)
+                    Log.d(TAG, "Set playWhenReady = false from stopPreview()")
+                } else {
+                    Log.d(TAG, "Streaming active - keeping playback after stopPreview()")
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping preview playback: ${e.message}", e)
             }
         }
+
+        // If both previewing and streaming are now inactive, schedule a full stop
+        // to cleanup surfaces/listeners.
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
+                    Log.d(TAG, "Both streaming and preview inactive - performing full stop cleanup")
+                    try {
+                        exoPlayer.stop()
+                        exoPlayer.setVideoSurface(null)
+                    } catch (ignored: Exception) {
+                    }
+                    playerListener?.let { listener ->
+                        try {
+                            exoPlayer.removeListener(listener)
+                        } catch (ignored: Exception) {
+                        }
+                        playerListener = null
+                    }
+                    if (isFormatListenerRegistered) {
+                        try {
+                            exoPlayer.removeListener(formatListener)
+                        } catch (ignored: Exception) {
+                        }
+                        isFormatListenerRegistered = false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in stopPreview delayed cleanup: ${e.message}", e)
+            }
+        }, 100)
     }
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
