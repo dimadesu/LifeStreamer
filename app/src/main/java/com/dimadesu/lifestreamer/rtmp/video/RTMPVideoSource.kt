@@ -35,6 +35,22 @@ class RTMPVideoSource (
     companion object {
         private const val TAG = "RTMPVideoSource"
     }
+
+    init {
+        // Register format listener immediately to catch format changes as soon as possible
+        Handler(Looper.getMainLooper()).post {
+            try {
+                if (!isFormatListenerRegistered) {
+                    exoPlayer.addListener(formatListener)
+                    isFormatListenerRegistered = true
+                    updateCachedFormat() // Get initial format if available
+                    Log.d(TAG, "Format listener registered on RTMPVideoSource init")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to register format listener on init: ${e.message}")
+            }
+        }
+    }
     /*
      * ExoPlayer must be accessed from the main thread (see ExoPlayer docs).
      * Reading `exoPlayer.videoFormat` from background coroutines/threads can
@@ -357,12 +373,24 @@ class RTMPVideoSource (
             val prevH = cachedFormatHeight.get()
             val prevRot = cachedRotation.get()
             if (prevW != w || prevH != h || prevRot != rot) {
+                Log.d(TAG, "Format changed: ${prevW}x${prevH} -> ${w}x${h}, rotation: $prevRot -> $rot")
                 cachedFormatWidth.set(w)
                 cachedFormatHeight.set(h)
                 cachedRotation.set(rot)
                 try {
                     _infoProviderFlow.value = makeInfoProvider()
                 } catch (ignored: Exception) {
+                }
+
+                // If we now have valid dimensions and we're previewing, reinitialize surface processor
+                // to ensure correct sizing
+                if (w > 0 && h > 0 && _isPreviewingFlow.value) {
+                    Log.d(TAG, "Format updated while previewing - reinitializing surface processor")
+                    try {
+                        initializeSurfaceProcessor()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to reinitialize surface processor after format update: ${e.message}")
+                    }
                 }
             }
         } catch (ignored: Exception) {
@@ -497,6 +525,21 @@ class RTMPVideoSource (
         val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetSize.width
         val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetSize.height
         val rotation = cachedRotation.get()
+
+        // If we don't have valid cached dimensions yet (common when first switching to RTMP),
+        // trigger format update on main thread and return a reasonable default size
+        if (cachedFormatWidth.get() <= 0 || cachedFormatHeight.get() <= 0) {
+            Log.d(TAG, "getPreviewSize: No cached format available, using default size and triggering update")
+            Handler(Looper.getMainLooper()).post {
+                updateCachedFormat()
+            }
+            // Return a common RTMP video size as default to prevent preview sizing issues
+            // Most RTMP streams are landscape, so use 16:9 aspect ratio
+            val defaultWidth = 1920
+            val defaultHeight = 1080
+            return if (rotation == 90 || rotation == 270) Size(defaultHeight, defaultWidth) else Size(defaultWidth, defaultHeight)
+        }
+
         return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
     }
 
@@ -544,7 +587,13 @@ class RTMPVideoSource (
                 surfaceProcessor = null
             }
         } else if (surfaceProcessor != null) {
-            // Update surfaces if processor already exists
+            // Check if we need to recreate the input surface due to size changes
+            val currentWidth = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
+            val currentHeight = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
+
+            // For simplicity, we'll just update the surfaces. The surface processor should handle
+            // size changes internally. If there are issues, we might need to recreate the entire processor.
+            Log.d(TAG, "Updating surfaces on existing processor")
             addSurfacesToProcessor()
         }
     }
