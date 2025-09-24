@@ -65,6 +65,10 @@ dependencies {
     implementation("io.github.thibaultbee.streampack:streampack-rtmp:3.0.0-RC3")
     implementation("io.github.thibaultbee.streampack:streampack-srt:3.0.0-RC3")
 
+    // Needed because we copied PreviewView into the app module which depends on viewfinder types
+    implementation("androidx.camera.viewfinder:viewfinder-core:1.4.0-alpha13")
+    implementation("androidx.camera.viewfinder:viewfinder-view:1.4.0-alpha13")
+
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
     implementation("androidx.media3:media3-datasource-rtmp:1.8.0")
