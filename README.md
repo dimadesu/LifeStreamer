@@ -50,7 +50,7 @@ I've started with original camera demo from StreamPack. I'm tweaking it and addi
   - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
   - There are many things that can go wrong with RTMP source, but I got the basic version working.
 
-### Other features
+### Planning to implement next
 
 - Re-connect on disconnect
 - Polish existing functionality and user flows
