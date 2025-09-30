@@ -1,12 +1,20 @@
-# LifeStreamer app for Android
+# LifeStreamer Android app
 
-Live streaming app for Android based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
+Live streaming app for Android designed for IRL streaming based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
 
-Can stream SRT with dynamic/adaptive bitrate alrogrithm as well as RTMP. A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
+## Features
 
-Can have bonding via [Bond Bunny app](https://github.com/dimadesu/bond-bunny).
+- Publish streams over SRT with dynamic bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
+- RTMP as video/audio source - restream RTMP feed from action cameras as SRT HEVC with great dynamic bitrate.
+- A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
 
 Discord server: https://discord.gg/2UzEkU2AJW
+
+## Apps that can work together
+
+- [MediaSrvr](https://github.com/dimadesu/MediaSrvr) - Runs RTMP server on Android phone. You can publish RTMP stream to it from an action camera, for example.
+- [LifeStreamer](https://github.com/dimadesu/LifeStreamer) - Can use RTMP as source: playback RTMP stream from server and restream it as SRT with great dynamic bitrate.
+- [Bond Bunny](https://github.com/dimadesu/bond-bunny) - You can use LifeStreamer to publish SRT stream into Bond Bunny app. Bond Bunny accepts SRT as input and forwards packets to SRTLA server like Belabox Cloud. Uses multiple networks to improve stream quality.
 
 ## How to install
 
@@ -31,24 +39,25 @@ Stretch goal: USB/UVC as video/audio source.
 
 ## Roadmap
 
-I'll start with original camera demo from StreamPack. I'll tweak it and add new features on top of it.
+I've started with original camera demo from StreamPack. I'm tweaking it and adding new features on top of it.
 
-### Top planned features
+### Main implemented features
 
-- [x] _(Can be polished more)_ Foreground service to allow streaming with app in background, phone locked and screen off.
-- [x] Dynamic bitrate. I want to upgrade it to [Belabox](https://github.com/BELABOX/belacoder) or [Moblin](https://github.com/eerimoq/moblin) algorithm.
-- RTMP as source.
-  - I tried a few things. I looked into building RTMP server, like Moblin does. Maybe I'll try building it later.
-  - I was able to get proof of concept working with [ExoPlayer](https://github.com/androidx/media).
-  - I can run server like [MediaMTX](https://github.com/bluenviron/mediamtx) in [Termux](https://termux.dev/en/) on Android or somewhere on the network. [Watch this video to see how to do it.](https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&t=310)
-  - I can stream RTMP from action camera to my server.
-  - I give ExoPlayer RTMP URL to that server to play and it does all the hard work - handles RTMP connection, demuxes and decodes video/audio.
-  - I sort of grab uncommpressed data from ExoPlayer and feed into StreamPack via custom video/audio source.
+- [x] Dynamic bitrate. I added [Belabox](https://github.com/BELABOX/belacoder) and [Moblin](https://github.com/eerimoq/moblin) algorithms. Can be changed via Settings.
+- [x] Foreground service to allow streaming with app in background, phone locked and screen off.
+  - Status: Usable, needs performance improvements
+- [x] RTMP as source.
+  - Status: Usable, still polishing.
+  - Run RTMP server on your device using [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app.
+    - Alternatively, run [MediaMTX](https://github.com/bluenviron/mediamtx) in [Termux](https://termux.dev/en/). [Watch video to see how to set it up.](https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&t=310)
+  - Stream RTMP from action camera to RTMP server.
+  - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
   - There are many things that can go wrong with RTMP source, but I got the basic version working.
 
-### Planned minor features
+### Planning to implement next
+
 - Re-connect on disconnect
-- Render bitrate and stream status in UI
+- Polish existing functionality and user flows
 
 ## Why StreamPack
 
@@ -64,47 +73,44 @@ Main features StreamPack provides out of the box that make sense to have as a ba
 
 StreamPack includes 2 great demo apps that can use phone cameras or screen recorder for live streaming.
 
-## Project status update 18 September 2025
+## Project status update 30 September 2025
 
-Applies to [LifeStreamer v0.0.8](https://github.com/dimadesu/LifeStreamer/releases/tag/v0.0.8).
+Applies to [LifeStreamer v0.2.0](https://github.com/dimadesu/LifeStreamer/releases/tag/v0.2.0).
 
 - :white_check_mark: Dynamic bitrate
 
-  Seems to work well. 3 algorithms added. Can be configured in Settings. When "bitrate regulation" is enabled the only bitrate setting that is used is maximum bitrate under "bitrate regulation".
+  - 3 algorithms added: Belabox, Moblin fast, Moblin slow. All seems to work well. Still testing.
+  - Algortihm can be configured in Settings.
+  - When "bitrate regulation" is enabled the only bitrate setting that is used is maximum bitrate under "bitrate regulation".
 
 - :warning: Background mode aka foreground service
 
-  Can be a bit unstable and stuttery.
+  Can work under right conditions:
 
-  **Workaround:** either don't go into background at all OR stay in the foreground as much as possible OR lower maximum bitrate to ~2000 kbps.
+  - Don't use phone or other apps as much as possible during the streaming in background.
+  - Don't set bitrate too hight. On my Samsung S20 FE it works w/o issues with 6000 kbps for full HD.
+  
+  Can be a bit unstable and stuttery otherwise. **Workarounds:**
 
-  I have ideas how to approach fixing it.
+  - Stay in the foreground as much as possible.
+  - Don't go into background at all.
+  - Lower maximum bitrate to ~2000 kbps (experiment what works for you) if you want to use other apps during the stream.
 
 - :warning:  RTMP as source
 
-  Many things can glitch out. **Workaround** is to stream only RTMP source primarily in foreground - no switching between sources and apps.
+  Can work under the right conditions. I recommened monitoring the stream on the 2nd phone. Do not use streaming phone for anything else as much as possible.
 
-  I tested streaming from DJI action cam 4 riding bicycle. I found configuration that works.
-
-  At first, it was very glitchy, but then I got rid of anything that's not required. I kept only bare minimum: one SIM card, no Bond Bunny, etc.
-
-  SRT to Belabox Cloud w/ "Belabox" bitrate regulator (all algorithms should work, I think). Max bitrate 5000kbps (can be set higher).
-
-  Do only minimum steps required to start the stream:
-
-  - Run MediaMTX server.
+  - Start RTMP server.
   - Start action cam stream to server.
   - Kill LifeStreamer app/service.
   - Start LifeStreamer app.
-  - Switch to RTMP source.
-  - Landscape orientation.
-  - Start the stream.
-  - Keep LifeStreamer app open, do not switch apps/sources. Do not go to settings screen. Do not lock the phone or turn the screen off.
-  - This works well on Samsung S20 FE on a usable cell signal (assuming phone is not too hot, so no CPU throttling).
+  - Start the stream from LifeStreamer.
+  - If you use Bond Bunny, you can periodically open Bond Bunny when internet starts getting worse - I think Android is trying to slow it down, when it's in background for too long. I need to look into it.
+  - Works on my Samsung S20 FE on a usable cell signal (assuming phone is not too hot, so no CPU throttling).
  
 ## Recommended solutions to most issues
 
-**There are many bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
+**There are bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
 
 Minimise transitions between foreground/background and stay in foreground for better performance with screen on and phone unlocked until background mode is fixed.
 
