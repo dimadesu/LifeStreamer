@@ -1,8 +1,12 @@
-# LifeStreamer app for Android
+# LifeStreamer Android app
 
-Live streaming app for Android based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
+Live streaming app for Android designed for IRL streaming based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
 
-Can stream SRT with dynamic bitrate from Belabox or Moblin. A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
+## Features
+
+- Publish streams over SRT with dynamic bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
+- RTMP as video/audio source - restream RTMP feed from action cameras as SRT HEVC with great dynamic bitrate.
+- A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
 
 Discord server: https://discord.gg/2UzEkU2AJW
 
