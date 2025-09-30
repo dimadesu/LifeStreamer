@@ -2,11 +2,15 @@
 
 Live streaming app for Android based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
 
-Can stream SRT with dynamic/adaptive bitrate alrogrithm as well as RTMP. A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
-
-Can have bonding via [Bond Bunny app](https://github.com/dimadesu/bond-bunny).
+Can stream SRT with dynamic bitrate from Belabox or Moblin. A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
 
 Discord server: https://discord.gg/2UzEkU2AJW
+
+## Apps that can work together
+
+- [MediaSrvr](https://github.com/dimadesu/MediaSrvr) - Runs RTMP server on Android phone. You can publish RTMP stream to it from an action camera, for example.
+- [LifeStreamer](https://github.com/dimadesu/LifeStreamer) - Can use RTMP as source: playback RTMP stream from server and restream it as SRT with great dynamic bitrate.
+- [Bond Bunny](https://github.com/dimadesu/bond-bunny) - You can use LifeStreamer to publish SRT stream into Bond Bunny app. Bond Bunny accepts SRT as input and forwards packets to SRTLA server like Belabox Cloud. Uses multiple networks to improve stream quality.
 
 ## How to install
 
@@ -31,24 +35,25 @@ Stretch goal: USB/UVC as video/audio source.
 
 ## Roadmap
 
-I'll start with original camera demo from StreamPack. I'll tweak it and add new features on top of it.
+I've started with original camera demo from StreamPack. I'm tweaking it and adding new features on top of it.
 
-### Top planned features
+### Main implemented features
 
-- [x] _(Can be polished more)_ Foreground service to allow streaming with app in background, phone locked and screen off.
-- [x] Dynamic bitrate. I want to upgrade it to [Belabox](https://github.com/BELABOX/belacoder) or [Moblin](https://github.com/eerimoq/moblin) algorithm.
-- RTMP as source.
-  - I tried a few things. I looked into building RTMP server, like Moblin does. Maybe I'll try building it later.
-  - I was able to get proof of concept working with [ExoPlayer](https://github.com/androidx/media).
-  - I can run server like [MediaMTX](https://github.com/bluenviron/mediamtx) in [Termux](https://termux.dev/en/) on Android or somewhere on the network. [Watch this video to see how to do it.](https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&t=310)
-  - I can stream RTMP from action camera to my server.
-  - I give ExoPlayer RTMP URL to that server to play and it does all the hard work - handles RTMP connection, demuxes and decodes video/audio.
-  - I sort of grab uncommpressed data from ExoPlayer and feed into StreamPack via custom video/audio source.
+- [x] Dynamic bitrate. I added [Belabox](https://github.com/BELABOX/belacoder) and [Moblin](https://github.com/eerimoq/moblin) algorithms. Can be changed via Settings.
+- [x] Foreground service to allow streaming with app in background, phone locked and screen off.
+  - Status: Usable, needs performance improvements
+- [x] RTMP as source.
+  - Status: Usable, still polishing.
+  - Run RTMP server on your device using [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app.
+    - Alternatively, run [MediaMTX](https://github.com/bluenviron/mediamtx) in [Termux](https://termux.dev/en/). [Watch video to see how to set it up.](https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&t=310)
+  - Stream RTMP from action camera to RTMP server.
+  - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
   - There are many things that can go wrong with RTMP source, but I got the basic version working.
 
-### Planned minor features
+### Other features
+
 - Re-connect on disconnect
-- Render bitrate and stream status in UI
+- Polish existing functionality and user flows
 
 ## Why StreamPack
 
