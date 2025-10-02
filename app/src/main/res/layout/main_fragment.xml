@@ -39,6 +39,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:contentDescription="@string/switch_camera_source"
+                android:onClick="@{() -> viewmodel.toggleCamera()}"
                 android:onLongClick="@{() -> viewmodel.switchBackToFront()}"
                 android:src="@drawable/ic_baseline_cameraswitch_24"
                 app:goneUnless="@{viewmodel.isCameraSource}"
@@ -211,5 +212,14 @@
 
 
         </LinearLayout>
+
+        <com.dimadesu.lifestreamer.ui.main.BufferVisualizerView
+            android:id="@+id/bufferVisualizer"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginTop="64dp" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </layout>
