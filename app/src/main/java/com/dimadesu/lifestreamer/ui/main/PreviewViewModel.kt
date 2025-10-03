@@ -985,7 +985,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         currentRtmpPlayer = player
         
-        val maxBufferingDuration = 10_000L // 10 seconds of buffering = disconnection
+        val maxBufferingDuration = 1_000L // 1 second of buffering = disconnection
         
         rtmpDisconnectListener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -1061,6 +1061,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Fallback to bitmap immediately
                 RtmpSourceSwitchHelper.switchToBitmapFallback(currentStreamer, testBitmap)
+                
+                // Fallback audio to microphone
+                try {
+                    currentStreamer.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory())
+                    Log.i(TAG, "Switched audio to microphone on RTMP disconnection")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to switch audio to microphone: ${e.message}")
+                }
                 
                 // Start retry loop
                 rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
