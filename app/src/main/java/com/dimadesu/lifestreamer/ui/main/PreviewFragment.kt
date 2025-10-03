@@ -48,6 +48,7 @@ import androidx.lifecycle.lifecycleScope
 import com.dimadesu.lifestreamer.ApplicationConstants
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
+import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
@@ -91,38 +92,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     @SuppressLint("MissingPermission")
     private fun bindProperties() {
-        binding.liveButton.setOnClickListener { view ->
-            view as ToggleButton
-            Log.d(TAG, "Live button clicked - isChecked: ${view.isChecked}, streaming: ${previewViewModel.isStreamingLiveData.value}, trying: ${previewViewModel.isTryingConnectionLiveData.value}")
+        binding.liveButton.setOnClickListener {
+            // Use streamStatus as single source of truth for determining action
+            val currentStatus = previewViewModel.streamStatus.value
+            Log.d(TAG, "Live button clicked - currentStatus: $currentStatus")
             
-            // Check current state to determine action
-            val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value == true
-            val isTryingConnection = previewViewModel.isTryingConnectionLiveData.value == true
-            
-            // Also check the actual streamer state directly as backup
-            val actualStreamingState = previewViewModel.serviceStreamer?.isStreamingFlow?.value == true
-            Log.d(TAG, "Live button - actualStreamingState from serviceStreamer: $actualStreamingState")
-            
-            // Use either LiveData or direct streamer state
-            val isReallyStreaming = isCurrentlyStreaming || actualStreamingState
-            
-            if (!isReallyStreaming && !isTryingConnection) {
-                // Not streaming and not trying - start stream
-                Log.d(TAG, "Starting stream...")
-                // Set button to "Stop" immediately and keep it there
-                view.isChecked = true
-                startStreamIfPermissions(previewViewModel.requiredPermissions)
-            } else if (isReallyStreaming || isTryingConnection) {
-                // Streaming or trying to connect - stop stream
-                Log.d(TAG, "Stopping stream...")
-                // Set button to "Start" immediately
-                view.isChecked = false
-                stopStream()
-            } else {
-                Log.w(TAG, "Uncertain state - button clicked but unclear action needed")
-                // Reset button to reflect actual state
-                view.isChecked = isReallyStreaming || isTryingConnection
+            when (currentStatus) {
+                StreamStatus.NOT_STREAMING, StreamStatus.ERROR -> {
+                    // Start streaming
+                    Log.d(TAG, "Starting stream...")
+                    startStreamIfPermissions(previewViewModel.requiredPermissions)
+                }
+                StreamStatus.STARTING, StreamStatus.CONNECTING, StreamStatus.STREAMING -> {
+                    // Stop streaming or cancel connection attempt
+                    Log.d(TAG, "Stopping stream...")
+                    stopStream()
+                }
             }
+            // Note: Button state will be updated by streamStatus observer
         }
 
         binding.switchCameraButton.setOnClickListener {
@@ -141,6 +128,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             showError("Endpoint error", it)
         }
 
+        // Lock/unlock orientation based on streaming state
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
             Log.d(TAG, "Streaming state changed to: $isStreaming")
             if (isStreaming) {
@@ -148,31 +136,36 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             } else {
                 unlockOrientation()
             }
-            if (isStreaming) {
-                // Ensure button shows "Stop" when definitely streaming
-                if (!binding.liveButton.isChecked) {
-                    Log.d(TAG, "Streaming confirmed - ensuring button shows Stop")
-                    binding.liveButton.isChecked = true
-                }
-            } else {
-                // Only set to "Start" if we're not in a connecting state
-                if (previewViewModel.isTryingConnectionLiveData.value != true && binding.liveButton.isChecked) {
-                    Log.d(TAG, "Streaming stopped and not trying - ensuring button shows Start")
-                    binding.liveButton.isChecked = false
-                }
-            }
         }
 
-        previewViewModel.isTryingConnectionLiveData.observe(viewLifecycleOwner) { isWaitingForConnection ->
-            Log.d(TAG, "Trying connection state changed to: $isWaitingForConnection")
-            // Don't change button state here - let the click handler manage it
-            // if (isWaitingForConnection) {
-            //     binding.liveButton.isChecked = true
-            // } else if (previewViewModel.isStreamingLiveData.value == true) {
-            //     binding.liveButton.isChecked = true
-            // } else {
-            //     binding.liveButton.isChecked = false
-            // }
+        // Observe streamStatus as single source of truth for button state
+        lifecycleScope.launch {
+            previewViewModel.streamStatus.collect { status ->
+                Log.d(TAG, "Stream status changed to: $status")
+                when (status) {
+                    StreamStatus.ERROR, StreamStatus.NOT_STREAMING -> {
+                        // Reset button to "Start" state when error occurs or stream stops
+                        if (binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream error/stopped - resetting button to Start")
+                            binding.liveButton.isChecked = false
+                        }
+                    }
+                    StreamStatus.STARTING, StreamStatus.CONNECTING -> {
+                        // Keep button in "Stop" state during connection attempts
+                        if (!binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream starting/connecting - setting button to Stop")
+                            binding.liveButton.isChecked = true
+                        }
+                    }
+                    StreamStatus.STREAMING -> {
+                        // Ensure button shows "Stop" when streaming
+                        if (!binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream active - ensuring button shows Stop")
+                            binding.liveButton.isChecked = true
+                        }
+                    }
+                }
+            }
         }
 
         previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
