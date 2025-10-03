@@ -375,21 +375,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         } catch (t: Throwable) {
                             Log.w(TAG, "Failed to collect service status: ${t.message}")
                         }
-                        // Collect critical errors from service and show dialogs
-                        try {
-                            val errFlow = binder.criticalErrors()
-                            viewModelScope.launch {
-                                errFlow.collect { err ->
-                                    try {
-                                        _streamerErrorLiveData.postValue(err)
-                                    } catch (t: Throwable) {
-                                        Log.w(TAG, "Failed to post critical error: ${t.message}")
-                                    }
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to collect critical errors from service: ${t.message}")
-                        }
+                        // Note: Critical errors are already handled via throwableFlow observer
+                        // in observeStreamerFlows(). Don't collect criticalErrors here to avoid
+                        // duplicate error dialogs when mid-stream errors occur.
+                        // The service's onErrorNotification still updates the notification UI.
+                        
                         // Collect isMuted flow to keep UI toggle in sync when mute is toggled via notification
                         try {
                             val isMutedFlow = binder.isMutedFlow()
