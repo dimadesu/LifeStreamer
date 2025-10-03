@@ -683,7 +683,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val success = startServiceStreaming(descriptor)
                 if (!success) {
                     Log.e(TAG, "Stream start failed - startServiceStreaming returned false")
-                    _streamerErrorLiveData.postValue("Failed to start stream")
+                    // Error already posted to _streamerErrorLiveData by startServiceStreaming
+                    // Don't post duplicate error
                     _streamStatus.value = StreamStatus.ERROR
                     return@launch
                 }
@@ -766,15 +767,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _isTryingConnectionLiveData.postValue(false)
                         val error = "Failed to configure MediaProjection audio: ${e.message}"
                         Log.e(TAG, error, e)
-                        onError(error)
+                        _streamerErrorLiveData.postValue(error)
+                        _streamStatus.value = StreamStatus.ERROR
+                        onError(error)  // Also call callback for custom handling if needed
                     }
                 }
             } else {
                 _isTryingConnectionLiveData.postValue(false)
                 val error = "MediaProjection permission required for streaming"
                 Log.e(TAG, error)
-                onError(error)
+                _streamerErrorLiveData.postValue(error)
                 _streamStatus.value = StreamStatus.ERROR
+                onError(error)  // Also call callback for custom handling if needed
             }
         }
     }
@@ -786,15 +790,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val descriptor = storageRepository.endpointDescriptorFlow.first()
                 Log.i(TAG, "Starting stream with descriptor: $descriptor")
                 Log.i(TAG, "About to call startServiceStreaming()...")
-                startServiceStreaming(descriptor)
+                val success = startServiceStreaming(descriptor)
+                
+                if (!success) {
+                    Log.e(TAG, "startServiceStreaming() returned false - stream start failed")
+                    // Error already posted to _streamerErrorLiveData by startServiceStreaming
+                    // Don't call onError to avoid double error dialogs
+                    _streamStatus.value = StreamStatus.ERROR
+                    return@launch
+                }
+                
                 Log.i(TAG, "startServiceStreaming() completed successfully")
-
                 Log.i(TAG, "Stream setup completed successfully, calling onSuccess()")
                 _streamStatus.value = StreamStatus.STREAMING
                 onSuccess()
             } catch (e: Throwable) {
                 val error = "Stream start failed: ${e.message ?: "Unknown error"}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
+                // Only call onError for unexpected exceptions not already handled
                 onError(error)
                 _streamStatus.value = StreamStatus.ERROR
             } finally {

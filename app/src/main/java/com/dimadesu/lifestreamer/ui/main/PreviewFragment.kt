@@ -258,14 +258,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         if (previewViewModel.requiresMediaProjection()) {
             Log.d(TAG, "MediaProjection required - using startStreamWithMediaProjection")
             // Use MediaProjection-enabled streaming for RTMP sources
+            // Note: Errors are displayed via streamerErrorLiveData observer, no need for onError callback
             previewViewModel.startStreamWithMediaProjection(
                 mediaProjectionLauncher,
                 onSuccess = {
                     Log.d(TAG, "MediaProjection stream started successfully")
                 },
                 onError = { error ->
+                    // Error already posted to streamerErrorLiveData by ViewModel
+                    // Just log it here to avoid double error dialogs
                     Log.e(TAG, "MediaProjection stream failed: $error")
-                    showError("Streaming Error", error)
                 }
             )
         } else {
