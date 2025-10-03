@@ -8,6 +8,8 @@ Live streaming app for Android designed for IRL streaming based on [StreamPack S
 - RTMP as video/audio source - restream RTMP feed from action cameras as SRT HEVC with great dynamic bitrate.
 - A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
 
+![LifeStreamer screenshot](docs/LifeStreamer-screenshot.png)
+
 Discord server: https://discord.gg/2UzEkU2AJW
 
 ## Apps that can work together
