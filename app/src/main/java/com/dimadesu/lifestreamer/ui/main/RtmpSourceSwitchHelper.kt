@@ -168,10 +168,8 @@ internal object RtmpSourceSwitchHelper {
                     }
 
                     if (exoPlayerInstance == null) {
-                        // Wait and retry
-                        if (isFirstAttempt) {
-                            switchToBitmapFallback(currentStreamer, testBitmap)
-                        }
+                        // Wait and retry - always set bitmap fallback to ensure audio is configured
+                        switchToBitmapFallback(currentStreamer, testBitmap)
                         if (isActive) {
                             postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
                         }
@@ -240,9 +238,8 @@ internal object RtmpSourceSwitchHelper {
                             Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
                             try { exoPlayerInstance.release() } catch (_: Exception) {}
                             
-                            if (isFirstAttempt) {
-                                switchToBitmapFallback(currentStreamer, testBitmap)
-                            }
+                            // Always set bitmap fallback to ensure audio source is configured
+                            switchToBitmapFallback(currentStreamer, testBitmap)
                             // Wait and retry
                             if (isActive) {
                                 postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
@@ -254,9 +251,8 @@ internal object RtmpSourceSwitchHelper {
                         Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
                         try { exoPlayerInstance.release() } catch (_: Exception) {}
                         
-                        if (isFirstAttempt) {
-                            switchToBitmapFallback(currentStreamer, testBitmap)
-                        }
+                        // Always set bitmap fallback to ensure audio source is configured
+                        switchToBitmapFallback(currentStreamer, testBitmap)
                         // Wait and retry
                         if (isActive) {
                             postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
