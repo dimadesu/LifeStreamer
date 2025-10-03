@@ -182,11 +182,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         return currentVideoSource != null && currentVideoSource !is ICameraSource
     }
 
-    // Streamer errors
-    private val _streamerErrorLiveData: MutableLiveData<String> = MutableLiveData()
-    val streamerErrorLiveData: LiveData<String> = _streamerErrorLiveData
-    private val _endpointErrorLiveData: MutableLiveData<String> = MutableLiveData()
-    val endpointErrorLiveData: LiveData<String> = _endpointErrorLiveData
+    // Streamer errors (nullable to support single-event pattern - cleared after observation)
+    private val _streamerErrorLiveData: MutableLiveData<String?> = MutableLiveData()
+    val streamerErrorLiveData: LiveData<String?> = _streamerErrorLiveData
+    private val _endpointErrorLiveData: MutableLiveData<String?> = MutableLiveData()
+    val endpointErrorLiveData: LiveData<String?> = _endpointErrorLiveData
+    
+    // Clear methods for single-event pattern (prevents re-showing errors on orientation change)
+    fun clearStreamerError() {
+        _streamerErrorLiveData.value = null
+    }
+    
+    fun clearEndpointError() {
+        _endpointErrorLiveData.value = null
+    }
 
     // RTMP status for UI display
     private val _rtmpStatusLiveData: MutableLiveData<String?> = MutableLiveData()
