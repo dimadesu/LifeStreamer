@@ -24,6 +24,7 @@ import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
+import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
@@ -110,7 +111,8 @@ internal object RtmpSourceSwitchHelper {
      * - prepare ExoPlayer for RTMP preview
      * - wait until ready (with timeout)
      * - attach RTMP video and appropriate audio source
-     * Returns true if RTMP attach succeeded, false otherwise.
+     * - retry every 5 seconds if connection fails
+     * Returns the Job for the retry loop so it can be cancelled if needed.
      */
     suspend fun switchToRtmpSource(
         application: Application,
@@ -119,105 +121,151 @@ internal object RtmpSourceSwitchHelper {
         storageRepository: DataStoreRepository,
         mediaProjectionHelper: MediaProjectionHelper,
         streamingMediaProjection: MediaProjection?,
-        postError: (String) -> Unit
-    ): Boolean {
-        try {
-
-            val videoSourceUrl = try {
-                storageRepository.rtmpVideoSourceUrlFlow.first()
-            } catch (e: Exception) {
-                application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
-            }
-
-            val exoPlayerInstance = try {
-                createExoPlayer(application, videoSourceUrl)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
-                null
-            }
-
-            if (exoPlayerInstance == null) {
-                // Nothing we can do, fallback to bitmap
-                postError("RTMP preview preparation failed, staying on bitmap")
-                switchToBitmapFallback(currentStreamer, testBitmap)
-                return false
-            }
-
-            try {
-                // Prepare and wait for the RTMP player to be ready before touching streamer
-                withTimeout(3000) {
-                    exoPlayerInstance.prepare()
-                    exoPlayerInstance.playWhenReady = true
-                    val ready = awaitReady(exoPlayerInstance)
-                    if (!ready) throw Exception("ExoPlayer did not become ready")
-                }
-
-                // ExoPlayer appears ready. Attach RTMP video to the streamer. Only fall
-                // back to bitmap if attaching fails. This avoids multiple setVideoSource
-                // calls during an active stream which can cause the pipeline to stop.
+        postError: (String) -> Unit,
+        postRtmpStatus: (String?) -> Unit
+    ): kotlinx.coroutines.Job {
+        var attemptCount = 0
+        val maxAttempts = Int.MAX_VALUE // Keep retrying indefinitely
+        
+        // Start retry loop - use Main dispatcher for ExoPlayer thread safety
+        // Return the Job so caller can cancel it when switching back to camera
+        return CoroutineScope(Dispatchers.Main).launch {
+            while (attemptCount < maxAttempts && isActive) {
+                attemptCount++
+                val isFirstAttempt = attemptCount == 1
+                
                 try {
-                    currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
-
-                    // Attach microphone immediately as a safe default for audio so we don't
-                    // block video switch on MediaProjection permission/state. We'll try to
-                    // upgrade to MediaProjection audio in the background if it becomes
-                    // available shortly.
-                    try {
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                    } catch (ae: Exception) {
-                        Log.w(TAG, "Attaching microphone audio failed: ${ae.message}")
+                    // Check cancellation before showing status
+                    if (!isActive) break
+                    
+                    // Show status message
+                    if (isFirstAttempt) {
+                        postRtmpStatus("Playing RTMP")
+                        Log.i(TAG, "Attempting to connect to RTMP source (first attempt)")
+                    } else {
+                        postRtmpStatus("Trying to play RTMP")
+                        Log.i(TAG, "Retrying RTMP connection (attempt $attemptCount)")
                     }
 
-                    // Background task: attempt to upgrade to MediaProjection audio for a short
-                    // period (10s) if MediaProjection becomes available.
-                    CoroutineScope(Dispatchers.Default).launch {
+                    val videoSourceUrl = try {
+                        withContext(Dispatchers.IO) {
+                            storageRepository.rtmpVideoSourceUrlFlow.first()
+                        }
+                    } catch (e: Exception) {
+                        application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
+                    }
+
+                    val exoPlayerInstance = try {
+                        createExoPlayer(application, videoSourceUrl)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
+                        null
+                    }
+
+                    if (exoPlayerInstance == null) {
+                        // Wait and retry
+                        if (isFirstAttempt) {
+                            switchToBitmapFallback(currentStreamer, testBitmap)
+                        }
+                        if (isActive) {
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        }
+                        delay(5000)
+                        continue
+                    }
+
+                    try {
+                        // Prepare and wait for the RTMP player to be ready before touching streamer
+                        // ExoPlayer operations must run on Main thread
+                        withTimeout(3000) {
+                            exoPlayerInstance.prepare()
+                            exoPlayerInstance.playWhenReady = true
+                            val ready = awaitReady(exoPlayerInstance)
+                            if (!ready) throw Exception("ExoPlayer did not become ready")
+                        }
+
+                        // ExoPlayer appears ready. Attach RTMP video to the streamer.
                         try {
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                val deadline = System.currentTimeMillis() + 10_000L
-                                var projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                                if (projection == null) {
-                                    while (System.currentTimeMillis() < deadline) {
-                                        delay(500L)
-                                        projection = mediaProjectionHelper.getMediaProjection()
-                                        if (projection != null) break
+                            currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
+                            
+                            // Clear status message on success
+                            postRtmpStatus(null)
+                            Log.i(TAG, "Successfully connected to RTMP source")
+
+                            // Attach microphone immediately as a safe default for audio
+                            try {
+                                currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                            } catch (ae: Exception) {
+                                Log.w(TAG, "Attaching microphone audio failed: ${ae.message}")
+                            }
+
+                            // Background task: attempt to upgrade to MediaProjection audio
+                            CoroutineScope(Dispatchers.Default).launch {
+                                try {
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                        val deadline = System.currentTimeMillis() + 10_000L
+                                        var projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                                        if (projection == null) {
+                                            while (System.currentTimeMillis() < deadline) {
+                                                delay(500L)
+                                                projection = mediaProjectionHelper.getMediaProjection()
+                                                if (projection != null) break
+                                            }
+                                        }
+                                        projection?.let { mp ->
+                                            try {
+                                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
+                                                Log.d(TAG, "Upgraded audio source to MediaProjection")
+                                            } catch (upgradeEx: Exception) {
+                                                Log.w(TAG, "MediaProjection audio attach failed on upgrade, keeping microphone: ${upgradeEx.message}")
+                                            }
+                                        }
                                     }
-                                }
-                                projection?.let { mp ->
-                                    try {
-                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
-                                        Log.d(TAG, "Upgraded audio source to MediaProjection")
-                                    } catch (upgradeEx: Exception) {
-                                        Log.w(TAG, "MediaProjection audio attach failed on upgrade, keeping microphone: ${upgradeEx.message}")
-                                    }
+                                } catch (bgEx: Exception) {
+                                    Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
                                 }
                             }
-                        } catch (bgEx: Exception) {
-                            Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
+                            
+                            // Success - exit retry loop
+                            return@launch
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
+                            try { exoPlayerInstance.release() } catch (_: Exception) {}
+                            
+                            if (isFirstAttempt) {
+                                switchToBitmapFallback(currentStreamer, testBitmap)
+                            }
+                            // Wait and retry
+                            if (isActive) {
+                                postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                            }
+                            delay(5000)
+                            continue
                         }
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
+                        try { exoPlayerInstance.release() } catch (_: Exception) {}
+                        
+                        if (isFirstAttempt) {
+                            switchToBitmapFallback(currentStreamer, testBitmap)
+                        }
+                        // Wait and retry
+                        if (isActive) {
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        }
+                        delay(5000)
+                        continue
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
-                    postError("Failed to attach RTMP source: ${e.message}")
-                    try { exoPlayerInstance.release() } catch (_: Exception) {}
-                    // Fall back to bitmap now that RTMP attach failed
-                    switchToBitmapFallback(currentStreamer, testBitmap)
-                    return false
+                    Log.e(TAG, "switchToRtmpSource unexpected error: ${e.message}", e)
+                    // Wait and retry
+                    if (isActive) {
+                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                    }
+                    delay(5000)
+                    continue
                 }
-
-                // Success
-                return true
-            } catch (t: Throwable) {
-                Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
-                postError("RTMP playback failed - staying on fallback source")
-                try { exoPlayerInstance.release() } catch (_: Exception) {}
-                // Fall back to bitmap if prepare/ready failed
-                switchToBitmapFallback(currentStreamer, testBitmap)
-                return false
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "switchToRtmpSource unexpected error: ${e.message}", e)
-            postError("RTMP switch failed: ${e.message}")
-            return false
         }
     }
 }
