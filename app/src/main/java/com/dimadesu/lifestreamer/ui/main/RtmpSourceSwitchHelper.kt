@@ -112,6 +112,7 @@ internal object RtmpSourceSwitchHelper {
      * - wait until ready (with timeout)
      * - attach RTMP video and appropriate audio source
      * - retry every 5 seconds if connection fails
+     * - call onRtmpConnected with ExoPlayer instance when successfully connected
      * Returns the Job for the retry loop so it can be cancelled if needed.
      */
     suspend fun switchToRtmpSource(
@@ -122,7 +123,8 @@ internal object RtmpSourceSwitchHelper {
         mediaProjectionHelper: MediaProjectionHelper,
         streamingMediaProjection: MediaProjection?,
         postError: (String) -> Unit,
-        postRtmpStatus: (String?) -> Unit
+        postRtmpStatus: (String?) -> Unit,
+        onRtmpConnected: ((ExoPlayer) -> Unit)? = null
     ): kotlinx.coroutines.Job {
         var attemptCount = 0
         val maxAttempts = Int.MAX_VALUE // Keep retrying indefinitely
@@ -191,6 +193,9 @@ internal object RtmpSourceSwitchHelper {
                             // Clear status message on success
                             postRtmpStatus(null)
                             Log.i(TAG, "Successfully connected to RTMP source")
+                            
+                            // Notify caller that RTMP is connected (for monitoring)
+                            onRtmpConnected?.invoke(exoPlayerInstance)
 
                             // Attach microphone immediately as a safe default for audio
                             try {
