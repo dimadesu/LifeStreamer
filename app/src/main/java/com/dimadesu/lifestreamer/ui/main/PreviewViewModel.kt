@@ -1059,6 +1059,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Cancel existing retry job if any
                 rtmpRetryJob?.cancel()
                 
+                // Release the old ExoPlayer to prevent multiple instances playing simultaneously
+                // (which causes audio echo when captured by MediaProjection)
+                currentRtmpPlayer?.let { player ->
+                    try {
+                        Log.i(TAG, "Releasing old RTMP ExoPlayer to prevent audio echo")
+                        player.stop()
+                        player.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error releasing old ExoPlayer: ${e.message}")
+                    }
+                }
+                currentRtmpPlayer = null
+                
                 // Fallback to bitmap immediately
                 RtmpSourceSwitchHelper.switchToBitmapFallback(currentStreamer, testBitmap)
                 
