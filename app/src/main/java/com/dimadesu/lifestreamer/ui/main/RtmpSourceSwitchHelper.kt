@@ -59,7 +59,7 @@ internal object RtmpSourceSwitchHelper {
             exoPlayer
         }
 
-    suspend fun awaitReady(player: ExoPlayer, timeoutMs: Long = 5000): Boolean {
+    suspend fun awaitReady(player: ExoPlayer, timeoutMs: Long = 2000): Boolean {
         return try {
             withTimeout(timeoutMs) {
                 suspendCancellableCoroutine<Boolean> { cont ->
@@ -145,7 +145,7 @@ internal object RtmpSourceSwitchHelper {
 
             try {
                 // Prepare and wait for the RTMP player to be ready before touching streamer
-                withTimeout(6000) {
+                withTimeout(3000) {
                     exoPlayerInstance.prepare()
                     exoPlayerInstance.playWhenReady = true
                     val ready = awaitReady(exoPlayerInstance)
