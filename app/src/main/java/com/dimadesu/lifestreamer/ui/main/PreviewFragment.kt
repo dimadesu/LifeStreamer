@@ -120,12 +120,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher)
         }
 
-        previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) {
-            showError("Oops", it)
+        previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
+            error?.let {
+                showError("Oops", it)
+                previewViewModel.clearStreamerError() // Clear after showing to prevent re-show on rotation
+            }
         }
 
-        previewViewModel.endpointErrorLiveData.observe(viewLifecycleOwner) {
-            showError("Endpoint error", it)
+        previewViewModel.endpointErrorLiveData.observe(viewLifecycleOwner) { error ->
+            error?.let {
+                showError("Endpoint error", it)
+                previewViewModel.clearEndpointError() // Clear after showing to prevent re-show on rotation
+            }
         }
 
         // Lock/unlock orientation based on streaming state
