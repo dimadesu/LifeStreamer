@@ -985,7 +985,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         currentRtmpPlayer = player
         
-        val maxBufferingDuration = 1_000L // 1 second of buffering = disconnection
+        val maxBufferingDuration = 2_000L // 2 seconds of buffering = disconnection
         
         rtmpDisconnectListener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
