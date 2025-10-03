@@ -163,6 +163,7 @@ internal object RtmpSourceSwitchHelper {
                             postError("RTMP preview preparation failed, will retry")
                             switchToBitmapFallback(currentStreamer, testBitmap)
                         }
+                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
                         delay(5000)
                         continue
                     }
@@ -230,6 +231,7 @@ internal object RtmpSourceSwitchHelper {
                                 switchToBitmapFallback(currentStreamer, testBitmap)
                             }
                             // Wait and retry
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
                             delay(5000)
                             continue
                         }
@@ -242,6 +244,7 @@ internal object RtmpSourceSwitchHelper {
                             switchToBitmapFallback(currentStreamer, testBitmap)
                         }
                         // Wait and retry
+                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
                         delay(5000)
                         continue
                     }
@@ -251,6 +254,7 @@ internal object RtmpSourceSwitchHelper {
                         postError("RTMP switch failed, will retry")
                     }
                     // Wait and retry
+                    postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
                     delay(5000)
                     continue
                 }
