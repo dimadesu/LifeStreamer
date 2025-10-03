@@ -200,6 +200,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var rtmpDisconnectListener: androidx.media3.common.Player.Listener? = null
     private var rtmpBufferingStartTime = 0L
     private var bufferingCheckJob: kotlinx.coroutines.Job? = null
+    private var isHandlingDisconnection = false // Guard flag to prevent duplicate disconnection handling
 
     // Streamer states
     val isStreamingLiveData: LiveData<Boolean>
@@ -1052,7 +1053,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun handleRtmpDisconnection() {
         val currentStreamer = serviceStreamer ?: return
         
+        // Guard against duplicate disconnection handling
+        if (isHandlingDisconnection) {
+            Log.d(TAG, "Already handling RTMP disconnection, ignoring duplicate call")
+            return
+        }
+        
         Log.i(TAG, "Handling RTMP disconnection - falling back to bitmap and retrying")
+        isHandlingDisconnection = true
         
         viewModelScope.launch {
             try {
@@ -1097,10 +1105,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     streamingMediaProjection = streamingMediaProjection,
                     postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                     postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                    onRtmpConnected = { player -> monitorRtmpConnection(player) }
+                    onRtmpConnected = { player -> 
+                        monitorRtmpConnection(player)
+                        // Reset guard flag when successfully reconnected
+                        isHandlingDisconnection = false
+                    }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling RTMP disconnection: ${e.message}", e)
+                isHandlingDisconnection = false // Reset flag on error
             }
         }
     }
