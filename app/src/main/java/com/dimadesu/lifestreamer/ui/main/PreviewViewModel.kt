@@ -1218,6 +1218,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     bufferingCheckJob = null
                     rtmpBufferingStartTime = 0L
                     
+                    // Reset disconnection handler guard flag
+                    isHandlingDisconnection = false
+                    
                     // Stop monitoring RTMP connection
                     rtmpDisconnectListener?.let { listener ->
                         try {
@@ -1533,6 +1536,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         bufferingCheckJob?.cancel()
         bufferingCheckJob = null
         rtmpBufferingStartTime = 0L
+        
+        // Reset disconnection handler guard flag
+        isHandlingDisconnection = false
         
         // Clean up RTMP disconnect listener
         rtmpDisconnectListener?.let { listener ->
