@@ -48,6 +48,7 @@ import androidx.lifecycle.lifecycleScope
 import com.dimadesu.lifestreamer.ApplicationConstants
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
+import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
@@ -173,6 +174,36 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             // } else {
             //     binding.liveButton.isChecked = false
             // }
+        }
+
+        // Observe streamStatus to handle error states properly
+        lifecycleScope.launch {
+            previewViewModel.streamStatus.collect { status ->
+                Log.d(TAG, "Stream status changed to: $status")
+                when (status) {
+                    StreamStatus.ERROR, StreamStatus.NOT_STREAMING -> {
+                        // Reset button to "Start" state when error occurs or stream stops
+                        if (binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream error/stopped - resetting button to Start")
+                            binding.liveButton.isChecked = false
+                        }
+                    }
+                    StreamStatus.STARTING, StreamStatus.CONNECTING -> {
+                        // Keep button in "Stop" state during connection attempts
+                        if (!binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream starting/connecting - setting button to Stop")
+                            binding.liveButton.isChecked = true
+                        }
+                    }
+                    StreamStatus.STREAMING -> {
+                        // Ensure button shows "Stop" when streaming
+                        if (!binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream active - ensuring button shows Stop")
+                            binding.liveButton.isChecked = true
+                        }
+                    }
+                }
+            }
         }
 
         previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
