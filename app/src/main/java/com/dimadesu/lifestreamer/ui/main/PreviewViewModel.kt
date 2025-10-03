@@ -1041,13 +1041,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 else -> {
                     Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
 
+                    // Clear RTMP status message FIRST before cancelling job
+                    // (job might be in middle of delay showing error message)
+                    _rtmpStatusLiveData.postValue(null)
+
                     // Cancel any ongoing RTMP retry loop
                     rtmpRetryJob?.cancel()
                     rtmpRetryJob = null
                     Log.i(TAG, "Cancelled RTMP retry loop")
-
-                    // Clear RTMP status message
-                    _rtmpStatusLiveData.postValue(null)
 
                     // Don't release streaming MediaProjection here - it's managed by stream lifecycle
                     if (streamingMediaProjection == null) {
