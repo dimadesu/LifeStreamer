@@ -681,8 +681,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val hasAudioSource = currentStreamer.audioInput?.sourceFlow?.value != null
             Log.i(TAG, "startStream: hasVideoSource = $hasVideoSource, hasAudioSource = $hasAudioSource")
 
-            if (!hasVideoSource) {
-                Log.w(TAG, "Video source not configured, initializing...")
+            if (!hasVideoSource || !hasAudioSource) {
+                Log.w(TAG, "Sources not fully configured (video: $hasVideoSource, audio: $hasAudioSource), initializing...")
                 // Try to initialize sources before streaming
                 initializeStreamerSources()
                 // Small delay to let initialization complete
@@ -1078,6 +1078,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Fallback to bitmap immediately - this will properly release the RTMPVideoSource
                 // which cleans up the surface processor before we release the ExoPlayer
+                // Note: switchToBitmapFallback now also sets audio to microphone
                 RtmpSourceSwitchHelper.switchToBitmapFallback(currentStreamer, testBitmap)
                 
                 // Small delay to let the video source release complete and surface processor cleanup
@@ -1095,14 +1096,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                 }
                 currentRtmpPlayer = null
-                
-                // Fallback audio to microphone
-                try {
-                    currentStreamer.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory())
-                    Log.i(TAG, "Switched audio to microphone on RTMP disconnection")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to switch audio to microphone: ${e.message}")
-                }
                 
                 // Start retry loop
                 rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(

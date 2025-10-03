@@ -99,6 +99,9 @@ internal object RtmpSourceSwitchHelper {
     suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
+            // Also set audio to microphone when switching to bitmap
+            streamer.setAudioSource(MicrophoneSourceFactory())
+            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set bitmap fallback source: ${e.message}")
         }
