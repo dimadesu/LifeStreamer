@@ -1002,6 +1002,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     }
 
                                     // Now that we have projection, perform the RTMP source switch
+                                    // Cancel any existing retry job first
+                                    rtmpRetryJob?.cancel()
                                     rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
                                         application = application,
                                         currentStreamer = currentStreamer,
@@ -1026,6 +1028,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
                         }
 
+                        // Cancel any existing retry job first
+                        rtmpRetryJob?.cancel()
                         rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
                             application = application,
                             currentStreamer = currentStreamer,
