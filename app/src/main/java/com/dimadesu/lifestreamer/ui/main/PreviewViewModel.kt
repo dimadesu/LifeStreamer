@@ -1208,18 +1208,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Use setValue for immediate effect since we're on main thread
                     _rtmpStatusLiveData.value = null
 
-                    // Cancel any ongoing RTMP retry loop
+                    // Cancel any ongoing RTMP retry loop and reset disconnection flag
                     rtmpRetryJob?.cancel()
                     rtmpRetryJob = null
-                    Log.i(TAG, "Cancelled RTMP retry loop")
+                    isHandlingDisconnection = false // Reset flag when cancelling retry
+                    Log.i(TAG, "Cancelled RTMP retry loop and reset disconnection flag")
                     
                     // Cancel buffering check
                     bufferingCheckJob?.cancel()
                     bufferingCheckJob = null
                     rtmpBufferingStartTime = 0L
-                    
-                    // Reset disconnection handler guard flag
-                    isHandlingDisconnection = false
                     
                     // Stop monitoring RTMP connection
                     rtmpDisconnectListener?.let { listener ->
