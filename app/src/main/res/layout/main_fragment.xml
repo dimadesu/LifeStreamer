@@ -27,6 +27,23 @@
             app:position="center"
             app:scaleMode="fit" />
 
+        <!-- RTMP status message (centered) -->
+        <TextView
+            android:id="@+id/rtmpStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:padding="16dp"
+            android:background="#80000000"
+            android:text='@{viewmodel.rtmpStatusLiveData}'
+            app:goneUnless='@{viewmodel.rtmpStatusLiveData != null}'
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

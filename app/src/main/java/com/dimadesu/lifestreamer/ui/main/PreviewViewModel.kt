@@ -187,6 +187,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _endpointErrorLiveData: MutableLiveData<String> = MutableLiveData()
     val endpointErrorLiveData: LiveData<String> = _endpointErrorLiveData
 
+    // RTMP status for UI display
+    private val _rtmpStatusLiveData: MutableLiveData<String?> = MutableLiveData()
+    val rtmpStatusLiveData: LiveData<String?> = _rtmpStatusLiveData
+
     // Streamer states
     val isStreamingLiveData: LiveData<Boolean>
         get() = serviceReadyFlow.flatMapLatest { ready ->
@@ -1002,7 +1006,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         storageRepository = storageRepository,
                                         mediaProjectionHelper = mediaProjectionHelper,
                                         streamingMediaProjection = streamingMediaProjection,
-                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) }
+                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                                        postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) }
                                     )
                                     if (!switchedNow) {
                                         // switchToRtmpSource already handled fallback and errors
@@ -1029,7 +1034,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             storageRepository = storageRepository,
                             mediaProjectionHelper = mediaProjectionHelper,
                             streamingMediaProjection = streamingMediaProjection,
-                            postError = { msg -> _streamerErrorLiveData.postValue(msg) }
+                            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) }
                         )
                         if (!switched) {
                             // switchToRtmpSource already handled fallback and errors
@@ -1039,6 +1045,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 else -> {
                     Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
+
+                    // Clear RTMP status message
+                    _rtmpStatusLiveData.postValue(null)
 
                     // Don't release streaming MediaProjection here - it's managed by stream lifecycle
                     if (streamingMediaProjection == null) {
