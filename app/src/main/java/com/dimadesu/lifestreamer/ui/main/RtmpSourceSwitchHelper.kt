@@ -24,6 +24,7 @@ import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
+import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
@@ -129,11 +130,14 @@ internal object RtmpSourceSwitchHelper {
         // Start retry loop - use Main dispatcher for ExoPlayer thread safety
         // Return the Job so caller can cancel it when switching back to camera
         return CoroutineScope(Dispatchers.Main).launch {
-            while (attemptCount < maxAttempts) {
+            while (attemptCount < maxAttempts && isActive) {
                 attemptCount++
                 val isFirstAttempt = attemptCount == 1
                 
                 try {
+                    // Check cancellation before showing status
+                    if (!isActive) break
+                    
                     // Show status message
                     if (isFirstAttempt) {
                         postRtmpStatus("Playing RTMP")
@@ -161,10 +165,11 @@ internal object RtmpSourceSwitchHelper {
                     if (exoPlayerInstance == null) {
                         // Wait and retry
                         if (isFirstAttempt) {
-                            postError("RTMP preview preparation failed, will retry")
                             switchToBitmapFallback(currentStreamer, testBitmap)
                         }
-                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        if (isActive) {
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        }
                         delay(5000)
                         continue
                     }
@@ -228,11 +233,12 @@ internal object RtmpSourceSwitchHelper {
                             try { exoPlayerInstance.release() } catch (_: Exception) {}
                             
                             if (isFirstAttempt) {
-                                postError("Failed to attach RTMP source, will retry")
                                 switchToBitmapFallback(currentStreamer, testBitmap)
                             }
                             // Wait and retry
-                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                            if (isActive) {
+                                postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                            }
                             delay(5000)
                             continue
                         }
@@ -241,21 +247,21 @@ internal object RtmpSourceSwitchHelper {
                         try { exoPlayerInstance.release() } catch (_: Exception) {}
                         
                         if (isFirstAttempt) {
-                            postError("RTMP playback failed, will retry")
                             switchToBitmapFallback(currentStreamer, testBitmap)
                         }
                         // Wait and retry
-                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        if (isActive) {
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        }
                         delay(5000)
                         continue
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "switchToRtmpSource unexpected error: ${e.message}", e)
-                    if (isFirstAttempt) {
-                        postError("RTMP switch failed, will retry")
-                    }
                     // Wait and retry
-                    postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                    if (isActive) {
+                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                    }
                     delay(5000)
                     continue
                 }

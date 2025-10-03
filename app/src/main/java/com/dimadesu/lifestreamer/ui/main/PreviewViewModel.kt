@@ -1043,7 +1043,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     // Clear RTMP status message FIRST before cancelling job
                     // (job might be in middle of delay showing error message)
-                    _rtmpStatusLiveData.postValue(null)
+                    // Use setValue for immediate effect since we're on main thread
+                    _rtmpStatusLiveData.value = null
 
                     // Cancel any ongoing RTMP retry loop
                     rtmpRetryJob?.cancel()
