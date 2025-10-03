@@ -190,6 +190,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // RTMP status for UI display
     private val _rtmpStatusLiveData: MutableLiveData<String?> = MutableLiveData()
     val rtmpStatusLiveData: LiveData<String?> = _rtmpStatusLiveData
+    
+    // Job to track RTMP retry loop - cancelled when switching back to camera
+    private var rtmpRetryJob: kotlinx.coroutines.Job? = null
 
     // Streamer states
     val isStreamingLiveData: LiveData<Boolean>
@@ -999,7 +1002,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     }
 
                                     // Now that we have projection, perform the RTMP source switch
-                                    val switchedNow = RtmpSourceSwitchHelper.switchToRtmpSource(
+                                    rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
                                         application = application,
                                         currentStreamer = currentStreamer,
                                         testBitmap = testBitmap,
@@ -1009,10 +1012,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                                         postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) }
                                     )
-                                    if (!switchedNow) {
-                                        // switchToRtmpSource already handled fallback and errors
-                                        return@launch
-                                    }
                                 }
                             }
                             // Return early; the actual switch will happen in the projection callback
@@ -1027,7 +1026,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
                         }
 
-                        val switched = RtmpSourceSwitchHelper.switchToRtmpSource(
+                        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
                             application = application,
                             currentStreamer = currentStreamer,
                             testBitmap = testBitmap,
@@ -1037,14 +1036,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                             postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) }
                         )
-                        if (!switched) {
-                            // switchToRtmpSource already handled fallback and errors
-                            return@launch
-                        }
                     }
                 }
                 else -> {
                     Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
+
+                    // Cancel any ongoing RTMP retry loop
+                    rtmpRetryJob?.cancel()
+                    rtmpRetryJob = null
+                    Log.i(TAG, "Cancelled RTMP retry loop")
 
                     // Clear RTMP status message
                     _rtmpStatusLiveData.postValue(null)
@@ -1342,6 +1342,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     override fun onCleared() {
         super.onCleared()
+        
+        // Cancel any ongoing RTMP retry loop
+        rtmpRetryJob?.cancel()
+        rtmpRetryJob = null
+        Log.i(TAG, "Cancelled RTMP retry loop in onCleared()")
+        
         // try {
         //     streamer.releaseBlocking()
         // } catch (t: Throwable) {
