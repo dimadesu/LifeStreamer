@@ -98,12 +98,26 @@ internal object RtmpSourceSwitchHelper {
 
     suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
+            Log.i(TAG, "switchToBitmapFallback called - current video source: ${streamer.videoInput?.sourceFlow?.value?.javaClass?.simpleName}, audio source: ${streamer.audioInput?.sourceFlow?.value?.javaClass?.simpleName}")
+            
+            // Set both video and audio sources directly to ensure they're set synchronously
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
-            // Also set audio to microphone when switching to bitmap
+            Log.i(TAG, "Set bitmap video source")
+            
+            // Set audio to microphone - this is synchronous and ensures audio is configured
             streamer.setAudioSource(MicrophoneSourceFactory())
-            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
+            Log.i(TAG, "Set microphone audio source")
+            
+            // Verify sources were set
+            val videoSourceAfter = streamer.videoInput?.sourceFlow?.value
+            val audioSourceAfter = streamer.audioInput?.sourceFlow?.value
+            Log.i(TAG, "After switchToBitmapFallback - video: ${videoSourceAfter?.javaClass?.simpleName}, audio: ${audioSourceAfter?.javaClass?.simpleName}")
+            
+            if (audioSourceAfter == null) {
+                Log.e(TAG, "WARNING: Audio source is NULL after setting microphone!")
+            }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to set bitmap fallback source: ${e.message}")
+            Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
     }
 
@@ -168,8 +182,10 @@ internal object RtmpSourceSwitchHelper {
                     }
 
                     if (exoPlayerInstance == null) {
-                        // Wait and retry - always set bitmap fallback to ensure audio is configured
-                        switchToBitmapFallback(currentStreamer, testBitmap)
+                        // Set bitmap fallback on first attempt only
+                        if (isFirstAttempt) {
+                            switchToBitmapFallback(currentStreamer, testBitmap)
+                        }
                         if (isActive) {
                             postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
                         }
@@ -198,37 +214,60 @@ internal object RtmpSourceSwitchHelper {
                             // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
 
-                            // Attach microphone immediately as a safe default for audio
-                            try {
-                                currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                            } catch (ae: Exception) {
-                                Log.w(TAG, "Attaching microphone audio failed: ${ae.message}")
-                            }
-
-                            // Background task: attempt to upgrade to MediaProjection audio
-                            CoroutineScope(Dispatchers.Default).launch {
+                            // Set audio source: prefer MediaProjection if available, fallback to microphone
+                            val isStreaming = currentStreamer.isStreamingFlow.value == true
+                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                            
+                            if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                // Use MediaProjection audio if we're streaming and it's available
                                 try {
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                        val deadline = System.currentTimeMillis() + 10_000L
-                                        var projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                                        if (projection == null) {
-                                            while (System.currentTimeMillis() < deadline) {
-                                                delay(500L)
-                                                projection = mediaProjectionHelper.getMediaProjection()
-                                                if (projection != null) break
+                                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
+                                    Log.i(TAG, "Set MediaProjection audio for RTMP source")
+                                } catch (ae: Exception) {
+                                    Log.w(TAG, "MediaProjection audio failed, falling back to microphone: ${ae.message}")
+                                    try {
+                                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                    } catch (micEx: Exception) {
+                                        Log.w(TAG, "Microphone fallback also failed: ${micEx.message}")
+                                    }
+                                }
+                            } else {
+                                // Use microphone as default when not streaming or MediaProjection unavailable
+                                try {
+                                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                    Log.i(TAG, "Set microphone audio for RTMP source (streaming: $isStreaming, hasProjection: ${projection != null})")
+                                } catch (ae: Exception) {
+                                    Log.w(TAG, "Attaching microphone audio failed: ${ae.message}")
+                                }
+                                
+                                // If not streaming yet but might stream later, launch background upgrade task
+                                if (!isStreaming && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    CoroutineScope(Dispatchers.Default).launch {
+                                        try {
+                                            val deadline = System.currentTimeMillis() + 10_000L
+                                            var upgradedProjection = projection ?: mediaProjectionHelper.getMediaProjection()
+                                            if (upgradedProjection == null) {
+                                                while (System.currentTimeMillis() < deadline) {
+                                                    delay(500L)
+                                                    upgradedProjection = mediaProjectionHelper.getMediaProjection()
+                                                    if (upgradedProjection != null) break
+                                                }
                                             }
-                                        }
-                                        projection?.let { mp ->
-                                            try {
-                                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
-                                                Log.d(TAG, "Upgraded audio source to MediaProjection")
-                                            } catch (upgradeEx: Exception) {
-                                                Log.w(TAG, "MediaProjection audio attach failed on upgrade, keeping microphone: ${upgradeEx.message}")
+                                            upgradedProjection?.let { mp ->
+                                                // Only upgrade if now streaming
+                                                if (currentStreamer.isStreamingFlow.value == true) {
+                                                    try {
+                                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
+                                                        Log.d(TAG, "Upgraded audio source to MediaProjection")
+                                                    } catch (upgradeEx: Exception) {
+                                                        Log.w(TAG, "MediaProjection audio upgrade failed, keeping microphone: ${upgradeEx.message}")
+                                                    }
+                                                }
                                             }
+                                        } catch (bgEx: Exception) {
+                                            Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
                                         }
                                     }
-                                } catch (bgEx: Exception) {
-                                    Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
                                 }
                             }
                             
@@ -238,8 +277,9 @@ internal object RtmpSourceSwitchHelper {
                             Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
                             try { exoPlayerInstance.release() } catch (_: Exception) {}
                             
-                            // Always set bitmap fallback to ensure audio source is configured
-                            switchToBitmapFallback(currentStreamer, testBitmap)
+                            if (isFirstAttempt) {
+                                switchToBitmapFallback(currentStreamer, testBitmap)
+                            }
                             // Wait and retry
                             if (isActive) {
                                 postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
@@ -251,8 +291,9 @@ internal object RtmpSourceSwitchHelper {
                         Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
                         try { exoPlayerInstance.release() } catch (_: Exception) {}
                         
-                        // Always set bitmap fallback to ensure audio source is configured
-                        switchToBitmapFallback(currentStreamer, testBitmap)
+                        if (isFirstAttempt) {
+                            switchToBitmapFallback(currentStreamer, testBitmap)
+                        }
                         // Wait and retry
                         if (isActive) {
                             postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")

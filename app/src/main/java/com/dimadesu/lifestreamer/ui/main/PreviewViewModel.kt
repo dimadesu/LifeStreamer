@@ -65,6 +65,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSettings
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.IBitmapSource
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
@@ -327,26 +328,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
-    private fun setServiceAudioSource(audioSourceFactory: IAudioSourceInternal.Factory) {
-        viewModelScope.launch {
-            // Don't change audio source while streaming to avoid configuration conflicts
-            if (serviceStreamer?.isStreamingFlow?.value == true) {
-                Log.i(TAG, "Skipping audio source change - streamer is currently streaming")
-                return@launch
-            }
-            serviceStreamer?.setAudioSource(audioSourceFactory)
+    private suspend fun setServiceAudioSource(audioSourceFactory: IAudioSourceInternal.Factory) {
+        // Don't change audio source while streaming to avoid configuration conflicts
+        if (serviceStreamer?.isStreamingFlow?.value == true) {
+            Log.i(TAG, "Skipping audio source change - streamer is currently streaming")
+            return
         }
+        Log.i(TAG, "Setting audio source: ${audioSourceFactory.javaClass.simpleName}")
+        serviceStreamer?.setAudioSource(audioSourceFactory)
+        Log.i(TAG, "Audio source set successfully")
     }
 
-    private fun setServiceVideoSource(videoSourceFactory: IVideoSourceInternal.Factory) {
-        viewModelScope.launch {
-            // Don't change video source while streaming to avoid configuration conflicts
-            if (serviceStreamer?.isStreamingFlow?.value == true) {
+    private suspend fun setServiceVideoSource(videoSourceFactory: IVideoSourceInternal.Factory) {
+        // Don't change video source while streaming to avoid configuration conflicts
+        if (serviceStreamer?.isStreamingFlow?.value == true) {
                 Log.i(TAG, "Skipping video source change - streamer is currently streaming")
-                return@launch
-            }
-            serviceStreamer?.setVideoSource(videoSourceFactory)
+            return
         }
+        Log.i(TAG, "Setting video source: ${videoSourceFactory.javaClass.simpleName}")
+        serviceStreamer?.setVideoSource(videoSourceFactory)
+        Log.i(TAG, "Video source set successfully")
     }
 
     /**
@@ -679,7 +680,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Check if sources are configured
             val hasVideoSource = currentStreamer.videoInput?.sourceFlow?.value != null
             val hasAudioSource = currentStreamer.audioInput?.sourceFlow?.value != null
+            val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+            val audioSource = currentStreamer.audioInput?.sourceFlow?.value
             Log.i(TAG, "startStream: hasVideoSource = $hasVideoSource, hasAudioSource = $hasAudioSource")
+            Log.i(TAG, "startStream: videoSourceType = ${videoSource?.javaClass?.simpleName}, audioSourceType = ${audioSource?.javaClass?.simpleName}")
+            Log.i(TAG, "startStream: videoSource is IBitmapSource? ${videoSource is IBitmapSource}")
+
+            // Special case: If video source is bitmap (RTMP fallback) but no audio, ensure microphone is set
+            if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
+                Log.w(TAG, "Bitmap source detected without audio - setting microphone")
+                try {
+                    setServiceAudioSource(MicrophoneSourceFactory())
+                    // No delay needed - setServiceAudioSource now properly awaits completion
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to set microphone for bitmap source: ${e.message}")
+                }
+            }
 
             if (!hasVideoSource || !hasAudioSource) {
                 Log.w(TAG, "Sources not fully configured (video: $hasVideoSource, audio: $hasAudioSource), initializing...")
@@ -688,6 +704,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Small delay to let initialization complete
                 kotlinx.coroutines.delay(500)
             }
+            
+            // Final verification before starting
+            val finalHasVideo = currentStreamer.videoInput?.sourceFlow?.value != null
+            val finalHasAudio = currentStreamer.audioInput?.sourceFlow?.value != null
+            Log.i(TAG, "startStream: Final check before streaming - hasVideo: $finalHasVideo, hasAudio: $finalHasAudio")
 
             _isTryingConnectionLiveData.postValue(true)
             _streamStatus.value = StreamStatus.CONNECTING
@@ -754,12 +775,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 viewModelScope.launch {
                     try {
                         Log.i(TAG, "About to check video source for audio setup...")
-                        // Check if we're on RTMP source - only use MediaProjection audio for RTMP
+                        // Check video source type to determine correct audio source
                         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
-                        Log.i(TAG, "Current video source: $currentVideoSource (isICameraSource: ${currentVideoSource is ICameraSource})")
-                        if (currentVideoSource !is ICameraSource) {
-                            // We're on RTMP source - use MediaProjection for audio capture
-                            Log.i(TAG, "RTMP source detected - setting up MediaProjection audio capture")
+                        Log.i(TAG, "Current video source: ${currentVideoSource?.javaClass?.simpleName}")
+                        
+                        // Only use MediaProjection audio for ACTUAL RTMP video source
+                        // Bitmap fallback should use microphone, not MediaProjection
+                        val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                        
+                        if (isRtmpVideo) {
+                            // Real RTMP video source - use MediaProjection for audio capture
+                            Log.i(TAG, "RTMP video source detected - setting up MediaProjection audio capture")
                             try {
                                 setServiceAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
                                 Log.i(TAG, "MediaProjection audio source configured for RTMP streaming")
@@ -769,8 +795,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 setServiceAudioSource(MicrophoneSourceFactory())
                             }
                         } else {
-                            // We're on Camera source - use microphone for audio
-                            Log.i(TAG, "Camera source detected - using microphone for audio")
+                            // Camera or Bitmap source - use microphone for audio
+                            Log.i(TAG, "Non-RTMP source (${currentVideoSource?.javaClass?.simpleName}) - using microphone for audio")
                             setServiceAudioSource(MicrophoneSourceFactory())
                         }
 
