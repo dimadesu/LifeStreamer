@@ -78,7 +78,11 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_margin="8dp"
+            android:paddingBottom="2dp"
+            android:paddingStart="5dp"
+            android:paddingEnd="5dp"
+            android:layout_marginEnd="20dp"
+            android:background="#80000000"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
@@ -88,6 +92,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
+                android:layout_marginEnd="16dp"
                 android:text='@{viewmodel.uptimeLiveData}'
                 app:goneUnless='@{viewmodel.uptimeLiveData != null}' />
 
@@ -97,8 +102,9 @@
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
-                android:layout_marginStart="16dp"
-                android:text='@{viewmodel.bitrateLiveData}' />
+                android:layout_marginEnd="16dp"
+                android:text='@{viewmodel.bitrateLiveData}'
+                app:goneUnless='@{viewmodel.bitrateLiveData != null}' />
 
             <TextView
                 android:id="@+id/streamStatusText"
@@ -106,7 +112,6 @@
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
-                android:layout_marginStart="16dp"
                 android:text='@{viewmodel.streamStatusTextLiveData}' />
 
         </LinearLayout>
