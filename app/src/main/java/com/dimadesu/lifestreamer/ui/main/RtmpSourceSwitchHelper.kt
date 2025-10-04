@@ -98,9 +98,12 @@ internal object RtmpSourceSwitchHelper {
 
     suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
+            // Set video to bitmap and audio to microphone
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
+            streamer.setAudioSource(MicrophoneSourceFactory())
+            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to set bitmap fallback source: ${e.message}")
+            Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
     }
 
@@ -165,7 +168,7 @@ internal object RtmpSourceSwitchHelper {
                     }
 
                     if (exoPlayerInstance == null) {
-                        // Wait and retry
+                        // Set bitmap fallback on first attempt only
                         if (isFirstAttempt) {
                             switchToBitmapFallback(currentStreamer, testBitmap)
                         }
@@ -197,37 +200,58 @@ internal object RtmpSourceSwitchHelper {
                             // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
 
-                            // Attach microphone immediately as a safe default for audio
-                            try {
-                                currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                            } catch (ae: Exception) {
-                                Log.w(TAG, "Attaching microphone audio failed: ${ae.message}")
-                            }
-
-                            // Background task: attempt to upgrade to MediaProjection audio
-                            CoroutineScope(Dispatchers.Default).launch {
+                            // Set audio source: prefer MediaProjection if streaming, otherwise microphone
+                            val isStreaming = currentStreamer.isStreamingFlow.value == true
+                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                            
+                            if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                // Use MediaProjection audio when streaming
                                 try {
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                        val deadline = System.currentTimeMillis() + 10_000L
-                                        var projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                                        if (projection == null) {
-                                            while (System.currentTimeMillis() < deadline) {
-                                                delay(500L)
-                                                projection = mediaProjectionHelper.getMediaProjection()
-                                                if (projection != null) break
+                                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
+                                    Log.i(TAG, "Set MediaProjection audio for RTMP")
+                                } catch (ae: Exception) {
+                                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${ae.message}")
+                                    try {
+                                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                    } catch (micEx: Exception) {
+                                        Log.w(TAG, "Microphone fallback failed: ${micEx.message}")
+                                    }
+                                }
+                            } else {
+                                // Use microphone when not streaming or MediaProjection unavailable
+                                try {
+                                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                } catch (ae: Exception) {
+                                    Log.w(TAG, "Failed to set microphone audio: ${ae.message}")
+                                }
+                                
+                                // Launch background task to upgrade to MediaProjection if streaming starts
+                                if (!isStreaming && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    CoroutineScope(Dispatchers.Default).launch {
+                                        try {
+                                            val deadline = System.currentTimeMillis() + 10_000L
+                                            var upgradedProjection = projection ?: mediaProjectionHelper.getMediaProjection()
+                                            if (upgradedProjection == null) {
+                                                while (System.currentTimeMillis() < deadline) {
+                                                    delay(500L)
+                                                    upgradedProjection = mediaProjectionHelper.getMediaProjection()
+                                                    if (upgradedProjection != null) break
+                                                }
                                             }
-                                        }
-                                        projection?.let { mp ->
-                                            try {
-                                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
-                                                Log.d(TAG, "Upgraded audio source to MediaProjection")
-                                            } catch (upgradeEx: Exception) {
-                                                Log.w(TAG, "MediaProjection audio attach failed on upgrade, keeping microphone: ${upgradeEx.message}")
+                                            upgradedProjection?.let { mp ->
+                                                if (currentStreamer.isStreamingFlow.value == true) {
+                                                    try {
+                                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
+                                                        Log.d(TAG, "Upgraded to MediaProjection audio")
+                                                    } catch (upgradeEx: Exception) {
+                                                        Log.w(TAG, "MediaProjection upgrade failed: ${upgradeEx.message}")
+                                                    }
+                                                }
                                             }
+                                        } catch (bgEx: Exception) {
+                                            Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
                                         }
                                     }
-                                } catch (bgEx: Exception) {
-                                    Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
                                 }
                             }
                             
