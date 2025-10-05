@@ -37,6 +37,9 @@ class MediaProjectionAudioSource(
                 AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
                     .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                     .addMatchingUid(Process.myUid())
+                    // Exclude system captures to avoid feedback loops on some devices
+                    .excludeUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .excludeUsage(AudioAttributes.USAGE_NOTIFICATION)
                     .build()
             )
             .build()
