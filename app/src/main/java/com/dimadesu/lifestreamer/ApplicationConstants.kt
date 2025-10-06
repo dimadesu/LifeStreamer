@@ -9,10 +9,12 @@ import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
  */
 object ApplicationConstants {
     /**
-     * Default application orientation.
-     * Also set in `AndroidManifest.xml` `android:screenOrientation` attribute.
+     * Default application orientation when not streaming.
+     * Uses SCREEN_ORIENTATION_SENSOR to follow device rotation naturally.
+     * When streaming starts, orientation is locked to current position to prevent
+     * disorienting rotations mid-stream.
      */
-    const val supportedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    const val supportedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
 
     /**
      * User preferences file name.

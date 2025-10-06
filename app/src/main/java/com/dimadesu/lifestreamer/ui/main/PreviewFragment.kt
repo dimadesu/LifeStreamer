@@ -245,15 +245,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     private fun lockOrientation() {
         /**
-         * Lock orientation while stream is running to avoid stream interruption if
-         * user turns the device.
-         * For landscape only mode, set [requireActivity().requestedOrientation] to
-         * [ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE].
+         * Lock orientation to current position while streaming to prevent disorienting
+         * rotations mid-stream. The user can choose their preferred orientation before
+         * starting the stream (UI follows sensor via ApplicationConstants.supportedOrientation),
+         * and it will stay locked to that orientation until streaming stops.
+         * 
+         * SCREEN_ORIENTATION_LOCKED locks to whatever orientation the device is currently in,
+         * ensuring the UI and stream orientation always match during the stream.
          */
         requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
     }
 
     private fun unlockOrientation() {
+        /**
+         * Unlock orientation after streaming stops, returning to sensor-based rotation.
+         * This allows the user to freely rotate the device and choose a new orientation
+         * for the next stream.
+         */
         requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
     }
 
