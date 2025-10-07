@@ -634,7 +634,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // Lock stream rotation to current orientation when streaming starts
         // This ensures the stream orientation stays consistent with the locked UI orientation
-        currentRotation = detectCurrentRotation()
+        detectCurrentRotation() // Updates currentRotation variable
         lockedStreamRotation = currentRotation
         Log.i(TAG, "Stream rotation locked to ${rotationToString(currentRotation)} at stream start")
         
