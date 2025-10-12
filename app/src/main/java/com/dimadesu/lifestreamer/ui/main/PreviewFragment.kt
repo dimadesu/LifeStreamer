@@ -69,6 +69,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         PreviewViewModelFactory(requireActivity().application)
     }
 
+    // Remember the orientation that was locked when streaming started
+    // This allows us to restore the exact same orientation when returning from background
+    private var rememberedLockedOrientation: Int? = null
+
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
     // UI messages from service (notification-start feedback)
@@ -245,16 +249,38 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     private fun lockOrientation() {
         /**
-         * Lock orientation while stream is running to avoid stream interruption if
-         * user turns the device.
-         * For landscape only mode, set [requireActivity().requestedOrientation] to
-         * [ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE].
+         * Lock orientation to current position while streaming to prevent disorienting
+         * rotations mid-stream. The user can choose their preferred orientation before
+         * starting the stream (UI follows sensor via ApplicationConstants.supportedOrientation),
+         * and it will stay locked to that orientation until streaming stops.
+         * 
+         * We remember the current orientation first, then lock to it. This allows us to
+         * restore the exact same orientation if the app goes to background and returns.
          */
-        requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        // Get the actual current orientation from the display
+        val rotation = requireActivity().windowManager.defaultDisplay.rotation
+        val currentOrientation = when (rotation) {
+            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        
+        rememberedLockedOrientation = currentOrientation
+        requireActivity().requestedOrientation = currentOrientation
+        Log.d(TAG, "Orientation locked to: $currentOrientation (rotation: $rotation)")
     }
 
     private fun unlockOrientation() {
+        /**
+         * Unlock orientation after streaming stops, returning to sensor-based rotation.
+         * This allows the user to freely rotate the device and choose a new orientation
+         * for the next stream.
+         */
+        rememberedLockedOrientation = null
         requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
+        Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
     }
 
     private fun startStream() {
@@ -340,8 +366,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
             // Re-request audio focus / handle foreground recovery if streaming
             val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
-            if (isCurrentlyStreaming) {
-                Log.d(TAG, "App returned to foreground while streaming - handling recovery")
+            val hasRememberedOrientation = rememberedLockedOrientation != null
+            
+            // If we have a remembered orientation, we should definitely be streaming
+            // Use this as a more reliable indicator than just the LiveData value
+            if (isCurrentlyStreaming || hasRememberedOrientation) {
+                Log.d(TAG, "App returned to foreground while streaming - handling recovery (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation)")
+                
+                // Restore the exact orientation that was locked when streaming started
+                // This prevents UI rotation when returning from background during streaming
+                rememberedLockedOrientation?.let { rememberedOrientation ->
+                    requireActivity().requestedOrientation = rememberedOrientation
+                    Log.d(TAG, "Restored remembered orientation: $rememberedOrientation")
+                } ?: run {
+                    // Fallback to locking current orientation if we don't have a remembered one
+                    lockOrientation()
+                    Log.d(TAG, "No remembered orientation, locked to current position")
+                }
+                
                 previewViewModel.service?.let { service ->
                     try {
                         service.handleForegroundRecovery()
@@ -350,6 +392,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         Log.w(TAG, "Foreground recovery failed: ${t.message}")
                     }
                 }
+            } else {
+                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
             }
         }
     }
