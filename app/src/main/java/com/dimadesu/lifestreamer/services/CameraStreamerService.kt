@@ -82,6 +82,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     
     // Current device rotation
     private var currentRotation: Int = Surface.ROTATION_0
+    
+    // Stream rotation locking: when streaming starts, lock to current rotation
+    // and ignore sensor changes until streaming stops
+    private var lockedStreamRotation: Int? = null
 
     // Local rotation provider (we register our own to avoid calling StreamerService.onCreate)
     private var localRotationProvider: IRotationProvider? = null
@@ -214,10 +218,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 val rotationProvider = SensorRotationProvider(this@CameraStreamerService)
                 val listener = object : IRotationProvider.Listener {
                     override fun onOrientationChanged(rotation: Int) {
+                        // If stream rotation is locked (during streaming), ignore sensor changes
+                        if (lockedStreamRotation != null) {
+                            Log.d(TAG, "Ignoring rotation change to ${rotationToString(rotation)} - stream rotation is locked to ${rotationToString(lockedStreamRotation!!)}")
+                            return
+                        }
+                        
+                        // When not streaming, update rotation normally
                         try {
                             serviceScope.launch {
                                 try {
                                     (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+                                    currentRotation = rotation
+                                    Log.d(TAG, "Rotation updated to ${rotationToString(rotation)}")
                                 } catch (_: Throwable) {}
                             }
                         } catch (_: Throwable) {}
@@ -393,6 +406,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onStreamingStop() {
+        // Unlock stream rotation when streaming stops
+        // This allows the stream to follow sensor rotation again when not streaming
+        lockedStreamRotation = null
+        Log.i(TAG, "Stream rotation unlocked - will follow sensor again")
+        
         // Release wake lock when streaming stops
         releaseWakeLock()
         // clear start time
@@ -613,6 +631,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     override fun onStreamingStart() {
         // record start time for uptime display
         streamingStartTime = System.currentTimeMillis()
+        
+        // Lock stream rotation to current orientation when streaming starts
+        // This ensures the stream orientation stays consistent with the locked UI orientation
+        detectCurrentRotation() // Updates currentRotation variable
+        lockedStreamRotation = currentRotation
+        Log.i(TAG, "Stream rotation locked to ${rotationToString(currentRotation)} at stream start")
+        
         // Acquire wake lock when streaming starts
         acquireWakeLock()
         
