@@ -95,6 +95,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
     
+    // Network wake lock to prevent network I/O throttling during background streaming
+    // Especially important for SRT streaming
+    private var networkWakeLock: PowerManager.WakeLock? = null
+    
     // Create our own NotificationUtils instance for custom notifications
     private val customNotificationUtils: NotificationUtils by lazy {
         NotificationUtils(this, "camera_streaming_channel", 1001)
@@ -292,8 +296,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             localRotationListener = null
         } catch (_: Exception) {}
 
-        // Release wake lock if held
+        // Release wake locks if held
         try { releaseWakeLock() } catch (_: Exception) {}
+        try { releaseNetworkWakeLock() } catch (_: Exception) {}
 
         super.onDestroy()
     }
@@ -411,8 +416,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         lockedStreamRotation = null
         Log.i(TAG, "Stream rotation unlocked - will follow sensor again")
         
-        // Release wake lock when streaming stops
+        // Release wake locks when streaming stops
         releaseWakeLock()
+        releaseNetworkWakeLock()
         // clear start time
         streamingStartTime = null
         // Clear uptime so UI hides the uptime display immediately
@@ -638,8 +644,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         lockedStreamRotation = currentRotation
         Log.i(TAG, "Stream rotation locked to ${rotationToString(currentRotation)} at stream start")
         
-        // Acquire wake lock when streaming starts
+        // Acquire wake locks when streaming starts
         acquireWakeLock()
+        acquireNetworkWakeLock()
         
         // Boost process priority for foreground service - use more conservative priority for stability
         try {
@@ -720,6 +727,35 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.i(TAG, "Wake lock released")
             }
             wakeLock = null
+        }
+    }
+    
+    /**
+     * Acquire network wake lock to prevent network throttling in background
+     * Especially important for SRT streaming
+     */
+    private fun acquireNetworkWakeLock() {
+        if (networkWakeLock == null) {
+            networkWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "LifeStreamer::NetworkUpload"
+            ).apply {
+                acquire(30 * 60 * 1000L) // 30 minutes max
+                Log.i(TAG, "Network wake lock acquired for SRT/RTMP upload")
+            }
+        }
+    }
+    
+    /**
+     * Release network wake lock
+     */
+    private fun releaseNetworkWakeLock() {
+        networkWakeLock?.let { lock ->
+            if (lock.isHeld) {
+                lock.release()
+                Log.i(TAG, "Network wake lock released")
+            }
+            networkWakeLock = null
         }
     }
 
