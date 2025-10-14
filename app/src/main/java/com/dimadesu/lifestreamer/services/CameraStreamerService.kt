@@ -711,7 +711,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "StreamPack::StableBackgroundAudioRecording"
             ).apply {
-                acquire(30 * 60 * 1000L) // 30 minutes max - longer timeout for stability
+                acquire() // No timeout - held until manually released
                 Log.i(TAG, "Wake lock acquired for stable background audio recording")
             }
         }
@@ -740,7 +740,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "LifeStreamer::NetworkUpload"
             ).apply {
-                acquire(30 * 60 * 1000L) // 30 minutes max
+                acquire() // No timeout - held until manually released
                 Log.i(TAG, "Network wake lock acquired for SRT/RTMP upload")
             }
         }
