@@ -38,6 +38,9 @@ import io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation
 import io.github.thibaultbee.streampack.core.streamers.orientation.IRotationProvider
 import io.github.thibaultbee.streampack.core.streamers.orientation.SensorRotationProvider
 import kotlinx.coroutines.flow.first
+import com.dimadesu.lifestreamer.work.BackgroundStreamingWorker
+import com.dimadesu.lifestreamer.work.SrtStreamingWorker
+import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
 
 /**
  * CameraStreamerService extending StreamerService for camera streaming
@@ -300,6 +303,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try { releaseWakeLock() } catch (_: Exception) {}
         try { releaseNetworkWakeLock() } catch (_: Exception) {}
 
+        // Clean up WorkManager background streaming tasks
+        try { cleanupWorkManagerTasks() } catch (_: Exception) {}
+
         super.onDestroy()
     }
 
@@ -323,6 +329,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
+                            cleanupWorkManagerTasks()
                         } catch (e: Exception) {
                             Log.w(TAG, "Stop from notification failed: ${e.message}")
                         }
@@ -355,6 +362,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
+                            cleanupWorkManagerTasks()
                             // Refresh notification to show Start action on main thread
                             val notification = onCloseNotification() ?: onCreateNotification()
                             withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
@@ -831,6 +839,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 currentStreamer.startStream()
                 // On success, move to STREAMING
                 try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
+                
+                // Start WorkManager-based background streaming support
+                initializeWorkManagerBackgroundSupport(descriptor)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
                 try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}
@@ -1009,5 +1020,114 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
         )
+    }
+
+    /**
+     * Initialize WorkManager-based background streaming support
+     * Provides system-level reliability for streaming operations
+     */
+    private fun initializeWorkManagerBackgroundSupport(descriptor: MediaDescriptor) {
+        try {
+            Log.i(TAG, "Initializing WorkManager background streaming support")
+            
+            // Schedule general background streaming health monitoring
+            BackgroundStreamingWorker.scheduleStreamHealthCheck(this)
+            
+            // For SRT streams, add specialized SRT monitoring and recovery
+            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                val srtUrl = descriptor.uri.toString() // Get URL from descriptor URI
+                
+                // Schedule SRT-specific background tasks
+                SrtStreamingWorker.scheduleSrtStatsMonitoring(this)
+                SrtStreamingWorker.scheduleSrtBufferManagement(this)
+                
+                Log.i(TAG, "SRT-specific WorkManager tasks scheduled for: $srtUrl")
+            }
+            
+            Log.i(TAG, "WorkManager background streaming support initialized successfully")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initialize WorkManager background support: ${e.message}")
+        }
+    }
+    
+    /**
+     * Handle streaming connection failures with WorkManager recovery
+     */
+    private fun handleStreamingFailureWithWorkManager(error: Throwable, streamUrl: String?) {
+        Log.w(TAG, "Stream failure detected, scheduling WorkManager recovery: ${error.message}")
+        
+        try {
+            if (streamUrl != null) {
+                // Schedule connection recovery with WorkManager's superior background handling
+                BackgroundStreamingWorker.scheduleConnectionRecovery(
+                    context = this,
+                    streamUrl = streamUrl,
+                    delaySeconds = 5
+                )
+                
+                // For SRT, also schedule SRT-specific recovery
+                if (streamUrl.startsWith("srt://")) {
+                    SrtStreamingWorker.scheduleSrtReconnection(
+                        context = this,
+                        srtUrl = streamUrl,
+                        delaySeconds = 3
+                    )
+                }
+                
+                Log.i(TAG, "WorkManager recovery tasks scheduled for: $streamUrl")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to schedule WorkManager recovery: ${e.message}")
+        }
+    }
+    
+    /**
+     * Clean up WorkManager tasks when streaming stops
+     */
+    private fun cleanupWorkManagerTasks() {
+        try {
+            Log.i(TAG, "Cleaning up WorkManager background streaming tasks")
+            
+            BackgroundStreamingWorker.cancelAll(this)
+            SrtStreamingWorker.cancelSrtWork(this)
+            
+            Log.i(TAG, "WorkManager cleanup completed")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to cleanup WorkManager tasks: ${e.message}")
+        }
+    }
+    
+    /**
+     * Override onError to integrate WorkManager recovery with StreamPack error handling
+     */
+    override fun onError(t: Throwable) {
+        Log.e(TAG, "Stream error detected, triggering WorkManager recovery: ${t.message}", t)
+        
+        try {
+            // Get current streaming URL for recovery if available
+            val streamUrl = try {
+                runBlocking {
+                    storageRepository.endpointDescriptorFlow.first().toString()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not get stream URL for WorkManager recovery: ${e.message}")
+                null
+            }
+            
+            // Trigger WorkManager error recovery
+            handleStreamingFailureWithWorkManager(t, streamUrl)
+            
+            // Emit critical error for UI handling
+            serviceScope.launch { 
+                try {
+                    _criticalErrors.emit("Stream error: ${t.message}")
+                } catch (_: Exception) {}
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initiate WorkManager recovery: ${e.message}")
+        }
+        
+        // Call parent implementation for notification and service lifecycle
+        super.onError(t)
     }
 }
