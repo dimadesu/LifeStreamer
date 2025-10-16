@@ -677,6 +677,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val hasVideoSource = currentStreamer.videoInput?.sourceFlow?.value != null
             val hasAudioSource = currentStreamer.audioInput?.sourceFlow?.value != null
             val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+            val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+
+            Log.i(TAG, "Source check before stream start:")
+            Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
+            Log.i(TAG, "  hasAudioSource: $hasAudioSource (${audioSource?.javaClass?.simpleName})")
 
             // Special case: If video source is bitmap (RTMP fallback) but no audio, ensure microphone is set
             if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
@@ -692,6 +697,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.w(TAG, "Sources not fully configured - initializing...")
                 initializeStreamerSources()
                 kotlinx.coroutines.delay(500)
+                
+                // Re-check after initialization
+                val videoAfterInit = currentStreamer.videoInput?.sourceFlow?.value
+                val audioAfterInit = currentStreamer.audioInput?.sourceFlow?.value
+                Log.i(TAG, "After initialization - Video: ${videoAfterInit?.javaClass?.simpleName}, Audio: ${audioAfterInit?.javaClass?.simpleName}")
+                
+                if (videoAfterInit == null || audioAfterInit == null) {
+                    val error = "Failed to initialize sources - Video: ${videoAfterInit != null}, Audio: ${audioAfterInit != null}"
+                    Log.e(TAG, error)
+                    _streamerErrorLiveData.postValue(error)
+                    return@launch
+                }
             }
 
             _isTryingConnectionLiveData.postValue(true)
@@ -877,6 +894,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
+
+                // Wait for stream to actually stop before resetting sources
+                // This prevents race condition where setServiceAudioSource skips due to isStreaming still being true
+                var retries = 0
+                while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
+                    kotlinx.coroutines.delay(100)
+                    retries++
+                }
+                
+                if (currentStreamer.isStreamingFlow.value == true) {
+                    Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
+                }
+                
+                Log.i(TAG, "Stream confirmed stopped - now resetting audio source")
 
                 // Reset audio source to clean state
                 try {
