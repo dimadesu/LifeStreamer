@@ -351,14 +351,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (!success) {
                 Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
                 
-                // Trigger auto-retry if requested
+                // Trigger auto-retry if requested and not already reconnecting
                 if (shouldAutoRetry && !isReconnecting) {
                     val errorMessage = "Connection failed - unable to establish stream"
                     Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
                     handleDisconnection(errorMessage, isInitialConnection = true)
-                } else {
-                    // Only show error dialog if not auto-retrying
+                } else if (!shouldAutoRetry && !isReconnecting) {
+                    // Only show error dialog if not auto-retrying AND not already reconnecting
                     _streamerErrorLiveData.postValue("Connection failed - unable to establish stream")
+                } else {
+                    Log.d(TAG, "Connection failed during reconnection, error dialog suppressed")
                 }
                 
                 return false
@@ -389,11 +391,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Trigger auto-retry if requested and not already reconnecting
             if (shouldAutoRetry && !isReconnecting) {
                 Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
-                // Pass true to indicate this is an initial connection failure
                 handleDisconnection(errorMessage, isInitialConnection = true)
-            } else {
-                // Only show error dialog if not auto-retrying
+            } else if (!shouldAutoRetry && !isReconnecting) {
+                // Only show error dialog if not auto-retrying AND not already reconnecting
                 _streamerErrorLiveData.postValue(errorMessage)
+            } else {
+                Log.d(TAG, "Exception during reconnection, error dialog suppressed")
             }
             
             return false
