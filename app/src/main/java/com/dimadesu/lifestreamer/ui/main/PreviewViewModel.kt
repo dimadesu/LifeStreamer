@@ -1093,9 +1093,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Remove any bitrate regulator
                 try {
                     currentStreamer.removeBitrateRegulatorController()
+                    Log.d(TAG, "Bitrate regulator removed")
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
+
+                // Wait for stream to actually stop before reconnecting
+                // This ensures clean state for the reconnection attempt
+                var retries = 0
+                while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
+                    kotlinx.coroutines.delay(100)
+                    retries++
+                }
+                
+                if (currentStreamer.isStreamingFlow.value == true) {
+                    Log.w(TAG, "Stream did not stop cleanly after 5 seconds during reconnection cleanup")
+                }
+                
+                Log.d(TAG, "Stream confirmed stopped - ready for reconnection (keeping existing audio/video sources)")
+
+                // NOTE: We do NOT reset audio/video sources during reconnection because:
+                // - RTMP source needs to keep MediaProjection audio
+                // - Camera source already has microphone audio
+                // - Changing sources mid-reconnection can cause initialization issues
+                // Sources are only reset during manual stopStream() to prepare for new configuration
 
                 // Schedule reconnection after 5 seconds
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
