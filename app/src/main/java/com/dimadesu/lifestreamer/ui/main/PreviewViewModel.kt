@@ -1067,15 +1067,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
 
-        // Only reconnect if we were actively streaming or connecting (skip check for initial connection)
-        if (!isInitialConnection) {
-            val status = _streamStatus.value
-            if (status != StreamStatus.STREAMING && status != StreamStatus.CONNECTING) {
-                Log.d(TAG, "Not reconnecting: status is $status")
-                return
-            }
-        }
-
         isReconnecting = true
         lastDisconnectReason = reason
         

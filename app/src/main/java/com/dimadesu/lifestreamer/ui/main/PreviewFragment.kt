@@ -60,7 +60,6 @@ import com.dimadesu.lifestreamer.ui.views.PreviewView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
-import com.google.android.material.snackbar.Snackbar
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var binding: MainFragmentBinding
@@ -72,9 +71,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     // Remember the orientation that was locked when streaming started
     // This allows us to restore the exact same orientation when returning from background
     private var rememberedLockedOrientation: Int? = null
-    
-    // Persistent snackbar for reconnection status
-    private var reconnectionSnackbar: Snackbar? = null
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
@@ -141,25 +137,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Show reconnection status as persistent snackbar
-        previewViewModel.reconnectionStatusLiveData.observe(viewLifecycleOwner) { message ->
-            if (message != null) {
-                Log.d(TAG, "Reconnection status: $message")
-                // Create or update persistent snackbar
-                if (reconnectionSnackbar == null || !reconnectionSnackbar!!.isShown) {
-                    reconnectionSnackbar = Snackbar.make(binding.root, message, Snackbar.LENGTH_INDEFINITE)
-                    reconnectionSnackbar?.show()
-                } else {
-                    // Update text of existing snackbar
-                    reconnectionSnackbar?.setText(message)
-                }
-            } else {
-                // Dismiss snackbar when reconnection status is cleared
-                reconnectionSnackbar?.dismiss()
-                reconnectionSnackbar = null
-                Log.d(TAG, "Reconnection status cleared - dismissing snackbar")
-            }
-        }
+        // Reconnection status is now displayed via data binding in the layout XML
+        // No need for manual observer - the TextView will automatically show/hide
 
         // Lock/unlock orientation based on streaming state
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
