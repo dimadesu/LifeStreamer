@@ -614,17 +614,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { it.isClosedException }
                 .map { "Connection lost: ${it.message}" }.collect { errorMessage ->
-                    Log.w(TAG, "Connection lost detected: $errorMessage")
+                    Log.w(TAG, "Connection lost detected: $errorMessage, status=${_streamStatus.value}, isReconnecting=$isReconnecting")
                     
-                    // Trigger automatic reconnection if streaming was active
-                    if (_streamStatus.value == StreamStatus.STREAMING || 
-                        _streamStatus.value == StreamStatus.CONNECTING) {
-                        // Will auto-retry - don't show error dialog
-                        Log.i(TAG, "Connection lost - will auto-retry (error dialog suppressed)")
-                        handleDisconnection(errorMessage)
+                    // Suppress error if we're already in reconnection mode
+                    if (isReconnecting) {
+                        Log.i(TAG, "Connection error during reconnection - dialog suppressed")
                     } else {
-                        // Not in streaming mode - show the error
-                        _endpointErrorLiveData.postValue(errorMessage)
+                        // Connection lost - trigger reconnection
+                        Log.i(TAG, "Connection lost - will auto-retry (error dialog suppressed)")
+                        handleDisconnection(errorMessage, isInitialConnection = false)
                     }
                 }
         }
