@@ -921,13 +921,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val descriptor = storageRepository.endpointDescriptorFlow.first()
                 Log.i(TAG, "Starting stream with descriptor: $descriptor")
                 Log.i(TAG, "About to call startServiceStreaming()...")
-                val success = startServiceStreaming(descriptor)
+                val success = startServiceStreaming(descriptor, shouldSuppressErrors = true)
                 
                 if (!success) {
                     Log.e(TAG, "startServiceStreaming() returned false - stream start failed")
-                    // Error already posted to _streamerErrorLiveData by startServiceStreaming
-                    // Don't call onError to avoid double error dialogs
-                    _streamStatus.value = StreamStatus.ERROR
+                    val errorMessage = "Connection failed - unable to establish stream"
+                    
+                    // Trigger auto-retry unless already reconnecting
+                    if (!isReconnecting) {
+                        Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
+                        handleDisconnection(errorMessage, isInitialConnection = true)
+                    }
                     return@launch
                 }
                 
@@ -938,9 +942,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             } catch (e: Throwable) {
                 val error = "Stream start failed: ${e.message ?: "Unknown error"}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
-                // Only call onError for unexpected exceptions not already handled
-                onError(error)
-                _streamStatus.value = StreamStatus.ERROR
+                
+                // Trigger auto-retry unless already reconnecting
+                if (!isReconnecting) {
+                    Log.i(TAG, "Connection failed with exception, triggering auto-retry (error dialog suppressed)")
+                    handleDisconnection(error, isInitialConnection = true)
+                } else {
+                    Log.d(TAG, "Exception during reconnection, error dialog suppressed")
+                }
             } finally {
                 Log.i(TAG, "startStreamInternal finally block - setting isTryingConnection to false")
                 _isTryingConnectionLiveData.postValue(false)
