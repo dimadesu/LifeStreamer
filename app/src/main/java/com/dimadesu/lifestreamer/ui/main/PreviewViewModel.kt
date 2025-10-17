@@ -1061,6 +1061,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (success) {
                     Log.i(TAG, "Reconnection successful!")
                     _streamStatus.value = StreamStatus.STREAMING
+                    
+                    // Re-add bitrate regulator for SRT streams
+                    if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                        val bitrateRegulatorConfig =
+                            storageRepository.bitrateRegulatorConfigFlow.first()
+                        if (bitrateRegulatorConfig != null) {
+                            Log.i(TAG, "Re-adding bitrate regulator after reconnection")
+                            val selectedMode = storageRepository.regulatorModeFlow.first()
+                            currentStreamer.addBitrateRegulatorController(
+                                AdaptiveSrtBitrateRegulatorController.Factory(
+                                    bitrateRegulatorConfig = bitrateRegulatorConfig,
+                                    mode = selectedMode
+                                )
+                            )
+                        }
+                    }
+                    
                     _reconnectionStatusLiveData.postValue("Reconnected successfully!")
                     
                     // Clear success message after 3 seconds
