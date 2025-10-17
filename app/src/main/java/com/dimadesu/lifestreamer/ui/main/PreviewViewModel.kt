@@ -598,8 +598,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { !it.isClosedException }
-                .map { "${it.javaClass.simpleName}: ${it.message}" }.collect {
-                    _streamerErrorLiveData.postValue(it)
+                .map { "${it.javaClass.simpleName}: ${it.message}" }.collect { errorMessage ->
+                    // Don't show error dialog during reconnection attempts
+                    if (!isReconnecting) {
+                        _streamerErrorLiveData.postValue(errorMessage)
+                    } else {
+                        Log.w(TAG, "Error during reconnection (dialog suppressed): $errorMessage")
+                    }
                 }
         }
 
@@ -828,7 +833,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 _streamStatus.value = StreamStatus.STREAMING
             } catch (e: Throwable) {
                 Log.e(TAG, "startStream failed", e)
-                _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                // Don't show error dialog if reconnection will handle it
+                if (!isReconnecting) {
+                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                }
                 _streamStatus.value = StreamStatus.ERROR
             } finally {
                 _isTryingConnectionLiveData.postValue(false)
