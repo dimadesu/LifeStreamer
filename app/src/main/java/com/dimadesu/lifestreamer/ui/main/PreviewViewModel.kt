@@ -1139,19 +1139,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun attemptReconnection() {
         viewModelScope.launch {
             try {
+                // Check if user stopped streaming FIRST before doing anything
+                if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+                    Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
+                    isReconnecting = false
+                    return@launch
+                }
+                
                 val currentStreamer = serviceStreamer
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
                     isReconnecting = false
                     _streamStatus.value = StreamStatus.ERROR
-                    _reconnectionStatusLiveData.postValue(null)
-                    return@launch
-                }
-
-                // Check if user stopped streaming during the delay
-                if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
-                    Log.d(TAG, "User stopped streaming, cancelling reconnection")
-                    isReconnecting = false
                     _reconnectionStatusLiveData.postValue(null)
                     return@launch
                 }
