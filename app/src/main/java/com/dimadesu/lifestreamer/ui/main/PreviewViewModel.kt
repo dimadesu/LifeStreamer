@@ -320,6 +320,55 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
+    /**
+     * Core streaming logic shared between initial start and reconnection.
+     * Handles descriptor retrieval, stream start, and bitrate regulator setup.
+     * 
+     * @return true if stream started successfully, false otherwise
+     */
+    private suspend fun doStartStream(): Boolean {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.e(TAG, "doStartStream: serviceStreamer is null!")
+            _streamerErrorLiveData.postValue("Service streamer not available")
+            return false
+        }
+
+        try {
+            val descriptor = storageRepository.endpointDescriptorFlow.first()
+            Log.i(TAG, "doStartStream: Starting stream with descriptor: $descriptor")
+            
+            val success = startServiceStreaming(descriptor)
+            if (!success) {
+                Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
+                return false
+            }
+            
+            Log.i(TAG, "doStartStream: Stream started successfully")
+            
+            // Add bitrate regulator for SRT streams
+            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                if (bitrateRegulatorConfig != null) {
+                    Log.i(TAG, "doStartStream: Adding bitrate regulator controller")
+                    val selectedMode = storageRepository.regulatorModeFlow.first()
+                    currentStreamer.addBitrateRegulatorController(
+                        AdaptiveSrtBitrateRegulatorController.Factory(
+                            bitrateRegulatorConfig = bitrateRegulatorConfig,
+                            mode = selectedMode
+                        )
+                    )
+                }
+            }
+            
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "doStartStream failed: ${e.message}", e)
+            _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
+            return false
+        }
+    }
+
     private suspend fun stopServiceStreaming(): Boolean {
         return try {
             Log.i(TAG, "stopServiceStreaming: Stopping stream...")
@@ -731,34 +780,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _isTryingConnectionLiveData.postValue(true)
             _streamStatus.value = StreamStatus.CONNECTING
             try {
-                val descriptor = storageRepository.endpointDescriptorFlow.first()
-                Log.i(TAG, "Starting stream with descriptor: $descriptor")
-                val success = startServiceStreaming(descriptor)
+                val success = doStartStream()
                 if (!success) {
-                    Log.e(TAG, "Stream start failed - startServiceStreaming returned false")
-                    // Error already posted to _streamerErrorLiveData by startServiceStreaming
-                    // Don't post duplicate error
+                    Log.e(TAG, "Stream start failed")
                     _streamStatus.value = StreamStatus.ERROR
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
                 _streamStatus.value = StreamStatus.STREAMING
-
-                if (descriptor.type.sinkType == MediaSinkType.SRT) {
-                    val bitrateRegulatorConfig =
-                        storageRepository.bitrateRegulatorConfigFlow.first()
-                    if (bitrateRegulatorConfig != null) {
-                        Log.i(TAG, "Add Moblin SrtFight bitrate regulator controller")
-                        // Read user preference for regulator mode (fast/slow/belabox)
-                        val selectedMode = storageRepository.regulatorModeFlow.first()
-                        streamer?.addBitrateRegulatorController(
-                            AdaptiveSrtBitrateRegulatorController.Factory(
-                                bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                mode = selectedMode
-                            )
-                        )
-                    }
-                }
             } catch (e: Throwable) {
                 Log.e(TAG, "startStream failed", e)
                 _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
@@ -1052,32 +1081,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Executing reconnection attempt...")
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
 
-                // Get the current endpoint configuration
-                val descriptor = storageRepository.endpointDescriptorFlow.first()
-                
-                // Restart the stream
-                val success = startServiceStreaming(descriptor)
+                // Use the same stream start logic as initial connection
+                val success = doStartStream()
                 
                 if (success) {
                     Log.i(TAG, "Reconnection successful!")
                     _streamStatus.value = StreamStatus.STREAMING
-                    
-                    // Re-add bitrate regulator for SRT streams
-                    if (descriptor.type.sinkType == MediaSinkType.SRT) {
-                        val bitrateRegulatorConfig =
-                            storageRepository.bitrateRegulatorConfigFlow.first()
-                        if (bitrateRegulatorConfig != null) {
-                            Log.i(TAG, "Re-adding bitrate regulator after reconnection")
-                            val selectedMode = storageRepository.regulatorModeFlow.first()
-                            currentStreamer.addBitrateRegulatorController(
-                                AdaptiveSrtBitrateRegulatorController.Factory(
-                                    bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                    mode = selectedMode
-                                )
-                            )
-                        }
-                    }
-                    
                     _reconnectionStatusLiveData.postValue("Reconnected successfully!")
                     
                     // Clear success message after 3 seconds
