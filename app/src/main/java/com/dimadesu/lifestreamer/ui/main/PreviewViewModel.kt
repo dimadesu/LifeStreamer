@@ -279,15 +279,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Helper functions to interact with streamer directly (service compatibility layer)
+     * 
+     * @param shouldSuppressErrors If true, errors won't be posted to streamerErrorLiveData (for auto-retry)
      */
-    private suspend fun startServiceStreaming(descriptor: MediaDescriptor): Boolean {
+    private suspend fun startServiceStreaming(descriptor: MediaDescriptor, shouldSuppressErrors: Boolean = false): Boolean {
         return try {
             Log.i(TAG, "startServiceStreaming: Opening streamer with descriptor: $descriptor")
 
             val currentStreamer = serviceStreamer
             if (currentStreamer == null) {
                 Log.e(TAG, "startServiceStreaming: serviceStreamer is null!")
-                _streamerErrorLiveData.postValue("Service streamer not available")
+                if (!shouldSuppressErrors) {
+                    _streamerErrorLiveData.postValue("Service streamer not available")
+                }
                 return false
             }
 
@@ -311,11 +315,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             true
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
-            _streamerErrorLiveData.postValue("Connection timeout - check server address and network")
+            if (!shouldSuppressErrors) {
+                _streamerErrorLiveData.postValue("Connection timeout - check server address and network")
+            }
             false
         } catch (e: Exception) {
             Log.e(TAG, "startServiceStreaming failed: ${e.message}", e)
-            _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
+            if (!shouldSuppressErrors) {
+                _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
+            }
             false
         }
     }
@@ -339,7 +347,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val descriptor = storageRepository.endpointDescriptorFlow.first()
             Log.i(TAG, "doStartStream: Starting stream with descriptor: $descriptor")
             
-            val success = startServiceStreaming(descriptor)
+            val success = startServiceStreaming(descriptor, shouldSuppressErrors = shouldAutoRetry)
             if (!success) {
                 Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
                 
