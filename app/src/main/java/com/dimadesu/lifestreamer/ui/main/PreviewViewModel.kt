@@ -1159,6 +1159,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Executing reconnection attempt...")
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
 
+                // Check if we need to restore MediaProjection audio for RTMP source
+                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                
+                if (isRtmpVideo && streamingMediaProjection != null) {
+                    // Restore MediaProjection audio for RTMP stream
+                    try {
+                        Log.d(TAG, "Restoring MediaProjection audio for RTMP reconnection")
+                        setServiceAudioSource(MediaProjectionAudioSourceFactory(streamingMediaProjection!!))
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to restore MediaProjection audio, using microphone: ${e.message}")
+                        setServiceAudioSource(MicrophoneSourceFactory())
+                    }
+                }
+
                 // Use the same stream start logic as initial connection
                 // Pass shouldAutoRetry=true to suppress error dialogs during reconnection
                 val success = doStartStream(shouldAutoRetry = true)
