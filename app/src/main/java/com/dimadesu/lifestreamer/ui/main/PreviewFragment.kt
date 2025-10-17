@@ -140,13 +140,42 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // Reconnection status is now displayed via data binding in the layout XML
         // No need for manual observer - the TextView will automatically show/hide
 
-        // Lock/unlock orientation based on streaming state
+        // Lock/unlock orientation based on streaming state and reconnection status
+        // Keep orientation locked during STREAMING and CONNECTING (which includes reconnection)
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
             Log.d(TAG, "Streaming state changed to: $isStreaming")
             if (isStreaming) {
                 lockOrientation()
             } else {
-                unlockOrientation()
+                // Only unlock if we're NOT in CONNECTING status (reconnection)
+                val currentStatus = previewViewModel.streamStatus.value
+                if (currentStatus != com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING) {
+                    unlockOrientation()
+                } else {
+                    Log.d(TAG, "Keeping orientation locked - in CONNECTING/reconnection mode")
+                }
+            }
+        }
+        
+        // Also observe streamStatus to handle orientation during state transitions
+        lifecycleScope.launch {
+            previewViewModel.streamStatus.collect { status ->
+                when (status) {
+                    com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING -> {
+                        // Ensure orientation stays locked during reconnection
+                        if (rememberedLockedOrientation != null) {
+                            Log.d(TAG, "Maintaining locked orientation during CONNECTING/reconnection")
+                        }
+                    }
+                    com.dimadesu.lifestreamer.models.StreamStatus.NOT_STREAMING,
+                    com.dimadesu.lifestreamer.models.StreamStatus.ERROR -> {
+                        // Unlock orientation when truly stopped
+                        if (previewViewModel.isStreamingLiveData.value == false) {
+                            unlockOrientation()
+                        }
+                    }
+                    else -> { /* STARTING, STREAMING handled by isStreamingLiveData */ }
+                }
             }
         }
 
@@ -369,11 +398,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             // Re-request audio focus / handle foreground recovery if streaming
             val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
             val hasRememberedOrientation = rememberedLockedOrientation != null
+            val isReconnecting = previewViewModel.streamStatus.value == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING
             
-            // If we have a remembered orientation, we should definitely be streaming
+            // If we have a remembered orientation, we should definitely be streaming or reconnecting
             // Use this as a more reliable indicator than just the LiveData value
-            if (isCurrentlyStreaming || hasRememberedOrientation) {
-                Log.d(TAG, "App returned to foreground while streaming - handling recovery (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation)")
+            if (isCurrentlyStreaming || hasRememberedOrientation || isReconnecting) {
+                Log.d(TAG, "App returned to foreground while streaming/reconnecting - handling recovery (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, reconnecting: $isReconnecting)")
                 
                 // Restore the exact orientation that was locked when streaming started
                 // This prevents UI rotation when returning from background during streaming
