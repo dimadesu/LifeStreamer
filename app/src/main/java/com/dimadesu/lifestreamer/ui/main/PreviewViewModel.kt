@@ -1041,14 +1041,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamingMediaProjection?.stop()
                 streamingMediaProjection = null
             } finally {
+                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
+                _streamStatus.value = StreamStatus.NOT_STREAMING
+                
                 // Cancel any pending reconnection attempts
                 reconnectTimer.stop()
                 isReconnecting = false
                 _reconnectionStatusLiveData.postValue(null)
                 
                 _isTryingConnectionLiveData.postValue(false)
-                // Make sure UI status is cleared after stop routine finishes
-                _streamStatus.value = StreamStatus.NOT_STREAMING
             }
         }
     }
@@ -1062,6 +1063,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
         Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting")
+        
+        // Check if user has stopped streaming - if so, don't start reconnection
+        if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+            Log.d(TAG, "Stream is NOT_STREAMING, skipping reconnection attempt")
+            return
+        }
         
         // Guard against duplicate handling
         if (isReconnecting) {
@@ -1120,6 +1127,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 // Schedule reconnection after 5 seconds
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                    // Double-check status before attempting reconnection
+                    if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+                        Log.d(TAG, "User stopped streaming during delay, cancelling reconnection")
+                        isReconnecting = false
+                        return@startSingleShot
+                    }
                     Log.i(TAG, "Attempting to reconnect after disconnection...")
                     attemptReconnection()
                 }
