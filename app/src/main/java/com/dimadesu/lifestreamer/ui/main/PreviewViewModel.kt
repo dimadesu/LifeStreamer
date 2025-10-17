@@ -50,6 +50,7 @@ import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
 import com.dimadesu.lifestreamer.utils.setNextCameraId
 import com.dimadesu.lifestreamer.utils.toggleBackToFront
+import com.dimadesu.lifestreamer.utils.ReconnectTimer
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.IAudioRecordSource
@@ -248,6 +249,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
+    // Connection retry mechanism (inspired by Moblin)
+    private val reconnectTimer = ReconnectTimer()
+    private var isReconnecting = false
+    private var lastDisconnectReason: String? = null
+    
+    // LiveData for reconnection status UI feedback
+    private val _reconnectionStatusLiveData = MutableLiveData<String?>()
+    val reconnectionStatusLiveData: LiveData<String?> = _reconnectionStatusLiveData
+
     init {
         // Bind to streaming service for background streaming capability
         bindToStreamerService()
@@ -269,15 +279,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Helper functions to interact with streamer directly (service compatibility layer)
+     * 
+     * @param shouldSuppressErrors If true, errors won't be posted to streamerErrorLiveData (for auto-retry)
      */
-    private suspend fun startServiceStreaming(descriptor: MediaDescriptor): Boolean {
+    private suspend fun startServiceStreaming(descriptor: MediaDescriptor, shouldSuppressErrors: Boolean = false): Boolean {
         return try {
             Log.i(TAG, "startServiceStreaming: Opening streamer with descriptor: $descriptor")
 
             val currentStreamer = serviceStreamer
             if (currentStreamer == null) {
                 Log.e(TAG, "startServiceStreaming: serviceStreamer is null!")
-                _streamerErrorLiveData.postValue("Service streamer not available")
+                if (!shouldSuppressErrors) {
+                    _streamerErrorLiveData.postValue("Service streamer not available")
+                }
                 return false
             }
 
@@ -301,12 +315,91 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             true
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
-            _streamerErrorLiveData.postValue("Connection timeout - check server address and network")
+            if (!shouldSuppressErrors) {
+                _streamerErrorLiveData.postValue("Connection timeout - check server address and network")
+            }
             false
         } catch (e: Exception) {
             Log.e(TAG, "startServiceStreaming failed: ${e.message}", e)
-            _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
+            if (!shouldSuppressErrors) {
+                _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
+            }
             false
+        }
+    }
+
+    /**
+     * Core streaming logic shared between initial start and reconnection.
+     * Handles descriptor retrieval, stream start, and bitrate regulator setup.
+     * 
+     * @param shouldAutoRetry If true, will trigger reconnection on connection failure
+     * @return true if stream started successfully, false otherwise
+     */
+    private suspend fun doStartStream(shouldAutoRetry: Boolean = false): Boolean {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.e(TAG, "doStartStream: serviceStreamer is null!")
+            _streamerErrorLiveData.postValue("Service streamer not available")
+            return false
+        }
+
+        try {
+            val descriptor = storageRepository.endpointDescriptorFlow.first()
+            Log.i(TAG, "doStartStream: Starting stream with descriptor: $descriptor")
+            
+            val success = startServiceStreaming(descriptor, shouldSuppressErrors = shouldAutoRetry)
+            if (!success) {
+                Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
+                
+                // Trigger auto-retry if requested and not already reconnecting
+                if (shouldAutoRetry && !isReconnecting) {
+                    val errorMessage = "Connection failed - unable to establish stream"
+                    Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
+                    handleDisconnection(errorMessage, isInitialConnection = true)
+                } else if (!shouldAutoRetry && !isReconnecting) {
+                    // Only show error dialog if not auto-retrying AND not already reconnecting
+                    _streamerErrorLiveData.postValue("Connection failed - unable to establish stream")
+                } else {
+                    Log.d(TAG, "Connection failed during reconnection, error dialog suppressed")
+                }
+                
+                return false
+            }
+            
+            Log.i(TAG, "doStartStream: Stream started successfully")
+            
+            // Add bitrate regulator for SRT streams
+            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                if (bitrateRegulatorConfig != null) {
+                    Log.i(TAG, "doStartStream: Adding bitrate regulator controller")
+                    val selectedMode = storageRepository.regulatorModeFlow.first()
+                    currentStreamer.addBitrateRegulatorController(
+                        AdaptiveSrtBitrateRegulatorController.Factory(
+                            bitrateRegulatorConfig = bitrateRegulatorConfig,
+                            mode = selectedMode
+                        )
+                    )
+                }
+            }
+            
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "doStartStream failed: ${e.message}", e)
+            val errorMessage = "Stream start failed: ${e.message}"
+            
+            // Trigger auto-retry if requested and not already reconnecting
+            if (shouldAutoRetry && !isReconnecting) {
+                Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
+                handleDisconnection(errorMessage, isInitialConnection = true)
+            } else if (!shouldAutoRetry && !isReconnecting) {
+                // Only show error dialog if not auto-retrying AND not already reconnecting
+                _streamerErrorLiveData.postValue(errorMessage)
+            } else {
+                Log.d(TAG, "Exception during reconnection, error dialog suppressed")
+            }
+            
+            return false
         }
     }
 
@@ -508,15 +601,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { !it.isClosedException }
-                .map { "${it.javaClass.simpleName}: ${it.message}" }.collect {
-                    _streamerErrorLiveData.postValue(it)
+                .map { "${it.javaClass.simpleName}: ${it.message}" }.collect { errorMessage ->
+                    // Don't show error dialog during reconnection attempts
+                    if (!isReconnecting) {
+                        _streamerErrorLiveData.postValue(errorMessage)
+                    } else {
+                        Log.w(TAG, "Error during reconnection (dialog suppressed): $errorMessage")
+                    }
                 }
         }
 
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { it.isClosedException }
-                .map { "Connection lost: ${it.message}" }.collect {
-                    _endpointErrorLiveData.postValue(it)
+                .map { "Connection lost: ${it.message}" }.collect { errorMessage ->
+                    Log.w(TAG, "Connection lost detected: $errorMessage, status=${_streamStatus.value}, isReconnecting=$isReconnecting")
+                    
+                    // Suppress error if we're already in reconnection mode
+                    if (isReconnecting) {
+                        Log.i(TAG, "Connection error during reconnection - dialog suppressed")
+                    } else {
+                        // Connection lost - trigger reconnection
+                        Log.i(TAG, "Connection lost - will auto-retry (error dialog suppressed)")
+                        handleDisconnection(errorMessage, isInitialConnection = false)
+                    }
                 }
         }
         viewModelScope.launch {
@@ -713,42 +820,33 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             _isTryingConnectionLiveData.postValue(true)
             _streamStatus.value = StreamStatus.CONNECTING
+            var autoRetryTriggered = false
             try {
-                val descriptor = storageRepository.endpointDescriptorFlow.first()
-                Log.i(TAG, "Starting stream with descriptor: $descriptor")
-                val success = startServiceStreaming(descriptor)
+                val success = doStartStream(shouldAutoRetry = true)
                 if (!success) {
-                    Log.e(TAG, "Stream start failed - startServiceStreaming returned false")
-                    // Error already posted to _streamerErrorLiveData by startServiceStreaming
-                    // Don't post duplicate error
-                    _streamStatus.value = StreamStatus.ERROR
+                    Log.e(TAG, "Initial connection failed - auto-retry was triggered")
+                    // handleDisconnection was already called in doStartStream
+                    // Check if reconnection is active before clearing status
+                    if (isReconnecting) {
+                        autoRetryTriggered = true
+                    } else {
+                        _streamStatus.value = StreamStatus.ERROR
+                    }
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
                 _streamStatus.value = StreamStatus.STREAMING
-
-                if (descriptor.type.sinkType == MediaSinkType.SRT) {
-                    val bitrateRegulatorConfig =
-                        storageRepository.bitrateRegulatorConfigFlow.first()
-                    if (bitrateRegulatorConfig != null) {
-                        Log.i(TAG, "Add Moblin SrtFight bitrate regulator controller")
-                        // Read user preference for regulator mode (fast/slow/belabox)
-                        val selectedMode = storageRepository.regulatorModeFlow.first()
-                        streamer?.addBitrateRegulatorController(
-                            AdaptiveSrtBitrateRegulatorController.Factory(
-                                bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                mode = selectedMode
-                            )
-                        )
-                    }
-                }
             } catch (e: Throwable) {
                 Log.e(TAG, "startStream failed", e)
-                _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                // Don't show error dialog if reconnection will handle it
+                if (!isReconnecting) {
+                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                }
                 _streamStatus.value = StreamStatus.ERROR
             } finally {
                 _isTryingConnectionLiveData.postValue(false)
-                if (_streamStatus.value != StreamStatus.STREAMING) {
+                // Don't override status if auto-retry was triggered
+                if (!autoRetryTriggered && _streamStatus.value != StreamStatus.STREAMING) {
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                 }
             }
@@ -823,13 +921,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val descriptor = storageRepository.endpointDescriptorFlow.first()
                 Log.i(TAG, "Starting stream with descriptor: $descriptor")
                 Log.i(TAG, "About to call startServiceStreaming()...")
-                val success = startServiceStreaming(descriptor)
+                val success = startServiceStreaming(descriptor, shouldSuppressErrors = true)
                 
                 if (!success) {
                     Log.e(TAG, "startServiceStreaming() returned false - stream start failed")
-                    // Error already posted to _streamerErrorLiveData by startServiceStreaming
-                    // Don't call onError to avoid double error dialogs
-                    _streamStatus.value = StreamStatus.ERROR
+                    val errorMessage = "Connection failed - unable to establish stream"
+                    
+                    // Trigger auto-retry unless already reconnecting
+                    if (!isReconnecting) {
+                        Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
+                        handleDisconnection(errorMessage, isInitialConnection = true)
+                    }
                     return@launch
                 }
                 
@@ -840,9 +942,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             } catch (e: Throwable) {
                 val error = "Stream start failed: ${e.message ?: "Unknown error"}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
-                // Only call onError for unexpected exceptions not already handled
-                onError(error)
-                _streamStatus.value = StreamStatus.ERROR
+                
+                // Trigger auto-retry unless already reconnecting
+                if (!isReconnecting) {
+                    Log.i(TAG, "Connection failed with exception, triggering auto-retry (error dialog suppressed)")
+                    handleDisconnection(error, isInitialConnection = true)
+                } else {
+                    Log.d(TAG, "Exception during reconnection, error dialog suppressed")
+                }
             } finally {
                 Log.i(TAG, "startStreamInternal finally block - setting isTryingConnection to false")
                 _isTryingConnectionLiveData.postValue(false)
@@ -934,9 +1041,140 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamingMediaProjection?.stop()
                 streamingMediaProjection = null
             } finally {
+                // Cancel any pending reconnection attempts
+                reconnectTimer.stop()
+                isReconnecting = false
+                _reconnectionStatusLiveData.postValue(null)
+                
                 _isTryingConnectionLiveData.postValue(false)
                 // Make sure UI status is cleared after stop routine finishes
                 _streamStatus.value = StreamStatus.NOT_STREAMING
+            }
+        }
+    }
+
+    /**
+     * Handles connection loss and triggers automatic reconnection.
+     * Inspired by Moblin's reconnection pattern with 5-second delay.
+     * 
+     * @param reason The reason for the disconnection
+     * @param isInitialConnection If true, skips status check (for initial connection failures)
+     */
+    private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
+        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting")
+        
+        // Guard against duplicate handling
+        if (isReconnecting) {
+            Log.d(TAG, "Already handling reconnection, skipping duplicate")
+            return
+        }
+
+        // Check if we should attempt reconnection
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.w(TAG, "Cannot reconnect: streamer not available")
+            return
+        }
+
+        isReconnecting = true
+        lastDisconnectReason = reason
+        
+        Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
+        _streamStatus.value = StreamStatus.CONNECTING
+        _reconnectionStatusLiveData.postValue("Connection lost. Reconnecting in 5 seconds...")
+
+        // Stop current stream cleanly before reconnecting
+        viewModelScope.launch {
+            try {
+                // Clean up current connection
+                Log.d(TAG, "Stopping failed stream before reconnection...")
+                currentStreamer.stopStream()
+                
+                // Remove any bitrate regulator
+                try {
+                    currentStreamer.removeBitrateRegulatorController()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                }
+
+                // Schedule reconnection after 5 seconds
+                reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                    Log.i(TAG, "Attempting to reconnect after disconnection...")
+                    attemptReconnection()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
+                isReconnecting = false
+                _streamStatus.value = StreamStatus.ERROR
+                _reconnectionStatusLiveData.postValue(null)
+                _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Attempts to reconnect to the stream endpoint.
+     */
+    private fun attemptReconnection() {
+        viewModelScope.launch {
+            try {
+                val currentStreamer = serviceStreamer
+                if (currentStreamer == null) {
+                    Log.w(TAG, "Reconnection failed: streamer no longer available")
+                    isReconnecting = false
+                    _streamStatus.value = StreamStatus.ERROR
+                    _reconnectionStatusLiveData.postValue(null)
+                    return@launch
+                }
+
+                // Check if user stopped streaming during the delay
+                if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+                    Log.d(TAG, "User stopped streaming, cancelling reconnection")
+                    isReconnecting = false
+                    _reconnectionStatusLiveData.postValue(null)
+                    return@launch
+                }
+
+                Log.i(TAG, "Executing reconnection attempt...")
+                _reconnectionStatusLiveData.postValue("Reconnecting...")
+
+                // Use the same stream start logic as initial connection
+                // Pass shouldAutoRetry=true to suppress error dialogs during reconnection
+                val success = doStartStream(shouldAutoRetry = true)
+                
+                if (success) {
+                    Log.i(TAG, "Reconnection successful!")
+                    _streamStatus.value = StreamStatus.STREAMING
+                    _reconnectionStatusLiveData.postValue("Reconnected successfully!")
+                    
+                    // Clear success message after 3 seconds
+                    viewModelScope.launch {
+                        delay(3000)
+                        _reconnectionStatusLiveData.postValue(null)
+                    }
+                } else {
+                    Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
+                    _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
+                    
+                    // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
+                    reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                        Log.i(TAG, "Retrying reconnection after previous failure...")
+                        attemptReconnection()
+                    }
+                    return@launch
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
+                _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
+                
+                // Schedule another reconnection attempt directly
+                reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                    Log.i(TAG, "Retrying reconnection after exception...")
+                    attemptReconnection()
+                }
+                return@launch
+            } finally {
+                isReconnecting = false
             }
         }
     }
@@ -1558,6 +1796,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     override fun onCleared() {
         super.onCleared()
+        
+        // Cancel any pending reconnection attempts
+        reconnectTimer.stop()
+        isReconnecting = false
+        Log.i(TAG, "Cancelled reconnect timer in onCleared()")
         
         // Cancel any ongoing RTMP retry loop
         rtmpRetryJob?.cancel()

@@ -60,7 +60,6 @@ import com.dimadesu.lifestreamer.ui.views.PreviewView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
-import com.google.android.material.snackbar.Snackbar
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var binding: MainFragmentBinding
@@ -137,6 +136,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 previewViewModel.clearEndpointError() // Clear after showing to prevent re-show on rotation
             }
         }
+
+        // Reconnection status is now displayed via data binding in the layout XML
+        // No need for manual observer - the TextView will automatically show/hide
 
         // Lock/unlock orientation based on streaming state
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
