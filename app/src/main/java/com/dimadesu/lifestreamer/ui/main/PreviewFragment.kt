@@ -72,6 +72,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     // Remember the orientation that was locked when streaming started
     // This allows us to restore the exact same orientation when returning from background
     private var rememberedLockedOrientation: Int? = null
+    
+    // Persistent snackbar for reconnection status
+    private var reconnectionSnackbar: Snackbar? = null
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
@@ -138,12 +141,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Show reconnection status as snackbar
+        // Show reconnection status as persistent snackbar
         previewViewModel.reconnectionStatusLiveData.observe(viewLifecycleOwner) { message ->
-            message?.let {
-                // Show as info snackbar (not error)
-                Snackbar.make(binding.root, it, Snackbar.LENGTH_LONG).show()
-                Log.d(TAG, "Reconnection status: $it")
+            if (message != null) {
+                Log.d(TAG, "Reconnection status: $message")
+                // Create or update persistent snackbar
+                if (reconnectionSnackbar == null || !reconnectionSnackbar!!.isShown) {
+                    reconnectionSnackbar = Snackbar.make(binding.root, message, Snackbar.LENGTH_INDEFINITE)
+                    reconnectionSnackbar?.show()
+                } else {
+                    // Update text of existing snackbar
+                    reconnectionSnackbar?.setText(message)
+                }
+            } else {
+                // Dismiss snackbar when reconnection status is cleared
+                reconnectionSnackbar?.dismiss()
+                reconnectionSnackbar = null
+                Log.d(TAG, "Reconnection status cleared - dismissing snackbar")
             }
         }
 
