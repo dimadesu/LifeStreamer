@@ -252,6 +252,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Connection retry mechanism (inspired by Moblin)
     private val reconnectTimer = ReconnectTimer()
     private var isReconnecting = false
+    private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
     
     // LiveData for reconnection status UI feedback
@@ -767,6 +768,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun startStream() {
         viewModelScope.launch {
+            // Clear manual stop flag when starting a new stream
+            userStoppedManually = false
+            
             _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
             val currentStreamer = serviceStreamer
@@ -1044,6 +1048,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
                 _streamStatus.value = StreamStatus.NOT_STREAMING
                 
+                // Mark that user stopped manually to prevent reconnection
+                userStoppedManually = true
+                
                 // Cancel any pending reconnection attempts
                 reconnectTimer.stop()
                 isReconnecting = false
@@ -1062,11 +1069,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * @param isInitialConnection If true, skips status check (for initial connection failures)
      */
     private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
-        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting")
+        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting, userStopped=$userStoppedManually")
         
-        // Check if user has stopped streaming - if so, don't start reconnection
-        if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
-            Log.d(TAG, "Stream is NOT_STREAMING, skipping reconnection attempt")
+        // Check if user manually stopped streaming - if so, don't start reconnection
+        if (userStoppedManually) {
+            Log.d(TAG, "User manually stopped stream, skipping reconnection attempt")
             return
         }
         
@@ -1127,8 +1134,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 // Schedule reconnection after 5 seconds
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
-                    // Double-check status before attempting reconnection
-                    if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+                    // Double-check if user manually stopped during the delay
+                    if (userStoppedManually) {
                         Log.d(TAG, "User stopped streaming during delay, cancelling reconnection")
                         isReconnecting = false
                         return@startSingleShot
@@ -1152,8 +1159,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun attemptReconnection() {
         viewModelScope.launch {
             try {
-                // Check if user stopped streaming FIRST before doing anything
-                if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+                // Check if user manually stopped streaming FIRST before doing anything
+                if (userStoppedManually) {
                     Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
                     isReconnecting = false
                     return@launch
