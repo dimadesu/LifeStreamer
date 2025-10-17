@@ -138,6 +138,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
+        // Show reconnection status as snackbar
+        previewViewModel.reconnectionStatusLiveData.observe(viewLifecycleOwner) { message ->
+            message?.let {
+                // Show as info snackbar (not error)
+                Snackbar.make(binding.root, it, Snackbar.LENGTH_LONG).show()
+                Log.d(TAG, "Reconnection status: $it")
+            }
+        }
+
         // Lock/unlock orientation based on streaming state
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
             Log.d(TAG, "Streaming state changed to: $isStreaming")

@@ -50,6 +50,7 @@ import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
 import com.dimadesu.lifestreamer.utils.setNextCameraId
 import com.dimadesu.lifestreamer.utils.toggleBackToFront
+import com.dimadesu.lifestreamer.utils.ReconnectTimer
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.IAudioRecordSource
@@ -247,6 +248,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
+
+    // Connection retry mechanism (inspired by Moblin)
+    private val reconnectTimer = ReconnectTimer()
+    private var isReconnecting = false
+    private var lastDisconnectReason: String? = null
+    
+    // LiveData for reconnection status UI feedback
+    private val _reconnectionStatusLiveData = MutableLiveData<String?>()
+    val reconnectionStatusLiveData: LiveData<String?> = _reconnectionStatusLiveData
 
     init {
         // Bind to streaming service for background streaming capability
@@ -515,8 +525,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { it.isClosedException }
-                .map { "Connection lost: ${it.message}" }.collect {
-                    _endpointErrorLiveData.postValue(it)
+                .map { "Connection lost: ${it.message}" }.collect { errorMessage ->
+                    Log.w(TAG, "Connection lost detected: $errorMessage")
+                    _endpointErrorLiveData.postValue(errorMessage)
+                    
+                    // Trigger automatic reconnection if streaming was active
+                    if (_streamStatus.value == StreamStatus.STREAMING || 
+                        _streamStatus.value == StreamStatus.CONNECTING) {
+                        handleDisconnection(errorMessage)
+                    }
                 }
         }
         viewModelScope.launch {
@@ -934,9 +951,136 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamingMediaProjection?.stop()
                 streamingMediaProjection = null
             } finally {
+                // Cancel any pending reconnection attempts
+                reconnectTimer.stop()
+                isReconnecting = false
+                _reconnectionStatusLiveData.postValue(null)
+                
                 _isTryingConnectionLiveData.postValue(false)
                 // Make sure UI status is cleared after stop routine finishes
                 _streamStatus.value = StreamStatus.NOT_STREAMING
+            }
+        }
+    }
+
+    /**
+     * Handles connection loss and triggers automatic reconnection.
+     * Inspired by Moblin's reconnection pattern with 5-second delay.
+     * 
+     * @param reason The reason for the disconnection
+     */
+    private fun handleDisconnection(reason: String) {
+        // Guard against duplicate handling
+        if (isReconnecting) {
+            Log.d(TAG, "Already handling reconnection, skipping duplicate")
+            return
+        }
+
+        // Check if we should attempt reconnection
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.w(TAG, "Cannot reconnect: streamer not available")
+            return
+        }
+
+        // Only reconnect if we were actively streaming or connecting
+        val status = _streamStatus.value
+        if (status != StreamStatus.STREAMING && status != StreamStatus.CONNECTING) {
+            Log.d(TAG, "Not reconnecting: status is $status")
+            return
+        }
+
+        isReconnecting = true
+        lastDisconnectReason = reason
+        
+        Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
+        _streamStatus.value = StreamStatus.CONNECTING
+        _reconnectionStatusLiveData.postValue("Connection lost. Reconnecting in 5 seconds...")
+
+        // Stop current stream cleanly before reconnecting
+        viewModelScope.launch {
+            try {
+                // Clean up current connection
+                Log.d(TAG, "Stopping failed stream before reconnection...")
+                currentStreamer.stopStream()
+                
+                // Remove any bitrate regulator
+                try {
+                    currentStreamer.removeBitrateRegulatorController()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                }
+
+                // Schedule reconnection after 5 seconds
+                reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                    Log.i(TAG, "Attempting to reconnect after disconnection...")
+                    attemptReconnection()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
+                isReconnecting = false
+                _streamStatus.value = StreamStatus.ERROR
+                _reconnectionStatusLiveData.postValue(null)
+                _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Attempts to reconnect to the stream endpoint.
+     */
+    private fun attemptReconnection() {
+        viewModelScope.launch {
+            try {
+                val currentStreamer = serviceStreamer
+                if (currentStreamer == null) {
+                    Log.w(TAG, "Reconnection failed: streamer no longer available")
+                    isReconnecting = false
+                    _streamStatus.value = StreamStatus.ERROR
+                    _reconnectionStatusLiveData.postValue(null)
+                    return@launch
+                }
+
+                // Check if user stopped streaming during the delay
+                if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
+                    Log.d(TAG, "User stopped streaming, cancelling reconnection")
+                    isReconnecting = false
+                    _reconnectionStatusLiveData.postValue(null)
+                    return@launch
+                }
+
+                Log.i(TAG, "Executing reconnection attempt...")
+                _reconnectionStatusLiveData.postValue("Reconnecting...")
+
+                // Get the current endpoint configuration
+                val descriptor = storageRepository.endpointDescriptorFlow.first()
+                
+                // Restart the stream
+                val success = startServiceStreaming(descriptor)
+                
+                if (success) {
+                    Log.i(TAG, "Reconnection successful!")
+                    _streamStatus.value = StreamStatus.STREAMING
+                    _reconnectionStatusLiveData.postValue("Reconnected successfully!")
+                    
+                    // Clear success message after 3 seconds
+                    viewModelScope.launch {
+                        delay(3000)
+                        _reconnectionStatusLiveData.postValue(null)
+                    }
+                } else {
+                    Log.w(TAG, "Reconnection attempt failed")
+                    _streamStatus.value = StreamStatus.ERROR
+                    _reconnectionStatusLiveData.postValue(null)
+                    _streamerErrorLiveData.postValue("Reconnection failed. Please try again manually.")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
+                _streamStatus.value = StreamStatus.ERROR
+                _reconnectionStatusLiveData.postValue(null)
+                _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
+            } finally {
+                isReconnecting = false
             }
         }
     }
@@ -1558,6 +1702,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     override fun onCleared() {
         super.onCleared()
+        
+        // Cancel any pending reconnection attempts
+        reconnectTimer.stop()
+        isReconnecting = false
+        Log.i(TAG, "Cancelled reconnect timer in onCleared()")
         
         // Cancel any ongoing RTMP retry loop
         rtmpRetryJob?.cancel()
