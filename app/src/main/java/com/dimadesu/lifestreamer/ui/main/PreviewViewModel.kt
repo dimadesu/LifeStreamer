@@ -1151,19 +1151,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _reconnectionStatusLiveData.postValue(null)
                     }
                 } else {
-                    Log.w(TAG, "Reconnection attempt failed - will retry again")
-                    // Trigger another reconnection attempt
-                    val errorMessage = "Reconnection failed - retrying..."
-                    _reconnectionStatusLiveData.postValue(errorMessage)
-                    handleDisconnection(errorMessage, isInitialConnection = true)
+                    Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
+                    _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
+                    
+                    // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
+                    reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                        Log.i(TAG, "Retrying reconnection after previous failure...")
+                        attemptReconnection()
+                    }
                     return@launch
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
-                // Trigger another reconnection attempt
-                val errorMessage = "Reconnection failed - retrying..."
-                _reconnectionStatusLiveData.postValue(errorMessage)
-                handleDisconnection(errorMessage, isInitialConnection = true)
+                _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
+                
+                // Schedule another reconnection attempt directly
+                reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                    Log.i(TAG, "Retrying reconnection after exception...")
+                    attemptReconnection()
+                }
                 return@launch
             } finally {
                 isReconnecting = false
