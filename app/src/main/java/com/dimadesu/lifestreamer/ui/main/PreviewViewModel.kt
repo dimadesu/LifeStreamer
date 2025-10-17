@@ -665,13 +665,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
-        // Apply rotation changes, but if streamer is currently streaming queue the change and
-        // apply it when streaming stops to avoid conflicts in encoding pipeline.
+        // Apply rotation changes, but if streamer is currently streaming or reconnecting,
+        // queue the change and apply it when streaming stops to avoid conflicts in encoding pipeline.
         viewModelScope.launch {
             rotationRepository.rotationFlow.collect { rotation ->
                 val current = serviceStreamer
-                if (current?.isStreamingFlow?.value == true) {
-                    Log.i(TAG, "Rotation change to $rotation queued until stream stops")
+                val isCurrentlyStreaming = current?.isStreamingFlow?.value == true
+                val isReconnecting = _streamStatus.value == StreamStatus.CONNECTING
+                
+                if (isCurrentlyStreaming || isReconnecting) {
+                    Log.i(TAG, "Rotation change to $rotation queued (streaming: $isCurrentlyStreaming, reconnecting: $isReconnecting)")
                     pendingTargetRotation = rotation
                 } else {
                     try {
