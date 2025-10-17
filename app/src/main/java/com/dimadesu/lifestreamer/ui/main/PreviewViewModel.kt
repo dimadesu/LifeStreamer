@@ -1137,7 +1137,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
 
                 // Use the same stream start logic as initial connection
-                val success = doStartStream()
+                // Pass shouldAutoRetry=true to suppress error dialogs during reconnection
+                val success = doStartStream(shouldAutoRetry = true)
                 
                 if (success) {
                     Log.i(TAG, "Reconnection successful!")
