@@ -324,9 +324,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Core streaming logic shared between initial start and reconnection.
      * Handles descriptor retrieval, stream start, and bitrate regulator setup.
      * 
+     * @param shouldAutoRetry If true, will trigger reconnection on connection failure
      * @return true if stream started successfully, false otherwise
      */
-    private suspend fun doStartStream(): Boolean {
+    private suspend fun doStartStream(shouldAutoRetry: Boolean = false): Boolean {
         val currentStreamer = serviceStreamer
         if (currentStreamer == null) {
             Log.e(TAG, "doStartStream: serviceStreamer is null!")
@@ -341,6 +342,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val success = startServiceStreaming(descriptor)
             if (!success) {
                 Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
+                
+                // Trigger auto-retry if requested
+                if (shouldAutoRetry && !isReconnecting) {
+                    val errorMessage = "Connection failed - unable to establish stream"
+                    Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
+                    handleDisconnection(errorMessage, isInitialConnection = true)
+                } else {
+                    // Only show error dialog if not auto-retrying
+                    _streamerErrorLiveData.postValue("Connection failed - unable to establish stream")
+                }
+                
                 return false
             }
             
@@ -364,7 +376,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return true
         } catch (e: Exception) {
             Log.e(TAG, "doStartStream failed: ${e.message}", e)
-            _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
+            val errorMessage = "Stream start failed: ${e.message}"
+            
+            // Trigger auto-retry if requested and not already reconnecting
+            if (shouldAutoRetry && !isReconnecting) {
+                Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
+                // Pass true to indicate this is an initial connection failure
+                handleDisconnection(errorMessage, isInitialConnection = true)
+            } else {
+                // Only show error dialog if not auto-retrying
+                _streamerErrorLiveData.postValue(errorMessage)
+            }
+            
             return false
         }
     }
@@ -779,11 +802,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             _isTryingConnectionLiveData.postValue(true)
             _streamStatus.value = StreamStatus.CONNECTING
+            var autoRetryTriggered = false
             try {
-                val success = doStartStream()
+                val success = doStartStream(shouldAutoRetry = true)
                 if (!success) {
-                    Log.e(TAG, "Stream start failed")
-                    _streamStatus.value = StreamStatus.ERROR
+                    Log.e(TAG, "Initial connection failed - auto-retry was triggered")
+                    // handleDisconnection was already called in doStartStream
+                    // Check if reconnection is active before clearing status
+                    if (isReconnecting) {
+                        autoRetryTriggered = true
+                    } else {
+                        _streamStatus.value = StreamStatus.ERROR
+                    }
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
@@ -794,7 +824,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 _streamStatus.value = StreamStatus.ERROR
             } finally {
                 _isTryingConnectionLiveData.postValue(false)
-                if (_streamStatus.value != StreamStatus.STREAMING) {
+                // Don't override status if auto-retry was triggered
+                if (!autoRetryTriggered && _streamStatus.value != StreamStatus.STREAMING) {
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                 }
             }
@@ -997,8 +1028,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Inspired by Moblin's reconnection pattern with 5-second delay.
      * 
      * @param reason The reason for the disconnection
+     * @param isInitialConnection If true, skips status check (for initial connection failures)
      */
-    private fun handleDisconnection(reason: String) {
+    private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
+        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting")
+        
         // Guard against duplicate handling
         if (isReconnecting) {
             Log.d(TAG, "Already handling reconnection, skipping duplicate")
@@ -1012,11 +1046,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
 
-        // Only reconnect if we were actively streaming or connecting
-        val status = _streamStatus.value
-        if (status != StreamStatus.STREAMING && status != StreamStatus.CONNECTING) {
-            Log.d(TAG, "Not reconnecting: status is $status")
-            return
+        // Only reconnect if we were actively streaming or connecting (skip check for initial connection)
+        if (!isInitialConnection) {
+            val status = _streamStatus.value
+            if (status != StreamStatus.STREAMING && status != StreamStatus.CONNECTING) {
+                Log.d(TAG, "Not reconnecting: status is $status")
+                return
+            }
         }
 
         isReconnecting = true
@@ -1095,16 +1131,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _reconnectionStatusLiveData.postValue(null)
                     }
                 } else {
-                    Log.w(TAG, "Reconnection attempt failed")
-                    _streamStatus.value = StreamStatus.ERROR
-                    _reconnectionStatusLiveData.postValue(null)
-                    _streamerErrorLiveData.postValue("Reconnection failed. Please try again manually.")
+                    Log.w(TAG, "Reconnection attempt failed - will retry again")
+                    // Trigger another reconnection attempt
+                    val errorMessage = "Reconnection failed - retrying..."
+                    _reconnectionStatusLiveData.postValue(errorMessage)
+                    handleDisconnection(errorMessage, isInitialConnection = true)
+                    return@launch
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
-                _streamStatus.value = StreamStatus.ERROR
-                _reconnectionStatusLiveData.postValue(null)
-                _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
+                // Trigger another reconnection attempt
+                val errorMessage = "Reconnection failed - retrying..."
+                _reconnectionStatusLiveData.postValue(errorMessage)
+                handleDisconnection(errorMessage, isInitialConnection = true)
+                return@launch
             } finally {
                 isReconnecting = false
             }
