@@ -982,6 +982,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
     }
 
+    /**
+     * Update the service stream status. This is typically called from the ViewModel
+     * to keep the service's status in sync during reconnection attempts or other
+     * state changes that the service might not detect on its own.
+     */
+    fun updateStreamStatus(status: StreamStatus) {
+        try {
+            _serviceStreamStatus.tryEmit(status)
+            Log.d(TAG, "Service status updated to: $status")
+            // Force notification update with new status
+            serviceScope.launch {
+                notifyForCurrentState()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "updateStreamStatus failed: ${e.message}")
+        }
+    }
+
     // Helper to compute the localized mute/unmute label based on current audio state
     private fun currentMuteLabel(): String {
         return if (isCurrentlyMuted()) getString(R.string.service_notification_action_unmute) else getString(R.string.service_notification_action_mute)

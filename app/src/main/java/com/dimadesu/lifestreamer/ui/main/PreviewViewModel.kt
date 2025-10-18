@@ -1184,6 +1184,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
         _streamStatus.value = StreamStatus.CONNECTING
         _reconnectionStatusLiveData.postValue("Connection lost. Reconnecting in 5 seconds...")
+        
+        // Update service notification to show "Connecting..." status
+        service?.updateStreamStatus(StreamStatus.CONNECTING)
 
         // Stop current stream cleanly before reconnecting
         viewModelScope.launch {
