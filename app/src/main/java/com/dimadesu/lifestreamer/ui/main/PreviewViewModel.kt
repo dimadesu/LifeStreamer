@@ -45,6 +45,7 @@ import com.dimadesu.lifestreamer.data.rotation.RotationRepository
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.ui.main.usecases.BuildStreamerUseCase
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
+import com.dimadesu.lifestreamer.rtmp.audio.AudioPlaybackCaptureSourceFactory
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
@@ -1001,12 +1002,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
                         
                         if (isRtmpVideo) {
-                            // Real RTMP video source - use MediaProjection for audio capture
+                            // Real RTMP video source - use AudioPlaybackCapture for audio
                             try {
-                                setServiceAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
-                                Log.i(TAG, "MediaProjection audio configured for RTMP")
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    setServiceAudioSource(AudioPlaybackCaptureSourceFactory(application))
+                                    Log.i(TAG, "AudioPlaybackCapture configured for RTMP (no permission popup)")
+                                } else {
+                                    // Fallback to MediaProjection on Android 9 and below
+                                    setServiceAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
+                                    Log.i(TAG, "MediaProjection audio configured for RTMP (Android < 10)")
+                                }
                             } catch (audioError: Exception) {
-                                Log.w(TAG, "MediaProjection audio failed, using microphone: ${audioError.message}")
+                                Log.w(TAG, "Playback capture failed, using microphone: ${audioError.message}")
                                 setServiceAudioSource(MicrophoneSourceFactory())
                             }
                         } else {
@@ -1335,34 +1342,33 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 if (isRtmpVideo) {
                     // For RTMP video source, ensure we have proper audio source
-                    // Priority: MediaProjection > existing audio > microphone fallback
-                    val hasMediaProjection = streamingMediaProjection != null || mediaProjectionHelper.getMediaProjection() != null
+                    // Priority: AudioPlaybackCapture > existing audio > microphone fallback
+                    val currentAudioIsPlaybackCapture = currentAudioSource?.javaClass?.simpleName?.contains("PlaybackCapture") == true
                     val currentAudioIsMediaProjection = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
                     
-                    if (hasMediaProjection && !currentAudioIsMediaProjection) {
-                        // Restore MediaProjection audio for RTMP stream
+                    if (!currentAudioIsPlaybackCapture && !currentAudioIsMediaProjection) {
+                        // Set up AudioPlaybackCapture for RTMP stream
                         try {
-                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                            if (projection != null) {
-                                Log.d(TAG, "Restoring MediaProjection audio for RTMP reconnection")
-                                setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                Log.d(TAG, "Setting AudioPlaybackCapture for RTMP reconnection")
+                                setServiceAudioSource(AudioPlaybackCaptureSourceFactory(application))
                             } else {
-                                Log.w(TAG, "MediaProjection became null, using microphone for reconnection")
-                                setServiceAudioSource(MicrophoneSourceFactory())
+                                // Android < 10: try MediaProjection fallback
+                                val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                                if (projection != null) {
+                                    Log.d(TAG, "Setting MediaProjection audio for RTMP reconnection (Android < 10)")
+                                    setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                                } else {
+                                    Log.w(TAG, "No MediaProjection available, using microphone for reconnection")
+                                    setServiceAudioSource(MicrophoneSourceFactory())
+                                }
                             }
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to restore MediaProjection audio, using microphone: ${e.message}")
+                            Log.w(TAG, "Failed to set playback capture audio, using microphone: ${e.message}")
                             setServiceAudioSource(MicrophoneSourceFactory())
                         }
-                    } else if (currentAudioIsMediaProjection) {
-                        Log.d(TAG, "Audio source already set to MediaProjection, keeping it")
                     } else {
-                        Log.d(TAG, "No MediaProjection available, ensuring microphone audio for RTMP")
-                        try {
-                            setServiceAudioSource(MicrophoneSourceFactory())
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to set microphone audio: ${e.message}")
-                        }
+                        Log.d(TAG, "Audio source already set to playback capture or MediaProjection, keeping it")
                     }
                 }
 
