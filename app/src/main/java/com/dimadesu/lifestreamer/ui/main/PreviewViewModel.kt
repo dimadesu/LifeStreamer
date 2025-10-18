@@ -777,6 +777,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
+        // Observe critical errors from service (e.g., start from notification failures)
+        // Trigger reconnection for these errors
+        viewModelScope.launch {
+            _serviceReady.first { it }
+            service?.let { svc ->
+                try {
+                    svc.criticalErrors.collect { errorMessage ->
+                        Log.w(TAG, "Critical error from service: $errorMessage")
+                        // Only trigger reconnection if not already reconnecting and user didn't manually stop
+                        if (!isReconnecting && !userStoppedManually) {
+                            Log.i(TAG, "Triggering reconnection due to service critical error")
+                            handleDisconnection(errorMessage, isInitialConnection = true)
+                        } else {
+                            Log.d(TAG, "Skipping reconnection trigger - isReconnecting=$isReconnecting, userStopped=$userStoppedManually")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to collect critical errors from service: ${e.message}")
+                }
+            }
+        }
+        
         viewModelScope.launch {
             storageRepository.isAudioEnableFlow.combine(storageRepository.isVideoEnableFlow) { isAudioEnable, isVideoEnable ->
                 Pair(isAudioEnable, isVideoEnable)
