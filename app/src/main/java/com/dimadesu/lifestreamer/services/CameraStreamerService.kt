@@ -260,6 +260,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         // Start periodic notification updater to reflect runtime status
         startStatusUpdater()
+        
+        // Observe streaming state changes for immediate notification updates
+        serviceScope.launch {
+            isStreamingFlow.collect { _ ->
+                // When streaming state changes, immediately update the notification
+                notifyForCurrentState()
+            }
+        }
+        
+        // Also observe service status changes (STARTING, CONNECTING, ERROR, etc.)
+        serviceScope.launch {
+            serviceStreamStatus.collect { _ ->
+                notifyForCurrentState()
+            }
+        }
     }
 
     private fun initNotificationPendingIntents() {
@@ -936,8 +951,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 currentStreamer.startStream()
-                // On success, move to STREAMING
-                try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
+                // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
+                // derive it from isStreamingFlow.value to ensure accuracy
+                Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
