@@ -261,15 +261,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Start periodic notification updater to reflect runtime status
         startStatusUpdater()
         
-        // Observe streaming state changes for immediate notification updates
-        serviceScope.launch {
-            isStreamingFlow.collect { _ ->
-                // When streaming state changes, immediately update the notification
-                notifyForCurrentState()
-            }
-        }
-        
-        // Also observe service status changes (STARTING, CONNECTING, ERROR, etc.)
+        // Observe service status changes for immediate notification updates
+        // (STARTING, CONNECTING, ERROR, STREAMING, NOT_STREAMING)
         serviceScope.launch {
             serviceStreamStatus.collect { _ ->
                 notifyForCurrentState()
