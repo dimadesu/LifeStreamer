@@ -86,6 +86,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Stream rotation locking: when streaming starts, lock to current rotation
     // and ignore sensor changes until streaming stops
     private var lockedStreamRotation: Int? = null
+    
+    // Save the initial streaming orientation to restore it during reconnection
+    // This persists through disconnections and reconnections
+    private var savedStreamingOrientation: Int? = null
 
     // Local rotation provider (we register our own to avoid calling StreamerService.onCreate)
     private var localRotationProvider: IRotationProvider? = null
@@ -446,7 +450,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     fun unlockStreamRotation() {
         lockedStreamRotation = null
-        Log.i(TAG, "Stream rotation explicitly unlocked - will follow sensor again")
+        savedStreamingOrientation = null
+        Log.i(TAG, "Stream rotation explicitly unlocked - cleared saved orientation, will follow sensor again")
     }
     
     /**
@@ -457,19 +462,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     fun lockStreamRotation(rotation: Int) {
         val wasLocked = lockedStreamRotation
         lockedStreamRotation = rotation
+        savedStreamingOrientation = rotation  // Save for reconnection
         currentRotation = rotation
-        Log.i(TAG, "lockStreamRotation: Setting lock from ${if (wasLocked != null) rotationToString(wasLocked) else "null"} to ${rotationToString(rotation)}")
-        // Also apply to the streamer immediately if available - SYNCHRONOUSLY to prevent race conditions
-        try {
-            val streamerExists = streamer != null
-            Log.d(TAG, "lockStreamRotation: Applying to streamer SYNCHRONOUSLY (exists: $streamerExists)")
-            runBlocking {
-                (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
-            }
-            Log.i(TAG, "Stream rotation explicitly locked and applied to ${rotationToString(rotation)}")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to set target rotation: ${t.message}", t)
-        }
+        Log.i(TAG, "lockStreamRotation: Setting lock from ${if (wasLocked != null) rotationToString(wasLocked) else "null"} to ${rotationToString(rotation)}, saved for reconnection")
     }
 
     /**
@@ -672,28 +667,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         streamingStartTime = System.currentTimeMillis()
         
         // Lock stream rotation to current orientation when streaming starts
-        // If rotation is already locked (reconnection scenario), maintain the existing lock
-        // This ensures the stream orientation stays consistent through reconnections
-        Log.i(TAG, "onStreamingStart: lockedStreamRotation = ${if (lockedStreamRotation != null) rotationToString(lockedStreamRotation!!) else "null"}")
+        // If this is initial start, save the orientation for future reconnections
+        // If reconnecting, restore the saved orientation
+        Log.i(TAG, "onStreamingStart: lockedStreamRotation = ${if (lockedStreamRotation != null) rotationToString(lockedStreamRotation!!) else "null"}, savedStreamingOrientation = ${if (savedStreamingOrientation != null) rotationToString(savedStreamingOrientation!!) else "null"}")
+        
         if (lockedStreamRotation == null) {
+            // First time streaming - detect and save the orientation
             detectCurrentRotation() // Updates currentRotation variable
             lockedStreamRotation = currentRotation
-            Log.i(TAG, "onStreamingStart: NO LOCK FOUND - Detected and locked to ${rotationToString(currentRotation)}")
+            savedStreamingOrientation = currentRotation
+            Log.i(TAG, "onStreamingStart: INITIAL START - Detected and locked to ${rotationToString(currentRotation)}, saved for reconnection")
+        } else if (savedStreamingOrientation != null) {
+            // Reconnection - restore the saved orientation
+            lockedStreamRotation = savedStreamingOrientation
+            Log.i(TAG, "onStreamingStart: RECONNECTION - Restoring saved orientation ${rotationToString(savedStreamingOrientation!!)}")
         } else {
+            // Lock exists but no saved orientation (shouldn't happen, but handle it)
             Log.i(TAG, "onStreamingStart: LOCK EXISTS - Maintaining ${rotationToString(lockedStreamRotation!!)} through reconnection")
-        }
-        
-        // Always apply the locked rotation to the streamer to ensure it's set correctly
-        // Apply SYNCHRONOUSLY to ensure it takes effect before stream starts
-        try {
-            val rotationToApply = lockedStreamRotation!!
-            Log.i(TAG, "onStreamingStart: Applying rotation ${rotationToString(rotationToApply)} to streamer (synchronous)")
-            runBlocking {
-                (streamer as? IWithVideoRotation)?.setTargetRotation(rotationToApply)
-            }
-            Log.i(TAG, "onStreamingStart: Successfully applied rotation ${rotationToString(rotationToApply)}")
-        } catch (t: Throwable) {
-            Log.e(TAG, "onStreamingStart: FAILED to apply locked rotation", t)
         }
         
         // Acquire wake locks when streaming starts
