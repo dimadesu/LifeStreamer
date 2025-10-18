@@ -1339,6 +1339,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _reconnectionStatusLiveData.postValue(null)
                     }
                 } else {
+                    // Check if user stopped before showing failure message
+                    if (userStoppedManually) {
+                        Log.d(TAG, "User stopped during reconnection failure handling, skipping retry")
+                        isReconnecting = false
+                        _reconnectionStatusLiveData.value = null
+                        return@launch
+                    }
+                    
                     Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
                     _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
                     
@@ -1351,6 +1359,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@launch
                 }
             } catch (e: Exception) {
+                // Check if user stopped before showing failure message
+                if (userStoppedManually) {
+                    Log.d(TAG, "User stopped during reconnection exception handling, skipping retry")
+                    isReconnecting = false
+                    _reconnectionStatusLiveData.value = null
+                    return@launch
+                }
+                
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
                 _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
                 
