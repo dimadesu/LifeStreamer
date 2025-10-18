@@ -224,9 +224,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     override fun onOrientationChanged(rotation: Int) {
                         // If stream rotation is locked (during streaming), ignore sensor changes
                         if (lockedStreamRotation != null) {
-                            Log.d(TAG, "Ignoring rotation change to ${rotationToString(rotation)} - stream rotation is locked to ${rotationToString(lockedStreamRotation!!)}")
+                            Log.i(TAG, "SENSOR: Ignoring rotation change to ${rotationToString(rotation)} - LOCKED to ${rotationToString(lockedStreamRotation!!)}")
                             return
                         }
+                        Log.i(TAG, "SENSOR: Rotation changed to ${rotationToString(rotation)} - NOT LOCKED, applying")
                         
                         // When not streaming, update rotation normally
                         try {
@@ -454,15 +455,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * @param rotation The rotation value (Surface.ROTATION_0, ROTATION_90, etc.)
      */
     fun lockStreamRotation(rotation: Int) {
+        val wasLocked = lockedStreamRotation
         lockedStreamRotation = rotation
         currentRotation = rotation
+        Log.i(TAG, "lockStreamRotation: Setting lock from ${if (wasLocked != null) rotationToString(wasLocked) else "null"} to ${rotationToString(rotation)}")
         // Also apply to the streamer immediately if available
         serviceScope.launch {
             try {
+                val streamerExists = streamer != null
+                Log.d(TAG, "lockStreamRotation: Applying to streamer (exists: $streamerExists)")
                 (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
-                Log.i(TAG, "Stream rotation explicitly locked to ${rotationToString(rotation)}")
+                Log.i(TAG, "Stream rotation explicitly locked and applied to ${rotationToString(rotation)}")
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to set target rotation: ${t.message}")
+                Log.e(TAG, "Failed to set target rotation: ${t.message}", t)
             }
         }
     }
@@ -669,21 +674,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Lock stream rotation to current orientation when streaming starts
         // If rotation is already locked (reconnection scenario), maintain the existing lock
         // This ensures the stream orientation stays consistent through reconnections
+        Log.i(TAG, "onStreamingStart: lockedStreamRotation = ${if (lockedStreamRotation != null) rotationToString(lockedStreamRotation!!) else "null"}")
         if (lockedStreamRotation == null) {
             detectCurrentRotation() // Updates currentRotation variable
             lockedStreamRotation = currentRotation
-            Log.i(TAG, "Stream rotation locked to ${rotationToString(currentRotation)} at stream start")
+            Log.i(TAG, "onStreamingStart: NO LOCK FOUND - Detected and locked to ${rotationToString(currentRotation)}")
         } else {
-            Log.i(TAG, "Stream rotation already locked to ${rotationToString(lockedStreamRotation!!)} - maintaining lock through reconnection")
+            Log.i(TAG, "onStreamingStart: LOCK EXISTS - Maintaining ${rotationToString(lockedStreamRotation!!)} through reconnection")
         }
         
         // Always apply the locked rotation to the streamer to ensure it's set correctly
         serviceScope.launch {
             try {
-                (streamer as? IWithVideoRotation)?.setTargetRotation(lockedStreamRotation!!)
-                Log.d(TAG, "Applied locked rotation ${rotationToString(lockedStreamRotation!!)} to streamer")
+                val rotationToApply = lockedStreamRotation!!
+                Log.i(TAG, "onStreamingStart: Applying rotation ${rotationToString(rotationToApply)} to streamer")
+                (streamer as? IWithVideoRotation)?.setTargetRotation(rotationToApply)
+                Log.i(TAG, "onStreamingStart: Successfully applied rotation ${rotationToString(rotationToApply)}")
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to apply locked rotation: ${t.message}")
+                Log.e(TAG, "onStreamingStart: FAILED to apply locked rotation", t)
             }
         }
         

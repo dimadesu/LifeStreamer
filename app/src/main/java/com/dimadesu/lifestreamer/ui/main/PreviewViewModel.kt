@@ -691,11 +691,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
 
         // When streaming stops, apply any pending rotation change.
+        // BUT: Don't apply during reconnection - we want to keep the locked orientation
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        if (!isStreaming) {
+                        if (!isStreaming && !isReconnecting) {
                             pendingTargetRotation?.let { pending ->
                                 Log.i(TAG, "Applying pending rotation $pending after stream stopped")
                                 try {
@@ -705,6 +706,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 pendingTargetRotation = null
                             }
+                        } else if (!isStreaming && isReconnecting) {
+                            Log.i(TAG, "Skipping pending rotation application during reconnection (pending: $pendingTargetRotation)")
                         }
                     }
                 }
