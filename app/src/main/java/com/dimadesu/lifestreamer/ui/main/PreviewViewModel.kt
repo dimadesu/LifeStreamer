@@ -780,6 +780,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
+            
+            // Lock stream rotation BEFORE starting to ensure it matches UI orientation
+            // Get current display rotation and lock the service to it
+            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            val currentRotation = windowManager.defaultDisplay.rotation
+            service?.lockStreamRotation(currentRotation)
+            Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
+            
             val currentStreamer = serviceStreamer
             val serviceReady = _serviceReady.value
 
