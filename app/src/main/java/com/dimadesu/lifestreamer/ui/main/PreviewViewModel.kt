@@ -760,20 +760,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         
         // Observe manual stop from notification - cancel reconnection if in progress
+        // Use a separate coroutine that waits for service to be ready and then observes the flow
         viewModelScope.launch {
-            serviceReadyFlow.collect { isReady ->
-                if (isReady) {
-                    service?.userStoppedFromNotification?.collect {
-                        Log.i(TAG, "User stopped from notification - cancelling reconnection")
-                        // Mark as manual stop to prevent reconnection
-                        userStoppedManually = true
-                        // Cancel any pending reconnection
-                        reconnectTimer.stop()
-                        isReconnecting = false
-                        _reconnectionStatusLiveData.postValue(null)
-                        _streamStatus.value = StreamStatus.NOT_STREAMING
-                    }
-                }
+            // Wait for service to be ready
+            _serviceReady.first { it }
+            // Now observe the stop signal
+            service?.userStoppedFromNotification?.collect {
+                Log.i(TAG, "User stopped from notification - cancelling reconnection")
+                // Mark as manual stop to prevent reconnection
+                userStoppedManually = true
+                // Cancel any pending reconnection
+                reconnectTimer.stop()
+                isReconnecting = false
+                _reconnectionStatusLiveData.postValue(null)
+                _streamStatus.value = StreamStatus.NOT_STREAMING
             }
         }
         
