@@ -596,8 +596,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         // Determine mute/unmute label and pending intents
         val muteLabel = currentMuteLabel()
-        val showStart = status != StreamStatus.STREAMING
-        val showStop = status == StreamStatus.STREAMING
+        // Show Start button when not streaming and not in a transitional state
+        val showStart = status == StreamStatus.NOT_STREAMING
+        // Show Stop button when streaming or attempting to connect
+        val showStop = status == StreamStatus.STREAMING || 
+                      status == StreamStatus.CONNECTING || 
+                      status == StreamStatus.STARTING
 
         // Only read bitrate when streaming
         val videoBitrate = if (status == StreamStatus.STREAMING) {
@@ -643,15 +647,29 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // if neither is available.
     private fun getEffectiveServiceStatus(): StreamStatus {
         return try {
+            val svcStatus = _serviceStreamStatus.value
             val streamerInstance = streamer
+            
             if (streamerInstance != null) {
                 val streamingNow = streamerInstance.isStreamingFlow.value
-                if (streamingNow) StreamStatus.STREAMING else StreamStatus.NOT_STREAMING
+                
+                // If we're actively streaming, return STREAMING
+                if (streamingNow) return StreamStatus.STREAMING
+                
+                // If not streaming but service status is CONNECTING, STARTING, or ERROR,
+                // respect the service status (e.g., during reconnection attempts)
+                if (svcStatus == StreamStatus.CONNECTING || 
+                    svcStatus == StreamStatus.STARTING ||
+                    svcStatus == StreamStatus.ERROR) {
+                    return svcStatus
+                }
+                
+                // Otherwise, not streaming and no special status
+                return StreamStatus.NOT_STREAMING
             } else {
                 // Conservative: if streamer is null but service still reports STREAMING,
                 // treat as NOT_STREAMING to avoid flashing 'live' when no active streamer.
-                val svc = _serviceStreamStatus.value
-                if (svc == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svc
+                if (svcStatus == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svcStatus
             }
         } catch (_: Throwable) {
             _serviceStreamStatus.value
