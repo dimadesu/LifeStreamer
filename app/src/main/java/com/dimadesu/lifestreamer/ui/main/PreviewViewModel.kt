@@ -676,6 +676,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                            currentStatus == StreamStatus.CONNECTING ||
                                            currentStatus == StreamStatus.STREAMING
                 
+                // During reconnection, ignore rotation changes to maintain locked orientation
+                if (isReconnecting) {
+                    Log.i(TAG, "Rotation change to $rotation ignored during reconnection (maintaining locked orientation)")
+                    return@collect
+                }
+                
                 if (isCurrentlyStreaming || isInStreamingProcess) {
                     Log.i(TAG, "Rotation change to $rotation queued (streaming: $isCurrentlyStreaming, status: $currentStatus)")
                     pendingTargetRotation = rotation
