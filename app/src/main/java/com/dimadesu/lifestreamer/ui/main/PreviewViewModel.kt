@@ -1041,6 +1041,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
 
                 Log.i(TAG, "Stream stop completed successfully")
+                
+                // Explicitly unlock stream rotation in the service
+                // This allows rotation to follow sensor again when truly stopped
+                service?.unlockStreamRotation()
 
             } catch (e: Throwable) {
                 Log.e(TAG, "stopStream failed", e)

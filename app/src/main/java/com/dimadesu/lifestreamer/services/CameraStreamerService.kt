@@ -411,10 +411,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onStreamingStop() {
-        // Unlock stream rotation when streaming stops
-        // This allows the stream to follow sensor rotation again when not streaming
-        lockedStreamRotation = null
-        Log.i(TAG, "Stream rotation unlocked - will follow sensor again")
+        // Don't automatically unlock stream rotation here - it will be unlocked explicitly
+        // when the stream truly stops (not during reconnection cleanup)
+        // This prevents rotation changes from being accepted during reconnection
+        Log.i(TAG, "Streaming stopped - rotation lock maintained for potential reconnection")
         
         // Release wake locks when streaming stops
         releaseWakeLock()
@@ -437,6 +437,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Update service-side status
         try { _serviceStreamStatus.tryEmit(StreamStatus.NOT_STREAMING) } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
+    }
+    
+    /**
+     * Explicitly unlock stream rotation when streaming truly stops (not during reconnection).
+     * This should be called by the ViewModel when the stream is fully stopped.
+     */
+    fun unlockStreamRotation() {
+        lockedStreamRotation = null
+        Log.i(TAG, "Stream rotation explicitly unlocked - will follow sensor again")
     }
 
     /**
