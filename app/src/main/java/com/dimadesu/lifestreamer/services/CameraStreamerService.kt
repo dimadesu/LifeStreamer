@@ -875,22 +875,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 return
             }
 
-            // Check if sources are configured - initialize if needed
+            // Check if sources are configured - wait for them to become available
             // Cast to IWithVideoSource and IWithAudioSource to access inputs
             val videoInput = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput
             val audioInput = (currentStreamer as? IWithAudioSource)?.audioInput
+            
+            // Wait up to 3 seconds for sources to be initialized by ViewModel
+            val sourcesReady = withTimeoutOrNull(3000) {
+                while (videoInput?.sourceFlow?.value == null || audioInput?.sourceFlow?.value == null) {
+                    delay(200)
+                }
+                true
+            } ?: false
+            
             val hasVideoSource = videoInput?.sourceFlow?.value != null
             val hasAudioSource = audioInput?.sourceFlow?.value != null
             
-            Log.i(TAG, "startStreamFromConfiguredEndpoint: Source check - Video: $hasVideoSource, Audio: $hasAudioSource")
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Source check after waiting - Video: $hasVideoSource, Audio: $hasAudioSource")
             
             if (!hasVideoSource || !hasAudioSource) {
-                Log.i(TAG, "Sources not fully configured - initializing before stream start")
-                // Sources need initialization - this can happen if starting from notification
-                // before ViewModel has initialized sources
-                
-                // Note: We can't initialize sources here without permissions or context
-                // Instead, emit error and let ViewModel handle initialization
+                // Sources still not available after waiting - this means ViewModel hasn't initialized them
+                // This can happen if user clicks Start in notification before opening the app
                 val errorMsg = "Sources not initialized - please start from app first"
                 Log.w(TAG, errorMsg)
                 customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
