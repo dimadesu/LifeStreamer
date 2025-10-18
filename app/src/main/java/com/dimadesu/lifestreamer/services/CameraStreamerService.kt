@@ -457,11 +457,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         lockedStreamRotation = rotation
         currentRotation = rotation
         // Also apply to the streamer immediately if available
-        try {
-            (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
-            Log.i(TAG, "Stream rotation explicitly locked to ${rotationToString(rotation)}")
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to set target rotation: ${t.message}")
+        serviceScope.launch {
+            try {
+                (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+                Log.i(TAG, "Stream rotation explicitly locked to ${rotationToString(rotation)}")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to set target rotation: ${t.message}")
+            }
         }
     }
 
@@ -676,11 +678,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
         
         // Always apply the locked rotation to the streamer to ensure it's set correctly
-        try {
-            (streamer as? IWithVideoRotation)?.setTargetRotation(lockedStreamRotation!!)
-            Log.d(TAG, "Applied locked rotation ${rotationToString(lockedStreamRotation!!)} to streamer")
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to apply locked rotation: ${t.message}")
+        serviceScope.launch {
+            try {
+                (streamer as? IWithVideoRotation)?.setTargetRotation(lockedStreamRotation!!)
+                Log.d(TAG, "Applied locked rotation ${rotationToString(lockedStreamRotation!!)} to streamer")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to apply locked rotation: ${t.message}")
+            }
         }
         
         // Acquire wake locks when streaming starts
