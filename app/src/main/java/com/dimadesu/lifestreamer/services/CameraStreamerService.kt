@@ -32,6 +32,7 @@ import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
+import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import kotlinx.coroutines.*
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
@@ -871,6 +872,29 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
                 // Surface critical error for UI dialogs
                 serviceScope.launch { _criticalErrors.emit("Streamer not available") }
+                return
+            }
+
+            // Check if sources are configured - initialize if needed
+            // Cast to IWithVideoSource and IWithAudioSource to access inputs
+            val videoInput = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput
+            val audioInput = (currentStreamer as? IWithAudioSource)?.audioInput
+            val hasVideoSource = videoInput?.sourceFlow?.value != null
+            val hasAudioSource = audioInput?.sourceFlow?.value != null
+            
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Source check - Video: $hasVideoSource, Audio: $hasAudioSource")
+            
+            if (!hasVideoSource || !hasAudioSource) {
+                Log.i(TAG, "Sources not fully configured - initializing before stream start")
+                // Sources need initialization - this can happen if starting from notification
+                // before ViewModel has initialized sources
+                
+                // Note: We can't initialize sources here without permissions or context
+                // Instead, emit error and let ViewModel handle initialization
+                val errorMsg = "Sources not initialized - please start from app first"
+                Log.w(TAG, errorMsg)
+                customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
+                serviceScope.launch { _criticalErrors.emit(errorMsg) }
                 return
             }
 
