@@ -463,7 +463,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try {
             val streamerExists = streamer != null
             Log.d(TAG, "lockStreamRotation: Applying to streamer SYNCHRONOUSLY (exists: $streamerExists)")
-            (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+            runBlocking {
+                (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+            }
             Log.i(TAG, "Stream rotation explicitly locked and applied to ${rotationToString(rotation)}")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to set target rotation: ${t.message}", t)
@@ -686,7 +688,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try {
             val rotationToApply = lockedStreamRotation!!
             Log.i(TAG, "onStreamingStart: Applying rotation ${rotationToString(rotationToApply)} to streamer (synchronous)")
-            (streamer as? IWithVideoRotation)?.setTargetRotation(rotationToApply)
+            runBlocking {
+                (streamer as? IWithVideoRotation)?.setTargetRotation(rotationToApply)
+            }
             Log.i(TAG, "onStreamingStart: Successfully applied rotation ${rotationToString(rotationToApply)}")
         } catch (t: Throwable) {
             Log.e(TAG, "onStreamingStart: FAILED to apply locked rotation", t)
