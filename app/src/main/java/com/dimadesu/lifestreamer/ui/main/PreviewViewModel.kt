@@ -255,7 +255,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isReconnectingLiveData: LiveData<Boolean> = _isReconnectingLiveData
     private var isReconnecting: Boolean
         get() = _isReconnectingLiveData.value ?: false
-        set(value) { _isReconnectingLiveData.postValue(value) }
+        set(value) { _isReconnectingLiveData.value = value }
     private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
@@ -907,24 +907,27 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             _isTryingConnectionLiveData.postValue(true)
             _streamStatus.value = StreamStatus.CONNECTING
+            Log.i(TAG, "startStream: Set status to CONNECTING")
             var autoRetryTriggered = false
             try {
                 val success = doStartStream(shouldAutoRetry = true)
                 if (!success) {
-                    Log.e(TAG, "Initial connection failed - auto-retry was triggered")
+                    Log.e(TAG, "Initial connection failed - isReconnecting=$isReconnecting, status=${_streamStatus.value}")
                     // handleDisconnection was already called in doStartStream
                     // Check if reconnection is active before clearing status
                     if (isReconnecting) {
                         autoRetryTriggered = true
+                        Log.i(TAG, "Auto-retry triggered, keeping status=${_streamStatus.value}")
                     } else {
                         _streamStatus.value = StreamStatus.ERROR
+                        Log.i(TAG, "No auto-retry, setting status to ERROR")
                     }
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
                 _streamStatus.value = StreamStatus.STREAMING
             } catch (e: Throwable) {
-                Log.e(TAG, "startStream failed", e)
+                Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=$isReconnecting", e)
                 // Don't show error dialog if reconnection will handle it
                 if (!isReconnecting) {
                     _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
@@ -932,14 +935,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Check if reconnection was triggered by the exception
                 if (isReconnecting) {
                     autoRetryTriggered = true
+                    Log.i(TAG, "Exception but reconnecting, keeping status=${_streamStatus.value}")
                 } else {
                     _streamStatus.value = StreamStatus.ERROR
+                    Log.i(TAG, "Exception and no reconnection, setting status to ERROR")
                 }
             } finally {
+                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${_streamStatus.value}")
                 _isTryingConnectionLiveData.postValue(false)
                 // Don't override status if auto-retry was triggered or if we're reconnecting
                 if (!autoRetryTriggered && !isReconnecting && _streamStatus.value != StreamStatus.STREAMING) {
+                    Log.w(TAG, "startStream finally: Overriding status to NOT_STREAMING")
                     _streamStatus.value = StreamStatus.NOT_STREAMING
+                } else {
+                    Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
                 }
             }
         }
