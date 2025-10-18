@@ -260,6 +260,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         // Start periodic notification updater to reflect runtime status
         startStatusUpdater()
+        
+        // Observe service status changes for immediate notification updates
+        // (STARTING, CONNECTING, ERROR, STREAMING, NOT_STREAMING)
+        serviceScope.launch {
+            serviceStreamStatus.collect { _ ->
+                notifyForCurrentState()
+            }
+        }
     }
 
     private fun initNotificationPendingIntents() {
@@ -924,8 +932,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
-                try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}
-                customNotificationUtils.notify(onErrorNotification(Throwable("Open failed: ${e.message}")) ?: onCreateNotification())
+                // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
+                // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
+                customNotificationUtils.notify(onCreateNotification())
+                // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
                 return
             }
@@ -934,12 +944,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 currentStreamer.startStream()
-                // On success, move to STREAMING
-                try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
+                // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
+                // derive it from isStreamingFlow.value to ensure accuracy
+                Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
-                try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}
-                customNotificationUtils.notify(onErrorNotification(Throwable("Start failed: ${e.message}")) ?: onCreateNotification())
+                // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
+                // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
+                customNotificationUtils.notify(onCreateNotification())
+                // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
                 return
             }
