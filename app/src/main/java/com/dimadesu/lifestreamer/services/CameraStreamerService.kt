@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.content.BroadcastReceiver
 import android.content.Intent
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
@@ -131,6 +132,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
+    // Signal when user manually stops from notification (for ViewModel to cancel reconnection)
+    private val _userStoppedFromNotification = MutableSharedFlow<Unit>(replay = 0)
+    val userStoppedFromNotification = _userStoppedFromNotification.asSharedFlow()
     // Cached PendingIntents for notification actions to avoid recreating/cancelling them
     private lateinit var startPendingIntent: PendingIntent
     private lateinit var stopPendingIntent: PendingIntent
@@ -359,6 +363,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification receiver: STOP_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
                         try {
+                            // Signal that user manually stopped from notification
+                            // This allows ViewModel to cancel reconnection attempts
+                            _userStoppedFromNotification.emit(Unit)
+                            
                             streamer?.stopStream()
                             // Refresh notification to show Start action on main thread
                             val notification = onCloseNotification() ?: onCreateNotification()
@@ -596,8 +604,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         // Determine mute/unmute label and pending intents
         val muteLabel = currentMuteLabel()
-        val showStart = status != StreamStatus.STREAMING
-        val showStop = status == StreamStatus.STREAMING
+        // Show Start button when not streaming and not in a transitional state
+        val showStart = status == StreamStatus.NOT_STREAMING
+        // Show Stop button when streaming or attempting to connect
+        val showStop = status == StreamStatus.STREAMING || 
+                      status == StreamStatus.CONNECTING || 
+                      status == StreamStatus.STARTING
 
         // Only read bitrate when streaming
         val videoBitrate = if (status == StreamStatus.STREAMING) {
@@ -643,15 +655,29 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // if neither is available.
     private fun getEffectiveServiceStatus(): StreamStatus {
         return try {
+            val svcStatus = _serviceStreamStatus.value
             val streamerInstance = streamer
+            
             if (streamerInstance != null) {
                 val streamingNow = streamerInstance.isStreamingFlow.value
-                if (streamingNow) StreamStatus.STREAMING else StreamStatus.NOT_STREAMING
+                
+                // If we're actively streaming, return STREAMING
+                if (streamingNow) return StreamStatus.STREAMING
+                
+                // If not streaming but service status is CONNECTING, STARTING, or ERROR,
+                // respect the service status (e.g., during reconnection attempts)
+                if (svcStatus == StreamStatus.CONNECTING || 
+                    svcStatus == StreamStatus.STARTING ||
+                    svcStatus == StreamStatus.ERROR) {
+                    return svcStatus
+                }
+                
+                // Otherwise, not streaming and no special status
+                return StreamStatus.NOT_STREAMING
             } else {
                 // Conservative: if streamer is null but service still reports STREAMING,
                 // treat as NOT_STREAMING to avoid flashing 'live' when no active streamer.
-                val svc = _serviceStreamStatus.value
-                if (svc == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svc
+                if (svcStatus == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svcStatus
             }
         } catch (_: Throwable) {
             _serviceStreamStatus.value
@@ -979,6 +1005,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } catch (e: Exception) {
                 Log.w(TAG, "setMuted failed: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Update the service stream status. This is typically called from the ViewModel
+     * to keep the service's status in sync during reconnection attempts or other
+     * state changes that the service might not detect on its own.
+     */
+    fun updateStreamStatus(status: StreamStatus) {
+        try {
+            _serviceStreamStatus.tryEmit(status)
+            Log.d(TAG, "Service status updated to: $status")
+            // Force notification update with new status
+            serviceScope.launch {
+                notifyForCurrentState()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "updateStreamStatus failed: ${e.message}")
         }
     }
 
