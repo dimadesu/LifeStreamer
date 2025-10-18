@@ -620,9 +620,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { !it.isClosedException }
-                .map { "${it.javaClass.simpleName}: ${it.message}" }.collect { errorMessage ->
-                    // Don't show error dialog during reconnection attempts
-                    if (!isReconnecting) {
+                .collect { throwable ->
+                    val errorMessage = "${throwable.javaClass.simpleName}: ${throwable.message}"
+                    Log.w(TAG, "Non-ClosedException error: $errorMessage, type: ${throwable.javaClass.name}")
+                    
+                    // Check if this is a connection-related error that should trigger reconnection
+                    val isConnectionError = throwable.message?.contains("connection", ignoreCase = true) == true ||
+                                           throwable.message?.contains("socket", ignoreCase = true) == true ||
+                                           throwable.message?.contains("network", ignoreCase = true) == true ||
+                                           throwable.message?.contains("timeout", ignoreCase = true) == true ||
+                                           throwable.message?.contains("refused", ignoreCase = true) == true ||
+                                           throwable.javaClass.name.contains("IOException") ||
+                                           throwable.javaClass.name.contains("SocketException")
+                    
+                    if (isConnectionError && !isReconnecting) {
+                        // Connection-related error - trigger reconnection
+                        Log.i(TAG, "Connection error detected - triggering reconnection")
+                        handleDisconnection(errorMessage, isInitialConnection = false)
+                    } else if (!isReconnecting) {
+                        // Other error - show error dialog
                         _streamerErrorLiveData.postValue(errorMessage)
                     } else {
                         Log.w(TAG, "Error during reconnection (dialog suppressed): $errorMessage")
