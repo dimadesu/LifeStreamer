@@ -32,6 +32,7 @@ import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
+import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import kotlinx.coroutines.*
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
@@ -871,6 +872,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
                 // Surface critical error for UI dialogs
                 serviceScope.launch { _criticalErrors.emit("Streamer not available") }
+                return
+            }
+
+            // Check if sources are configured - wait for them to become available
+            // Cast to IWithVideoSource and IWithAudioSource to access inputs
+            val videoInput = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput
+            val audioInput = (currentStreamer as? IWithAudioSource)?.audioInput
+            
+            // Wait up to 3 seconds for sources to be initialized by ViewModel
+            val sourcesReady = withTimeoutOrNull(3000) {
+                while (videoInput?.sourceFlow?.value == null || audioInput?.sourceFlow?.value == null) {
+                    delay(200)
+                }
+                true
+            } ?: false
+            
+            val hasVideoSource = videoInput?.sourceFlow?.value != null
+            val hasAudioSource = audioInput?.sourceFlow?.value != null
+            
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Source check after waiting - Video: $hasVideoSource, Audio: $hasAudioSource")
+            
+            if (!hasVideoSource || !hasAudioSource) {
+                // Sources still not available after waiting - this means ViewModel hasn't initialized them
+                // This can happen if user clicks Start in notification before opening the app
+                val errorMsg = "Sources not initialized - please start from app first"
+                Log.w(TAG, errorMsg)
+                customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
+                serviceScope.launch { _criticalErrors.emit(errorMsg) }
                 return
             }
 
