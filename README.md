@@ -54,11 +54,10 @@ I've started with original camera demo from StreamPack. I'm tweaking it and addi
     - Alternatively, run [MediaMTX](https://github.com/bluenviron/mediamtx) in [Termux](https://termux.dev/en/). [Watch video to see how to set it up.](https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&t=310)
   - Stream RTMP from action camera to RTMP server.
   - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
-  - There are many things that can go wrong with RTMP source, but I got the basic version working.
+  - There are many things that can go wrong with RTMP source. I think it's working pretty good now.
+- [x] Reconnect on disconnect
 
 ### Planning to implement next
-
-- Re-connect on disconnect
 - Polish existing functionality and user flows
 
 ## Why StreamPack
@@ -95,13 +94,13 @@ Applies to [LifeStreamer v0.3.3](https://github.com/dimadesu/LifeStreamer/releas
     - Retries for playing RTMP stream.
     - Etc.
   
-  I recommened monitoring the stream on the 2nd phone. Do not use streaming phone for anything else as much as possible, keep LifeStreamer app open (in foreground) for best performance.
+  Be careful with background mode when using RTMP as source. RTMP source by itself should be fine, but background mode has performance limitations. I recommened monitoring the stream on the 2nd phone. Do not use streaming phone for anything else as much as possible, keep LifeStreamer app open (in foreground) for best performance.
 
   What works:
 
   - Start RTMP server.
   - Start action cam stream to RTMP server.
-  - Kill LifeStreamer app/service.
+  - Kill LifeStreamer app/service. _(Optional, just to get super clean app state before starting.)_
   - Start LifeStreamer app.
   - Switch to RTMP source.
   - Start the stream from LifeStreamer.
@@ -132,12 +131,10 @@ Applies to [LifeStreamer v0.3.3](https://github.com/dimadesu/LifeStreamer/releas
 
 **There are bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
 
-Minimise transitions between foreground/background and stay in foreground for better performance with screen on and phone unlocked until background mode is fixed.
+Minimise transitions between foreground/background and stay in foreground for better performance with screen on and phone unlocked until background mode performance is optimised OR embrace background mode limitations.
 
-Once you find configuration that works get a solid sample size of that and then start carefully adding/changing things and test if it still works as expected.
-
-Some settings can be changed on the fly. It's best to kill app/service and restart the app after changing settings - this seems to help.
+Settings can be changed during the stream, but won't apply until you restart the stream.
 
 Goal for near future is stabilising as much as possible and making sure it's solid. It will take some time to polish.
 
-MVP sort of works. Use recommended workarounds if you encounter issues.
+Use recommended workarounds if you encounter issues.
