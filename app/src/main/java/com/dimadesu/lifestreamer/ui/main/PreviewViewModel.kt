@@ -251,7 +251,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     // Connection retry mechanism (inspired by Moblin)
     private val reconnectTimer = ReconnectTimer()
-    private var isReconnecting = false
+    private val _isReconnectingLiveData = MutableLiveData<Boolean>(false)
+    val isReconnectingLiveData: LiveData<Boolean> = _isReconnectingLiveData
+    private var isReconnecting: Boolean
+        get() = _isReconnectingLiveData.value ?: false
+        set(value) { _isReconnectingLiveData.postValue(value) }
     private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
