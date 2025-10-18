@@ -466,6 +466,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         currentRotation = rotation
         Log.i(TAG, "lockStreamRotation: Setting lock from ${if (wasLocked != null) rotationToString(wasLocked) else "null"} to ${rotationToString(rotation)}, saved for reconnection")
     }
+    
+    /**
+     * Get the saved streaming orientation for reconnection.
+     * Returns null if no orientation has been saved.
+     */
+    fun getSavedStreamingOrientation(): Int? {
+        return savedStreamingOrientation
+    }
 
     /**
      * Start a coroutine that periodically updates the notification with streaming status

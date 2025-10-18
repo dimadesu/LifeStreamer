@@ -311,6 +311,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.open(descriptor)
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
+            
+            // Apply saved rotation BEFORE starting stream (during reconnection)
+            // This is the critical window where rotation can be set
+            service?.getSavedStreamingOrientation()?.let { savedRotation ->
+                Log.i(TAG, "startServiceStreaming: Applying saved rotation $savedRotation before starting stream")
+                try {
+                    currentStreamer.setTargetRotation(savedRotation)
+                    Log.i(TAG, "startServiceStreaming: Successfully applied saved rotation $savedRotation")
+                } catch (e: Exception) {
+                    Log.e(TAG, "startServiceStreaming: Failed to apply saved rotation: ${e.message}")
+                }
+            }
+            
             currentStreamer.startStream()
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             true
