@@ -1156,7 +1156,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Cancel any pending reconnection attempts
                 reconnectTimer.stop()
                 isReconnecting = false
-                _reconnectionStatusLiveData.postValue(null)
+                _reconnectionStatusLiveData.value = null
                 
                 _isTryingConnectionLiveData.postValue(false)
                 
@@ -1287,6 +1287,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (userStoppedManually) {
                     Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
                     isReconnecting = false
+                    _reconnectionStatusLiveData.value = null
                     return@launch
                 }
                 
