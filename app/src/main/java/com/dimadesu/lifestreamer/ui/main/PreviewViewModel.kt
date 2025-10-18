@@ -929,11 +929,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (!isReconnecting) {
                     _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
                 }
-                _streamStatus.value = StreamStatus.ERROR
+                // Check if reconnection was triggered by the exception
+                if (isReconnecting) {
+                    autoRetryTriggered = true
+                } else {
+                    _streamStatus.value = StreamStatus.ERROR
+                }
             } finally {
                 _isTryingConnectionLiveData.postValue(false)
-                // Don't override status if auto-retry was triggered
-                if (!autoRetryTriggered && _streamStatus.value != StreamStatus.STREAMING) {
+                // Don't override status if auto-retry was triggered or if we're reconnecting
+                if (!autoRetryTriggered && !isReconnecting && _streamStatus.value != StreamStatus.STREAMING) {
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                 }
             }
