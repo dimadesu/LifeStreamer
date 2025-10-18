@@ -671,14 +671,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             rotationRepository.rotationFlow.collect { rotation ->
                 val current = serviceStreamer
                 val isCurrentlyStreaming = current?.isStreamingFlow?.value == true
-                val isReconnecting = _streamStatus.value == StreamStatus.CONNECTING
+                val currentStatus = _streamStatus.value
+                val isInStreamingProcess = currentStatus == StreamStatus.STARTING ||
+                                           currentStatus == StreamStatus.CONNECTING ||
+                                           currentStatus == StreamStatus.STREAMING
                 
-                if (isCurrentlyStreaming || isReconnecting) {
-                    Log.i(TAG, "Rotation change to $rotation queued (streaming: $isCurrentlyStreaming, reconnecting: $isReconnecting)")
+                if (isCurrentlyStreaming || isInStreamingProcess) {
+                    Log.i(TAG, "Rotation change to $rotation queued (streaming: $isCurrentlyStreaming, status: $currentStatus)")
                     pendingTargetRotation = rotation
                 } else {
                     try {
                         current?.setTargetRotation(rotation)
+                        Log.i(TAG, "Rotation change to $rotation applied immediately (not streaming)")
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to set target rotation: $t")
                     }
