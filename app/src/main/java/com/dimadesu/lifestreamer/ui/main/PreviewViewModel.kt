@@ -1121,6 +1121,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         isReconnecting = true
         lastDisconnectReason = reason
         
+        // Clear any pending rotation changes - we want to maintain current locked orientation
+        if (pendingTargetRotation != null) {
+            Log.i(TAG, "Clearing pending rotation $pendingTargetRotation - maintaining locked orientation during reconnection")
+            pendingTargetRotation = null
+        }
+        
         Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
         _streamStatus.value = StreamStatus.CONNECTING
         _reconnectionStatusLiveData.postValue("Connection lost. Reconnecting in 5 seconds...")
