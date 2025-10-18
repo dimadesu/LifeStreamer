@@ -1230,6 +1230,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _streamStatus.value = StreamStatus.STREAMING
                     _reconnectionStatusLiveData.postValue("Reconnected successfully!")
                     
+                    // Clear reconnection flag ONLY after stream is fully connected
+                    isReconnecting = false
+                    
                     // Clear success message after 3 seconds
                     viewModelScope.launch {
                         delay(3000)
@@ -1239,6 +1242,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
                     _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
                     
+                    // Keep isReconnecting = true for retry attempt
                     // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
                     reconnectTimer.startSingleShot(timeoutSeconds = 5) {
                         Log.i(TAG, "Retrying reconnection after previous failure...")
@@ -1250,14 +1254,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
                 _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
                 
+                // Keep isReconnecting = true for retry attempt
                 // Schedule another reconnection attempt directly
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
                     Log.i(TAG, "Retrying reconnection after exception...")
                     attemptReconnection()
                 }
                 return@launch
-            } finally {
-                isReconnecting = false
             }
         }
     }
