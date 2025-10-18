@@ -1327,16 +1327,42 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 // Check if we need to restore MediaProjection audio for RTMP source
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
                 val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
                 
-                if (isRtmpVideo && streamingMediaProjection != null) {
-                    // Restore MediaProjection audio for RTMP stream
-                    try {
-                        Log.d(TAG, "Restoring MediaProjection audio for RTMP reconnection")
-                        setServiceAudioSource(MediaProjectionAudioSourceFactory(streamingMediaProjection!!))
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to restore MediaProjection audio, using microphone: ${e.message}")
-                        setServiceAudioSource(MicrophoneSourceFactory())
+                Log.d(TAG, "Reconnection video source check: isRtmpVideo=$isRtmpVideo, videoSource=${currentVideoSource?.javaClass?.simpleName}")
+                Log.d(TAG, "Reconnection audio source: ${currentAudioSource?.javaClass?.simpleName}, MediaProjection available: ${streamingMediaProjection != null}")
+                
+                if (isRtmpVideo) {
+                    // For RTMP video source, ensure we have proper audio source
+                    // Priority: MediaProjection > existing audio > microphone fallback
+                    val hasMediaProjection = streamingMediaProjection != null || mediaProjectionHelper.getMediaProjection() != null
+                    val currentAudioIsMediaProjection = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                    
+                    if (hasMediaProjection && !currentAudioIsMediaProjection) {
+                        // Restore MediaProjection audio for RTMP stream
+                        try {
+                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                            if (projection != null) {
+                                Log.d(TAG, "Restoring MediaProjection audio for RTMP reconnection")
+                                setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                            } else {
+                                Log.w(TAG, "MediaProjection became null, using microphone for reconnection")
+                                setServiceAudioSource(MicrophoneSourceFactory())
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to restore MediaProjection audio, using microphone: ${e.message}")
+                            setServiceAudioSource(MicrophoneSourceFactory())
+                        }
+                    } else if (currentAudioIsMediaProjection) {
+                        Log.d(TAG, "Audio source already set to MediaProjection, keeping it")
+                    } else {
+                        Log.d(TAG, "No MediaProjection available, ensuring microphone audio for RTMP")
+                        try {
+                            setServiceAudioSource(MicrophoneSourceFactory())
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to set microphone audio: ${e.message}")
+                        }
                     }
                 }
 
