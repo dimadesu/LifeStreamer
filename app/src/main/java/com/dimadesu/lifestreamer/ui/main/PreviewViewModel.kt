@@ -758,6 +758,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
+        
+        // Observe manual stop from notification - cancel reconnection if in progress
+        viewModelScope.launch {
+            serviceReadyFlow.collect { isReady ->
+                if (isReady) {
+                    service?.userStoppedFromNotification?.collect {
+                        Log.i(TAG, "User stopped from notification - cancelling reconnection")
+                        // Mark as manual stop to prevent reconnection
+                        userStoppedManually = true
+                        // Cancel any pending reconnection
+                        reconnectTimer.stop()
+                        isReconnecting = false
+                        _reconnectionStatusLiveData.postValue(null)
+                        _streamStatus.value = StreamStatus.NOT_STREAMING
+                    }
+                }
+            }
+        }
+        
         viewModelScope.launch {
             storageRepository.isAudioEnableFlow.combine(storageRepository.isVideoEnableFlow) { isAudioEnable, isVideoEnable ->
                 Pair(isAudioEnable, isVideoEnable)

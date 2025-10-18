@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.content.BroadcastReceiver
 import android.content.Intent
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
@@ -131,6 +132,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
+    // Signal when user manually stops from notification (for ViewModel to cancel reconnection)
+    private val _userStoppedFromNotification = MutableSharedFlow<Unit>(replay = 0)
+    val userStoppedFromNotification = _userStoppedFromNotification.asSharedFlow()
     // Cached PendingIntents for notification actions to avoid recreating/cancelling them
     private lateinit var startPendingIntent: PendingIntent
     private lateinit var stopPendingIntent: PendingIntent
@@ -359,6 +363,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification receiver: STOP_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
                         try {
+                            // Signal that user manually stopped from notification
+                            // This allows ViewModel to cancel reconnection attempts
+                            _userStoppedFromNotification.emit(Unit)
+                            
                             streamer?.stopStream()
                             // Refresh notification to show Start action on main thread
                             val notification = onCloseNotification() ?: onCreateNotification()
