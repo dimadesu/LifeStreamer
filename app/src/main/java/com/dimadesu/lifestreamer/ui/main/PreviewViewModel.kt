@@ -251,8 +251,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     // Connection retry mechanism (inspired by Moblin)
     private val reconnectTimer = ReconnectTimer()
-    private var isReconnecting = false
+    private val _isReconnectingLiveData = MutableLiveData<Boolean>(false)
+    val isReconnectingLiveData: LiveData<Boolean> = _isReconnectingLiveData
+    private var isReconnecting: Boolean
+        get() = _isReconnectingLiveData.value ?: false
+        set(value) { _isReconnectingLiveData.postValue(value) }
+    private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
+    private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -310,6 +316,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.open(descriptor)
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
+            
+            // Apply saved rotation BEFORE starting stream (during reconnection)
+            // This is the critical window where rotation can be set
+            service?.getSavedStreamingOrientation()?.let { savedRotation ->
+                Log.i(TAG, "startServiceStreaming: Applying saved rotation $savedRotation before starting stream")
+                try {
+                    currentStreamer.setTargetRotation(savedRotation)
+                    Log.i(TAG, "startServiceStreaming: Successfully applied saved rotation $savedRotation")
+                } catch (e: Exception) {
+                    Log.e(TAG, "startServiceStreaming: Failed to apply saved rotation: ${e.message}")
+                }
+            }
+            
             currentStreamer.startStream()
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             true
@@ -664,17 +683,32 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
-        // Apply rotation changes, but if streamer is currently streaming queue the change and
-        // apply it when streaming stops to avoid conflicts in encoding pipeline.
+        // Apply rotation changes, but if streamer is currently streaming or reconnecting,
+        // queue the change and apply it when streaming stops to avoid conflicts in encoding pipeline.
         viewModelScope.launch {
             rotationRepository.rotationFlow.collect { rotation ->
                 val current = serviceStreamer
-                if (current?.isStreamingFlow?.value == true) {
-                    Log.i(TAG, "Rotation change to $rotation queued until stream stops")
+                val isCurrentlyStreaming = current?.isStreamingFlow?.value == true
+                val currentStatus = _streamStatus.value
+                val isInStreamingProcess = currentStatus == StreamStatus.STARTING ||
+                                           currentStatus == StreamStatus.CONNECTING ||
+                                           currentStatus == StreamStatus.STREAMING
+                
+                // During reconnection, ignore rotation changes to maintain locked orientation
+                // But remember the latest rotation so we can apply it when reconnection ends
+                if (isReconnecting) {
+                    rotationIgnoredDuringReconnection = rotation
+                    Log.i(TAG, "Rotation change to $rotation ignored during reconnection (will apply later)")
+                    return@collect
+                }
+                
+                if (isCurrentlyStreaming || isInStreamingProcess) {
+                    Log.i(TAG, "Rotation change to $rotation queued (streaming: $isCurrentlyStreaming, status: $currentStatus)")
                     pendingTargetRotation = rotation
                 } else {
                     try {
                         current?.setTargetRotation(rotation)
+                        Log.i(TAG, "Rotation change to $rotation applied immediately (not streaming)")
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to set target rotation: $t")
                     }
@@ -683,11 +717,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
 
         // When streaming stops, apply any pending rotation change.
+        // BUT: Don't apply during reconnection - we want to keep the locked orientation
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        if (!isStreaming) {
+                        if (!isStreaming && !isReconnecting) {
                             pendingTargetRotation?.let { pending ->
                                 Log.i(TAG, "Applying pending rotation $pending after stream stopped")
                                 try {
@@ -697,6 +732,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 pendingTargetRotation = null
                             }
+                        } else if (!isStreaming && isReconnecting) {
+                            Log.i(TAG, "Skipping pending rotation application during reconnection (pending: $pendingTargetRotation)")
                         }
                     }
                 }
@@ -767,8 +804,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun startStream() {
         viewModelScope.launch {
+            // Clear manual stop flag when starting a new stream
+            userStoppedManually = false
+            
             _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
+            
+            // Lock stream rotation BEFORE starting to ensure it matches UI orientation
+            // Get current display rotation and lock the service to it
+            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            val currentRotation = windowManager.defaultDisplay.rotation
+            service?.lockStreamRotation(currentRotation)
+            Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
+            
             val currentStreamer = serviceStreamer
             val serviceReady = _serviceReady.value
 
@@ -1034,6 +1082,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
 
                 Log.i(TAG, "Stream stop completed successfully")
+                
+                // Explicitly unlock stream rotation in the service
+                // This allows rotation to follow sensor again when truly stopped
+                service?.unlockStreamRotation()
 
             } catch (e: Throwable) {
                 Log.e(TAG, "stopStream failed", e)
@@ -1041,14 +1093,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamingMediaProjection?.stop()
                 streamingMediaProjection = null
             } finally {
+                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
+                _streamStatus.value = StreamStatus.NOT_STREAMING
+                
+                // Mark that user stopped manually to prevent reconnection
+                userStoppedManually = true
+                
                 // Cancel any pending reconnection attempts
                 reconnectTimer.stop()
                 isReconnecting = false
                 _reconnectionStatusLiveData.postValue(null)
                 
                 _isTryingConnectionLiveData.postValue(false)
-                // Make sure UI status is cleared after stop routine finishes
-                _streamStatus.value = StreamStatus.NOT_STREAMING
+                
+                // Apply any rotation that was ignored during reconnection
+                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
+                    viewModelScope.launch {
+                        try {
+                            serviceStreamer?.setTargetRotation(ignoredRotation)
+                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to apply ignored rotation: $t")
+                        }
+                    }
+                    rotationIgnoredDuringReconnection = null
+                }
             }
         }
     }
@@ -1061,7 +1130,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * @param isInitialConnection If true, skips status check (for initial connection failures)
      */
     private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
-        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting")
+        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting, userStopped=$userStoppedManually")
+        
+        // Check if user manually stopped streaming - if so, don't start reconnection
+        if (userStoppedManually) {
+            Log.d(TAG, "User manually stopped stream, skipping reconnection attempt")
+            return
+        }
         
         // Guard against duplicate handling
         if (isReconnecting) {
@@ -1078,6 +1153,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         isReconnecting = true
         lastDisconnectReason = reason
+        
+        // Clear any pending rotation changes - we want to maintain current locked orientation
+        if (pendingTargetRotation != null) {
+            Log.i(TAG, "Clearing pending rotation $pendingTargetRotation - maintaining locked orientation during reconnection")
+            pendingTargetRotation = null
+        }
         
         Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
         _streamStatus.value = StreamStatus.CONNECTING
@@ -1120,6 +1201,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 // Schedule reconnection after 5 seconds
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
+                    // Double-check if user manually stopped during the delay
+                    if (userStoppedManually) {
+                        Log.d(TAG, "User stopped streaming during delay, cancelling reconnection")
+                        isReconnecting = false
+                        return@startSingleShot
+                    }
                     Log.i(TAG, "Attempting to reconnect after disconnection...")
                     attemptReconnection()
                 }
@@ -1139,19 +1226,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun attemptReconnection() {
         viewModelScope.launch {
             try {
+                // Check if user manually stopped streaming FIRST before doing anything
+                if (userStoppedManually) {
+                    Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
+                    isReconnecting = false
+                    return@launch
+                }
+                
                 val currentStreamer = serviceStreamer
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
                     isReconnecting = false
                     _streamStatus.value = StreamStatus.ERROR
-                    _reconnectionStatusLiveData.postValue(null)
-                    return@launch
-                }
-
-                // Check if user stopped streaming during the delay
-                if (_streamStatus.value == StreamStatus.NOT_STREAMING) {
-                    Log.d(TAG, "User stopped streaming, cancelling reconnection")
-                    isReconnecting = false
                     _reconnectionStatusLiveData.postValue(null)
                     return@launch
                 }
@@ -1183,6 +1269,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _streamStatus.value = StreamStatus.STREAMING
                     _reconnectionStatusLiveData.postValue("Reconnected successfully!")
                     
+                    // Clear reconnection flag ONLY after stream is fully connected
+                    isReconnecting = false
+                    
+                    // Clear any stored rotation since we successfully reconnected with locked orientation
+                    rotationIgnoredDuringReconnection = null
+                    
                     // Clear success message after 3 seconds
                     viewModelScope.launch {
                         delay(3000)
@@ -1192,6 +1284,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
                     _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
                     
+                    // Keep isReconnecting = true for retry attempt
                     // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
                     reconnectTimer.startSingleShot(timeoutSeconds = 5) {
                         Log.i(TAG, "Retrying reconnection after previous failure...")
@@ -1203,14 +1296,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
                 _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
                 
+                // Keep isReconnecting = true for retry attempt
                 // Schedule another reconnection attempt directly
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
                     Log.i(TAG, "Retrying reconnection after exception...")
                     attemptReconnection()
                 }
                 return@launch
-            } finally {
-                isReconnecting = false
             }
         }
     }
@@ -1836,6 +1928,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Cancel any pending reconnection attempts
         reconnectTimer.stop()
         isReconnecting = false
+        rotationIgnoredDuringReconnection = null
         Log.i(TAG, "Cancelled reconnect timer in onCleared()")
         
         // Cancel any ongoing RTMP retry loop

@@ -86,6 +86,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Stream rotation locking: when streaming starts, lock to current rotation
     // and ignore sensor changes until streaming stops
     private var lockedStreamRotation: Int? = null
+    
+    // Save the initial streaming orientation to restore it during reconnection
+    // This persists through disconnections and reconnections
+    private var savedStreamingOrientation: Int? = null
 
     // Local rotation provider (we register our own to avoid calling StreamerService.onCreate)
     private var localRotationProvider: IRotationProvider? = null
@@ -224,9 +228,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     override fun onOrientationChanged(rotation: Int) {
                         // If stream rotation is locked (during streaming), ignore sensor changes
                         if (lockedStreamRotation != null) {
-                            Log.d(TAG, "Ignoring rotation change to ${rotationToString(rotation)} - stream rotation is locked to ${rotationToString(lockedStreamRotation!!)}")
+                            Log.i(TAG, "SENSOR: Ignoring rotation change to ${rotationToString(rotation)} - LOCKED to ${rotationToString(lockedStreamRotation!!)}")
                             return
                         }
+                        Log.i(TAG, "SENSOR: Rotation changed to ${rotationToString(rotation)} - NOT LOCKED, applying")
                         
                         // When not streaming, update rotation normally
                         try {
@@ -411,10 +416,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onStreamingStop() {
-        // Unlock stream rotation when streaming stops
-        // This allows the stream to follow sensor rotation again when not streaming
-        lockedStreamRotation = null
-        Log.i(TAG, "Stream rotation unlocked - will follow sensor again")
+        // Don't automatically unlock stream rotation here - it will be unlocked explicitly
+        // when the stream truly stops (not during reconnection cleanup)
+        // This prevents rotation changes from being accepted during reconnection
+        Log.i(TAG, "Streaming stopped - rotation lock maintained for potential reconnection")
         
         // Release wake locks when streaming stops
         releaseWakeLock()
@@ -437,6 +442,37 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Update service-side status
         try { _serviceStreamStatus.tryEmit(StreamStatus.NOT_STREAMING) } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
+    }
+    
+    /**
+     * Explicitly unlock stream rotation when streaming truly stops (not during reconnection).
+     * This should be called by the ViewModel when the stream is fully stopped.
+     */
+    fun unlockStreamRotation() {
+        lockedStreamRotation = null
+        savedStreamingOrientation = null
+        Log.i(TAG, "Stream rotation explicitly unlocked - cleared saved orientation, will follow sensor again")
+    }
+    
+    /**
+     * Explicitly lock stream rotation to a specific rotation.
+     * This should be called when the UI locks orientation to ensure stream matches UI.
+     * @param rotation The rotation value (Surface.ROTATION_0, ROTATION_90, etc.)
+     */
+    fun lockStreamRotation(rotation: Int) {
+        val wasLocked = lockedStreamRotation
+        lockedStreamRotation = rotation
+        savedStreamingOrientation = rotation  // Save for reconnection
+        currentRotation = rotation
+        Log.i(TAG, "lockStreamRotation: Setting lock from ${if (wasLocked != null) rotationToString(wasLocked) else "null"} to ${rotationToString(rotation)}, saved for reconnection")
+    }
+    
+    /**
+     * Get the saved streaming orientation for reconnection.
+     * Returns null if no orientation has been saved.
+     */
+    fun getSavedStreamingOrientation(): Int? {
+        return savedStreamingOrientation
     }
 
     /**
@@ -639,10 +675,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         streamingStartTime = System.currentTimeMillis()
         
         // Lock stream rotation to current orientation when streaming starts
-        // This ensures the stream orientation stays consistent with the locked UI orientation
-        detectCurrentRotation() // Updates currentRotation variable
-        lockedStreamRotation = currentRotation
-        Log.i(TAG, "Stream rotation locked to ${rotationToString(currentRotation)} at stream start")
+        // If this is initial start, save the orientation for future reconnections
+        // If reconnecting, restore the saved orientation
+        Log.i(TAG, "onStreamingStart: lockedStreamRotation = ${if (lockedStreamRotation != null) rotationToString(lockedStreamRotation!!) else "null"}, savedStreamingOrientation = ${if (savedStreamingOrientation != null) rotationToString(savedStreamingOrientation!!) else "null"}")
+        
+        if (lockedStreamRotation == null) {
+            // First time streaming - detect and save the orientation
+            detectCurrentRotation() // Updates currentRotation variable
+            lockedStreamRotation = currentRotation
+            savedStreamingOrientation = currentRotation
+            Log.i(TAG, "onStreamingStart: INITIAL START - Detected and locked to ${rotationToString(currentRotation)}, saved for reconnection")
+        } else if (savedStreamingOrientation != null) {
+            // Reconnection - restore the saved orientation
+            lockedStreamRotation = savedStreamingOrientation
+            Log.i(TAG, "onStreamingStart: RECONNECTION - Restoring saved orientation ${rotationToString(savedStreamingOrientation!!)}")
+        } else {
+            // Lock exists but no saved orientation (shouldn't happen, but handle it)
+            Log.i(TAG, "onStreamingStart: LOCK EXISTS - Maintaining ${rotationToString(lockedStreamRotation!!)} through reconnection")
+        }
         
         // Acquire wake locks when streaming starts
         acquireWakeLock()
