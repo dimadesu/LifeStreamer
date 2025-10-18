@@ -674,13 +674,32 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        Log.i(TAG, "Streamer is streaming: $isStreaming")
-                        // Keep UI status in-sync with actual streamer state. When the streamer
-                        // reports it's streaming, show STREAMING; otherwise revert to NOT_STREAMING.
+                        val previousStatus = _streamStatus.value
+                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=$userStoppedManually, isReconnecting=$isReconnecting")
+                        
                         if (isStreaming) {
                             _streamStatus.value = StreamStatus.STREAMING
                         } else {
-                            _streamStatus.value = StreamStatus.NOT_STREAMING
+                            // Stream stopped - check if this was unexpected (should trigger reconnection)
+                            val wasStreaming = previousStatus == StreamStatus.STREAMING || 
+                                              previousStatus == StreamStatus.CONNECTING
+                            
+                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=$userStoppedManually, isReconnecting=$isReconnecting")
+                            
+                            if (wasStreaming && !userStoppedManually && !isReconnecting) {
+                                // Unexpected disconnection - trigger reconnection
+                                Log.w(TAG, "Unexpected stream stop detected - triggering reconnection")
+                                handleDisconnection("Stream stopped unexpectedly", isInitialConnection = false)
+                            } else {
+                                // Normal stop or already handling reconnection
+                                if (isReconnecting) {
+                                    Log.d(TAG, "Stream stopped during reconnection - keeping CONNECTING status")
+                                    // Don't change status, let reconnection logic handle it
+                                } else {
+                                    Log.d(TAG, "Normal stream stop - setting NOT_STREAMING")
+                                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                                }
+                            }
                         }
                     }
                 }
@@ -822,6 +841,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             // Clear manual stop flag when starting a new stream
             userStoppedManually = false
+            Log.i(TAG, "startStream() - Reset userStoppedManually=false")
             
             _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
@@ -1114,6 +1134,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Mark that user stopped manually to prevent reconnection
                 userStoppedManually = true
+                Log.i(TAG, "stopStream() - Set userStoppedManually=true")
                 
                 // Cancel any pending reconnection attempts
                 reconnectTimer.stop()
