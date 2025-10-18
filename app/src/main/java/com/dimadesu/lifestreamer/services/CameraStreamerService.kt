@@ -447,6 +447,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         lockedStreamRotation = null
         Log.i(TAG, "Stream rotation explicitly unlocked - will follow sensor again")
     }
+    
+    /**
+     * Explicitly lock stream rotation to a specific rotation.
+     * This should be called when the UI locks orientation to ensure stream matches UI.
+     * @param rotation The rotation value (Surface.ROTATION_0, ROTATION_90, etc.)
+     */
+    fun lockStreamRotation(rotation: Int) {
+        lockedStreamRotation = rotation
+        currentRotation = rotation
+        // Also apply to the streamer immediately if available
+        try {
+            (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+            Log.i(TAG, "Stream rotation explicitly locked to ${rotationToString(rotation)}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to set target rotation: ${t.message}")
+        }
+    }
 
     /**
      * Start a coroutine that periodically updates the notification with streaming status
@@ -656,6 +673,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.i(TAG, "Stream rotation locked to ${rotationToString(currentRotation)} at stream start")
         } else {
             Log.i(TAG, "Stream rotation already locked to ${rotationToString(lockedStreamRotation!!)} - maintaining lock through reconnection")
+        }
+        
+        // Always apply the locked rotation to the streamer to ensure it's set correctly
+        try {
+            (streamer as? IWithVideoRotation)?.setTargetRotation(lockedStreamRotation!!)
+            Log.d(TAG, "Applied locked rotation ${rotationToString(lockedStreamRotation!!)} to streamer")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to apply locked rotation: ${t.message}")
         }
         
         // Acquire wake locks when streaming starts

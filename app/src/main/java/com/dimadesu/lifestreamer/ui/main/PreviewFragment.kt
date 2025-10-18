@@ -323,6 +323,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         rememberedLockedOrientation = currentOrientation
         requireActivity().requestedOrientation = currentOrientation
         Log.d(TAG, "Orientation locked to: $currentOrientation (rotation: $rotation)")
+        
+        // Also lock the stream rotation in the service to match the UI orientation
+        previewViewModel.service?.lockStreamRotation(rotation)
     }
 
     private fun unlockOrientation() {
