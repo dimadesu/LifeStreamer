@@ -254,6 +254,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var isReconnecting = false
     private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
+    private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -690,8 +691,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                            currentStatus == StreamStatus.STREAMING
                 
                 // During reconnection, ignore rotation changes to maintain locked orientation
+                // But remember the latest rotation so we can apply it when reconnection ends
                 if (isReconnecting) {
-                    Log.i(TAG, "Rotation change to $rotation ignored during reconnection (maintaining locked orientation)")
+                    rotationIgnoredDuringReconnection = rotation
+                    Log.i(TAG, "Rotation change to $rotation ignored during reconnection (will apply later)")
                     return@collect
                 }
                 
@@ -1098,6 +1101,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 _reconnectionStatusLiveData.postValue(null)
                 
                 _isTryingConnectionLiveData.postValue(false)
+                
+                // Apply any rotation that was ignored during reconnection
+                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
+                    viewModelScope.launch {
+                        try {
+                            serviceStreamer?.setTargetRotation(ignoredRotation)
+                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to apply ignored rotation: $t")
+                        }
+                    }
+                    rotationIgnoredDuringReconnection = null
+                }
             }
         }
     }
@@ -1251,6 +1267,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Clear reconnection flag ONLY after stream is fully connected
                     isReconnecting = false
+                    
+                    // Clear any stored rotation since we successfully reconnected with locked orientation
+                    rotationIgnoredDuringReconnection = null
                     
                     // Clear success message after 3 seconds
                     viewModelScope.launch {
@@ -1905,6 +1924,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Cancel any pending reconnection attempts
         reconnectTimer.stop()
         isReconnecting = false
+        rotationIgnoredDuringReconnection = null
         Log.i(TAG, "Cancelled reconnect timer in onCleared()")
         
         // Cancel any ongoing RTMP retry loop
