@@ -94,7 +94,8 @@
             android:id="@+id/bitrateStatusLayout"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:paddingBottom="2dp"
             android:paddingStart="5dp"
             android:paddingEnd="5dp"
@@ -104,52 +105,56 @@
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <!-- First row: uptime, bitrate, stream status -->
-            <LinearLayout
+            <TextView
+                android:id="@+id/uptimeText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:layout_marginEnd="16dp"
+                android:text='@{viewmodel.uptimeLiveData}'
+                app:goneUnless='@{viewmodel.uptimeLiveData != null}' />
 
-                <TextView
-                    android:id="@+id/uptimeText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="16sp"
-                    android:layout_marginEnd="16dp"
-                    android:text='@{viewmodel.uptimeLiveData}'
-                    app:goneUnless='@{viewmodel.uptimeLiveData != null}' />
+            <TextView
+                android:id="@+id/bitrateText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:layout_marginEnd="16dp"
+                android:text='@{viewmodel.bitrateLiveData}'
+                app:goneUnless='@{viewmodel.bitrateLiveData != null}' />
 
-                <TextView
-                    android:id="@+id/bitrateText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="16sp"
-                    android:layout_marginEnd="16dp"
-                    android:text='@{viewmodel.bitrateLiveData}'
-                    app:goneUnless='@{viewmodel.bitrateLiveData != null}' />
+            <TextView
+                android:id="@+id/streamStatusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:text='@{viewmodel.streamStatusTextLiveData}' />
 
-                <TextView
-                    android:id="@+id/streamStatusText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="16sp"
-                    android:text='@{viewmodel.streamStatusTextLiveData}' />
+        </LinearLayout>
 
-            </LinearLayout>
+        <!-- Audio source indicator on the top-right -->
+        <LinearLayout
+            android:id="@+id/audioSourceLayout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="2dp"
+            android:paddingStart="5dp"
+            android:paddingEnd="5dp"
+            android:layout_marginEnd="20dp"
+            android:background="#80000000"
+            app:layout_constraintTop_toBottomOf="@+id/bitrateStatusLayout"
+            app:layout_constraintEnd_toEndOf="parent">
 
-            <!-- Second row: audio source indicator (only show when streaming on RTMP/Bitmap
-            sources) -->
             <TextView
                 android:id="@+id/audioSourceText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
-                android:layout_marginTop="4dp"
                 android:text='@{viewmodel.audioSourceIndicatorLiveData}'
                 app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null &amp;&amp; viewmodel.streamStatusLiveData == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING &amp;&amp; viewmodel.isRtmpOrBitmapSource}' />
 
