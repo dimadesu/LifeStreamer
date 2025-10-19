@@ -148,7 +148,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
-                android:textSize="12sp"
+                android:textSize="16sp"
                 android:layout_marginTop="4dp"
                 android:text='@{viewmodel.audioSourceIndicatorLiveData}'
                 app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null &amp;&amp; viewmodel.streamStatusLiveData == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING &amp;&amp; viewmodel.isRtmpOrBitmapSource}' />
