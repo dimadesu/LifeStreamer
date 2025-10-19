@@ -1880,6 +1880,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }.asLiveData()
 
+    val isRtmpOrBitmapSource: LiveData<Boolean>
+        get() = serviceReadyFlow.flatMapLatest { ready ->
+            if (ready && serviceStreamer != null) {
+                Log.d(TAG, "isRtmpOrBitmapSource: serviceStreamer available, checking video source")
+                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                    val isNotCamera = source !is ICameraSource && source != null
+                    Log.d(TAG, "isRtmpOrBitmapSource: video source = $source, isRtmpOrBitmapSource = $isNotCamera")
+                    isNotCamera
+                } ?: kotlinx.coroutines.flow.flowOf(false)
+            } else {
+                Log.d(TAG, "isRtmpOrBitmapSource: service not ready or serviceStreamer null, returning false")
+                kotlinx.coroutines.flow.flowOf(false)
+            }
+        }.asLiveData()
+
     val isFlashAvailable = MutableLiveData(false)
     fun toggleFlash() {
         cameraSettings?.let {

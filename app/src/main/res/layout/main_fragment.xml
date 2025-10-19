@@ -141,7 +141,8 @@
 
             </LinearLayout>
 
-            <!-- Second row: audio source indicator (only show when streaming) -->
+            <!-- Second row: audio source indicator (only show when streaming on RTMP/Bitmap
+            sources) -->
             <TextView
                 android:id="@+id/audioSourceText"
                 android:layout_width="wrap_content"
@@ -150,7 +151,7 @@
                 android:textSize="12sp"
                 android:layout_marginTop="4dp"
                 android:text='@{viewmodel.audioSourceIndicatorLiveData}'
-                app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null &amp;&amp; viewmodel.streamStatusLiveData == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING}' />
+                app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null &amp;&amp; viewmodel.streamStatusLiveData == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING &amp;&amp; viewmodel.isRtmpOrBitmapSource}' />
 
         </LinearLayout>
 
