@@ -235,6 +235,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _streamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
 
+    // LiveData for data binding to track streaming status changes
+    val streamStatusLiveData: LiveData<StreamStatus> = _streamStatus.asLiveData()
+
     // Human-friendly status string for UI binding
     val streamStatusTextLiveData: LiveData<String> = _streamStatus.map { status ->
         when (status) {
