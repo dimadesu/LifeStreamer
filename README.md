@@ -119,10 +119,10 @@ Applies to [LifeStreamer v0.4.1](https://github.com/dimadesu/LifeStreamer/releas
 
   Example. My phone is Samsung S20 FE. I stream full HD 30fps.
 
-  - If I don't use phone/apps: it works w/o issues with 6000 kbps, I wouldn't set it higher.
-  - If I want to use maps, browser, etc. during the stream: ~2000-3000 kbps max seems to work without major glitches.
+  - If I don't use phone/apps: it works w/o issues at 6000 kbps - I wouldn't set it higher.
+  - If I want to use maps, browser, etc. during the stream: 2500 kbps max bitrate seems to work without major glitches.
   
-  Can be a bit unstable and stuttery otherwise. **Workarounds:**
+  Otherwise, stream can have visual glitches and stuttery audio. **Workarounds:**
 
   - Stay in the foreground as much as possible.
   - Don't go into background at all.
