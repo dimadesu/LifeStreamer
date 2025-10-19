@@ -89,48 +89,68 @@
 
         </LinearLayout>
 
-        <!-- Bitrate and stream status on the same line (top-right) -->
+        <!-- Bitrate and stream status on the top-right -->
         <LinearLayout
             android:id="@+id/bitrateStatusLayout"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:orientation="vertical"
             android:paddingBottom="2dp"
             android:paddingStart="5dp"
             android:paddingEnd="5dp"
             android:layout_marginEnd="20dp"
+            android:layout_marginTop="8dp"
             android:background="#80000000"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <TextView
-                android:id="@+id/uptimeText"
+            <!-- First row: uptime, bitrate, stream status -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="16sp"
-                android:layout_marginEnd="16dp"
-                android:text='@{viewmodel.uptimeLiveData}'
-                app:goneUnless='@{viewmodel.uptimeLiveData != null}' />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/bitrateText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="16sp"
-                android:layout_marginEnd="16dp"
-                android:text='@{viewmodel.bitrateLiveData}'
-                app:goneUnless='@{viewmodel.bitrateLiveData != null}' />
+                <TextView
+                    android:id="@+id/uptimeText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp"
+                    android:layout_marginEnd="16dp"
+                    android:text='@{viewmodel.uptimeLiveData}'
+                    app:goneUnless='@{viewmodel.uptimeLiveData != null}' />
 
+                <TextView
+                    android:id="@+id/bitrateText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp"
+                    android:layout_marginEnd="16dp"
+                    android:text='@{viewmodel.bitrateLiveData}'
+                    app:goneUnless='@{viewmodel.bitrateLiveData != null}' />
+
+                <TextView
+                    android:id="@+id/streamStatusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp"
+                    android:text='@{viewmodel.streamStatusTextLiveData}' />
+
+            </LinearLayout>
+
+            <!-- Second row: audio source indicator -->
             <TextView
-                android:id="@+id/streamStatusText"
+                android:id="@+id/audioSourceText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
-                android:textSize="16sp"
-                android:text='@{viewmodel.streamStatusTextLiveData}' />
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"
+                android:text='@{viewmodel.audioSourceIndicatorLiveData}'
+                app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null}' />
 
         </LinearLayout>
 

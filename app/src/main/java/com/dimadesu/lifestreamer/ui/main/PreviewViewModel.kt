@@ -246,6 +246,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }.asLiveData()
 
+    // Audio source indicator for displaying current audio source type
+    private val _audioSourceIndicatorLiveData = MutableLiveData<String>()
+    val audioSourceIndicatorLiveData: LiveData<String> = _audioSourceIndicatorLiveData
+
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
@@ -574,6 +578,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (currentStreamer.isStreamingFlow.value == true) {
             Log.i(TAG, "Streamer is already streaming - skipping source initialization to avoid conflicts")
             observeStreamerFlows()
+            // Set initial audio source indicator based on current source
+            val initialAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val audioSourceLabel = getAudioSourceLabel(initialAudioSource)
+            _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
+            Log.i(TAG, "Initial audio source (already streaming): $audioSourceLabel (${initialAudioSource?.javaClass?.simpleName})")
             return
         }
 
@@ -604,6 +613,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         // Set up flow observers for the service-based streamer
         observeStreamerFlows()
+
+        // Set initial audio source indicator based on current source
+        val initialAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+        val audioSourceLabel = getAudioSourceLabel(initialAudioSource)
+        _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
+        Log.i(TAG, "Initial audio source: $audioSourceLabel (${initialAudioSource?.javaClass?.simpleName})")
     }
 
     /**
@@ -615,6 +630,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             currentStreamer.videoInput?.sourceFlow?.collect {
                 notifySourceChanged()
+            }
+        }
+
+        // Observe audio source changes to update the audio source indicator
+        viewModelScope.launch {
+            currentStreamer.audioInput?.sourceFlow?.collect { audioSource ->
+                val audioSourceLabel = getAudioSourceLabel(audioSource)
+                _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
+                Log.i(TAG, "Audio source changed: $audioSourceLabel (${audioSource?.javaClass?.simpleName})")
             }
         }
 
@@ -2042,6 +2066,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         showLensDistanceSlider.postValue(false)
         lensDistanceRange.postValue(settings.focus.availableLensDistanceRange)
         lensDistance = 0f
+    }
+
+    /**
+     * Get user-friendly label for audio source type
+     */
+    private fun getAudioSourceLabel(audioSource: Any?): String {
+        return when {
+            audioSource == null -> application.getString(R.string.audio_source_none)
+            audioSource.javaClass.simpleName.contains("RtmpAudioPacket") -> 
+                application.getString(R.string.audio_source_rtmp)
+            audioSource.javaClass.simpleName.contains("AudioPlaybackCapture") -> 
+                application.getString(R.string.audio_source_rtmp)
+            audioSource.javaClass.simpleName.contains("MediaProjection") -> 
+                application.getString(R.string.audio_source_rtmp)
+            audioSource.javaClass.simpleName.contains("Microphone") -> 
+                application.getString(R.string.audio_source_microphone)
+            audioSource.javaClass.simpleName.contains("AudioRecord") -> 
+                application.getString(R.string.audio_source_microphone)
+            else -> {
+                Log.w(TAG, "Unknown audio source type: ${audioSource.javaClass.simpleName}")
+                application.getString(R.string.audio_source_unknown)
+            }
+        }
     }
 
     override fun onCleared() {
