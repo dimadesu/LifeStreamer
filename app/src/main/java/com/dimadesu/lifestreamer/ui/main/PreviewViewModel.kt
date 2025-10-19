@@ -235,6 +235,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _streamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
 
+    // LiveData for data binding to track streaming status changes
+    val streamStatusLiveData: LiveData<StreamStatus> = _streamStatus.asLiveData()
+
     // Human-friendly status string for UI binding
     val streamStatusTextLiveData: LiveData<String> = _streamStatus.map { status ->
         when (status) {
@@ -245,6 +248,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             StreamStatus.ERROR -> application.getString(R.string.status_error)
         }
     }.asLiveData()
+
+    // Audio source indicator for displaying current audio source type
+    private val _audioSourceIndicatorLiveData = MutableLiveData<String>()
+    val audioSourceIndicatorLiveData: LiveData<String> = _audioSourceIndicatorLiveData
 
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
@@ -574,6 +581,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (currentStreamer.isStreamingFlow.value == true) {
             Log.i(TAG, "Streamer is already streaming - skipping source initialization to avoid conflicts")
             observeStreamerFlows()
+            // Set initial audio source indicator based on current source
+            val initialAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val audioSourceLabel = getAudioSourceLabel(initialAudioSource)
+            _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
+            Log.i(TAG, "Initial audio source (already streaming): $audioSourceLabel (${initialAudioSource?.javaClass?.simpleName})")
             return
         }
 
@@ -604,6 +616,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         // Set up flow observers for the service-based streamer
         observeStreamerFlows()
+
+        // Set initial audio source indicator based on current source
+        val initialAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+        val audioSourceLabel = getAudioSourceLabel(initialAudioSource)
+        _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
+        Log.i(TAG, "Initial audio source: $audioSourceLabel (${initialAudioSource?.javaClass?.simpleName})")
     }
 
     /**
@@ -615,6 +633,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             currentStreamer.videoInput?.sourceFlow?.collect {
                 notifySourceChanged()
+            }
+        }
+
+        // Observe audio source changes to update the audio source indicator
+        viewModelScope.launch {
+            currentStreamer.audioInput?.sourceFlow?.collect { audioSource ->
+                val audioSourceLabel = getAudioSourceLabel(audioSource)
+                _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
+                Log.i(TAG, "Audio source changed: $audioSourceLabel (${audioSource?.javaClass?.simpleName})")
             }
         }
 
@@ -1853,6 +1880,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }.asLiveData()
 
+    val isRtmpOrBitmapSource: LiveData<Boolean>
+        get() = serviceReadyFlow.flatMapLatest { ready ->
+            if (ready && serviceStreamer != null) {
+                Log.d(TAG, "isRtmpOrBitmapSource: serviceStreamer available, checking video source")
+                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                    val isNotCamera = source !is ICameraSource && source != null
+                    Log.d(TAG, "isRtmpOrBitmapSource: video source = $source, isRtmpOrBitmapSource = $isNotCamera")
+                    isNotCamera
+                } ?: kotlinx.coroutines.flow.flowOf(false)
+            } else {
+                Log.d(TAG, "isRtmpOrBitmapSource: service not ready or serviceStreamer null, returning false")
+                kotlinx.coroutines.flow.flowOf(false)
+            }
+        }.asLiveData()
+
     val isFlashAvailable = MutableLiveData(false)
     fun toggleFlash() {
         cameraSettings?.let {
@@ -2042,6 +2084,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         showLensDistanceSlider.postValue(false)
         lensDistanceRange.postValue(settings.focus.availableLensDistanceRange)
         lensDistance = 0f
+    }
+
+    /**
+     * Get user-friendly label for audio source type.
+     * Only 2 sources are used in the app:
+     * - MicrophoneSourceFactory: Phone Mic
+     * - MediaProjectionAudioSourceFactory: RTMP Audio
+     */
+    private fun getAudioSourceLabel(audioSource: Any?): String {
+        return when {
+            audioSource == null -> application.getString(R.string.audio_source_none)
+            audioSource.javaClass.simpleName.contains("MediaProjection") -> 
+                application.getString(R.string.audio_source_rtmp)
+            else -> application.getString(R.string.audio_source_microphone)
+        }
     }
 
     override fun onCleared() {

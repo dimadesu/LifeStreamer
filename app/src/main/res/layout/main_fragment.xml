@@ -89,7 +89,7 @@
 
         </LinearLayout>
 
-        <!-- Bitrate and stream status on the same line (top-right) -->
+        <!-- Bitrate and stream status on the top-right -->
         <LinearLayout
             android:id="@+id/bitrateStatusLayout"
             android:layout_width="wrap_content"
@@ -100,6 +100,7 @@
             android:paddingStart="5dp"
             android:paddingEnd="5dp"
             android:layout_marginEnd="20dp"
+            android:layout_marginTop="8dp"
             android:background="#80000000"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
@@ -131,6 +132,31 @@
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:text='@{viewmodel.streamStatusTextLiveData}' />
+
+        </LinearLayout>
+
+        <!-- Audio source indicator on the top-right -->
+        <LinearLayout
+            android:id="@+id/audioSourceLayout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="2dp"
+            android:paddingStart="5dp"
+            android:paddingEnd="5dp"
+            android:layout_marginEnd="20dp"
+            android:background="#80000000"
+            app:layout_constraintTop_toBottomOf="@+id/bitrateStatusLayout"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <TextView
+                android:id="@+id/audioSourceText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:text='@{viewmodel.audioSourceIndicatorLiveData}'
+                app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null &amp;&amp; viewmodel.streamStatusLiveData == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING &amp;&amp; viewmodel.isRtmpOrBitmapSource}' />
 
         </LinearLayout>
 
