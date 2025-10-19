@@ -15,14 +15,10 @@
  */
 package com.dimadesu.lifestreamer.rtmp.audio
 
-import android.Manifest
 import android.content.Context
 import android.os.Build
 import androidx.annotation.RequiresApi
-import androidx.annotation.RequiresPermission
-import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
-import io.github.thibaultbee.streampack.core.elements.sources.audio.ISourceFactory
 
 /**
  * Factory for creating AudioPlaybackCaptureSource instances.
@@ -31,12 +27,13 @@ import io.github.thibaultbee.streampack.core.elements.sources.audio.ISourceFacto
 @RequiresApi(Build.VERSION_CODES.Q)
 class AudioPlaybackCaptureSourceFactory(
     private val context: Context
-) : ISourceFactory<IAudioSourceInternal> {
+) : IAudioSourceInternal.Factory {
 
-    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    override suspend fun create(config: AudioSourceConfig): IAudioSourceInternal {
-        val source = AudioPlaybackCaptureSource(context)
-        source.configure(config)
-        return source
+    override suspend fun create(context: Context): IAudioSourceInternal {
+        return AudioPlaybackCaptureSource(this.context)
+    }
+
+    override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
+        return source is AudioPlaybackCaptureSource
     }
 }
