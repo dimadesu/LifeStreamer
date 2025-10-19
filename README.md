@@ -47,18 +47,18 @@ I've started with original camera demo from StreamPack. I'm tweaking it and addi
 
 - [x] Dynamic/adaptive bitrate. I added [Belabox](https://github.com/BELABOX/belacoder) and [Moblin](https://github.com/eerimoq/moblin) algorithms. Can be changed via Settings.
 - [x] Background mode (foreground service) to allow streaming with app in background, phone locked and screen off.
-  - Status: Usable, needs performance improvements.
+  - Status: usable, needs performance improvements.
 - [x] RTMP as source.
-  - Status: Usable.
+  - Status: stable.
   - Run RTMP server on your device using [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app.
     - Alternatively, run [MediaMTX](https://github.com/bluenviron/mediamtx) in [Termux](https://termux.dev/en/). [Watch video to see how to set it up.](https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&t=310)
   - Stream RTMP from action camera to RTMP server.
   - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
   - There are many things that can go wrong with RTMP source. I think it's working pretty good now.
-- [x] Reconnect on disconnect
+- [x] Reconnect on disconnect.
 
 ### Planning to implement next
-- Polish existing functionality and user flows
+- Polish existing functionality and user flows.
 
 ## Why StreamPack
 
@@ -68,15 +68,15 @@ Main features StreamPack provides out of the box that make sense to have as a ba
 - H.265 (aka HEVC) or H.264.
 - Basic dynamic bitrate algorithm for SRT (it calls it "bitrate regulator").
 - Foundation for implementing service to allow continue streaming in background with phone locked and screen off.
-- It's designed to be extensible with custom video and audio sources.
+- It's designed to be extendable with custom video and audio sources.
 
 ### Demo apps
 
 StreamPack includes 2 great demo apps that can use phone cameras or screen recorder for live streaming.
 
-## Project status update 15 October 2025
+## Project status update 19 October 2025
 
-Applies to [LifeStreamer v0.3.3](https://github.com/dimadesu/LifeStreamer/releases/tag/v0.3.3).
+Applies to [LifeStreamer v0.4.1](https://github.com/dimadesu/LifeStreamer/releases/tag/v0.4.1).
 
 - :white_check_mark: Dynamic bitrate
 
@@ -115,7 +115,7 @@ Applies to [LifeStreamer v0.3.3](https://github.com/dimadesu/LifeStreamer/releas
   Phone has a lot less CPU and other resources available to apps in the background.
   Either lower your video endcoder settings if you want to use other apps on your phone while streaming OR avoid using other apps to not compete for resources.
 
-  Looks like there is no magic fix, just a bunch of performance tweaks needed.
+  Looks like there is no magic fix - performance optimisations required.
 
   Example. My phone is Samsung S20 FE. I stream full HD 30fps.
 
@@ -127,14 +127,18 @@ Applies to [LifeStreamer v0.3.3](https://github.com/dimadesu/LifeStreamer/releas
   - Stay in the foreground as much as possible.
   - Don't go into background at all.
 
+- :white_check_mark:  Reconnect on disconnect
+
+  Should be pretty stable. Still testing. It affected many user flows.
+
 ## Recommended solutions to most issues
 
 **There are bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
 
 Minimise transitions between foreground/background and stay in foreground for better performance with screen on and phone unlocked until background mode performance is optimised OR embrace background mode limitations.
 
-Settings can be changed during the stream, but won't apply until you restart the stream.
+**Settings can be changed during the stream, but won't apply until you restart the stream.**
 
-Goal for near future is stabilising as much as possible and making sure it's solid. It will take some time to polish.
+Goal for near future is stabilising as much as possible and making sure it's solid. It will take some time to refine.
 
 Use recommended workarounds if you encounter issues.
