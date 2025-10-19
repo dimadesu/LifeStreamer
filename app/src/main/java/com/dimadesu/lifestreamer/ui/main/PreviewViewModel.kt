@@ -2069,25 +2069,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
-     * Get user-friendly label for audio source type
+     * Get user-friendly label for audio source type.
+     * Only 2 sources are used in the app:
+     * - MicrophoneSourceFactory: Phone Mic
+     * - MediaProjectionAudioSourceFactory: RTMP Audio
      */
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
             audioSource == null -> application.getString(R.string.audio_source_none)
-            audioSource.javaClass.simpleName.contains("RtmpAudioPacket") -> 
-                application.getString(R.string.audio_source_rtmp)
-            audioSource.javaClass.simpleName.contains("AudioPlaybackCapture") -> 
-                application.getString(R.string.audio_source_rtmp)
             audioSource.javaClass.simpleName.contains("MediaProjection") -> 
                 application.getString(R.string.audio_source_rtmp)
-            audioSource.javaClass.simpleName.contains("Microphone") -> 
-                application.getString(R.string.audio_source_microphone)
-            audioSource.javaClass.simpleName.contains("AudioRecord") -> 
-                application.getString(R.string.audio_source_microphone)
-            else -> {
-                Log.w(TAG, "Unknown audio source type: ${audioSource.javaClass.simpleName}")
-                application.getString(R.string.audio_source_unknown)
-            }
+            else -> application.getString(R.string.audio_source_microphone)
         }
     }
 

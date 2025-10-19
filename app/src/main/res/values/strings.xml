@@ -23,7 +23,6 @@
     <string name="audio_source_microphone">Phone Mic</string>
     <string name="audio_source_rtmp">RTMP Audio</string>
     <string name="audio_source_none">No Audio</string>
-    <string name="audio_source_unknown">Unknown</string>
 
     <!-- Notification action labels -->
     <string name="service_notification_action_mute">Mute</string>
