@@ -89,7 +89,7 @@
 
         </LinearLayout>
 
-        <!-- Bitrate and stream status on the top-right -->
+        <!-- Bitrate and stream status on the same line (top-right) -->
         <LinearLayout
             android:id="@+id/bitrateStatusLayout"
             android:layout_width="wrap_content"
@@ -100,7 +100,6 @@
             android:paddingStart="5dp"
             android:paddingEnd="5dp"
             android:layout_marginEnd="20dp"
-            android:layout_marginTop="8dp"
             android:background="#80000000"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
