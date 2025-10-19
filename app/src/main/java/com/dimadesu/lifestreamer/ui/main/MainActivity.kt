@@ -58,12 +58,23 @@ class MainActivity : AppCompatActivity() {
                     .commitNow()
             }
         } else if (action == "com.dimadesu.lifestreamer.action.EXIT_APP") {
-            // Exit requested via notification: stop the service (if running) and finish activity
+            // Exit requested via notification: properly stop service and finish activity
             try {
+                // Stop service gracefully
                 val stopIntent = Intent(this, com.dimadesu.lifestreamer.services.CameraStreamerService::class.java)
                 stopService(stopIntent)
-            } catch (_: Exception) {}
-            finish()
+            } catch (_: Exception) {
+                // Service might not be running, that's okay
+            }
+            
+            // Move task to back instead of abruptly finishing
+            // This gives the service time to cleanup and avoids crash detection
+            moveTaskToBack(true)
+            
+            // Schedule actual finish after a short delay to ensure service cleanup
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                finishAndRemoveTask()
+            }, 300)
         }
     }
 
