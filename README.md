@@ -122,7 +122,7 @@ Applies to [LifeStreamer v0.4.1](https://github.com/dimadesu/LifeStreamer/releas
   - If I don't use phone/apps: it works w/o issues at 6000 kbps - I wouldn't set it higher.
   - If I want to use maps, browser, etc. during the stream: 2500 kbps max bitrate seems to work without major glitches.
 
-  **Note: you can change bitrate and other settings on the fly, but they won't apply until you restart the stream. You can quickly can tap stop and start.**
+  **Note: Max/target bitrate under bitrate regulation in settings can be changed on the fly during the stream - no need to restart the stream to apply.**
   
   Otherwise, stream can have visual glitches and stuttery audio. **Workarounds:**
 
