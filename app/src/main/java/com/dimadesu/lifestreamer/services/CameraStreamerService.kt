@@ -40,6 +40,9 @@ import io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation
 import io.github.thibaultbee.streampack.core.streamers.orientation.IRotationProvider
 import io.github.thibaultbee.streampack.core.streamers.orientation.SensorRotationProvider
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 
 /**
  * CameraStreamerService extending StreamerService for camera streaming
@@ -267,6 +270,46 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             serviceStreamStatus.collect { _ ->
                 notifyForCurrentState()
             }
+        }
+        
+        // Observe bitrate regulator config changes and update regulator mid-stream
+        serviceScope.launch {
+            combine(
+                storageRepository.bitrateRegulatorConfigFlow,
+                storageRepository.regulatorModeFlow
+            ) { config, mode -> config to mode }
+                .distinctUntilChanged()
+                .drop(1) // Skip initial emission to avoid replacing on startup
+                .collect { (config, mode) ->
+                    // Only update if currently streaming with SRT endpoint
+                    if (_serviceStreamStatus.value == StreamStatus.STREAMING && 
+                        currentStreamer is ISingleStreamer) {
+                        try {
+                            val descriptor = storageRepository.endpointDescriptorFlow.first()
+                            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                                Log.i(TAG, "Bitrate regulator settings changed during stream - updating controller")
+                                
+                                // Remove old controller
+                                currentStreamer.removeBitrateRegulatorController()
+                                
+                                // Re-add with new config if enabled
+                                if (config != null) {
+                                    currentStreamer.addBitrateRegulatorController(
+                                        AdaptiveSrtBitrateRegulatorController.Factory(
+                                            bitrateRegulatorConfig = config,
+                                            mode = mode
+                                        )
+                                    )
+                                    Log.i(TAG, "Bitrate regulator controller updated: range=${config.videoBitrateRange.lower/1000}k-${config.videoBitrateRange.upper/1000}k, mode=$mode")
+                                } else {
+                                    Log.i(TAG, "Bitrate regulator disabled")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to update bitrate regulator controller: ${e.message}")
+                        }
+                    }
+                }
         }
     }
 
