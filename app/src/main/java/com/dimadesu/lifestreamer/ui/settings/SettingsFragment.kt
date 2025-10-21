@@ -50,100 +50,112 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private lateinit var streamerInfo: CameraStreamerConfigurationInfo
     private val profileLevelDisplay by lazy { ProfileLevelDisplay(requireContext()) }
 
+    /**
+     * Safe preference finder that logs error if preference not found instead of crashing
+     */
+    private fun <T : androidx.preference.Preference> findPreferenceSafe(keyResId: Int): T? {
+        return try {
+            this.findPreference(getString(keyResId))
+        } catch (e: Exception) {
+            android.util.Log.e("SettingsFragment", "Preference not found for key: ${getString(keyResId)}", e)
+            null
+        }
+    }
+
     private val videoEncoderListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.video_encoder_key))!!
+        findPreferenceSafe<ListPreference>(R.string.video_encoder_key) ?: error("video_encoder_key not found")
     }
 
     private val videoResolutionListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.video_resolution_key))!!
+        findPreferenceSafe<ListPreference>(R.string.video_resolution_key) ?: error("video_resolution_key not found")
     }
 
     private val videoFpsListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.video_fps_key))!!
+        findPreferenceSafe<ListPreference>(R.string.video_fps_key) ?: error("video_fps_key not found")
     }
 
     private val videoBitrateSeekBar: SeekBarPreference by lazy {
-        this.findPreference(getString(R.string.video_bitrate_key))!!
+        findPreferenceSafe<SeekBarPreference>(R.string.video_bitrate_key) ?: error("video_bitrate_key not found")
     }
 
     private val videoProfileListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.video_profile_key))!!
+        findPreferenceSafe<ListPreference>(R.string.video_profile_key) ?: error("video_profile_key not found")
     }
 
     private val videoLevelListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.video_level_key))!!
+        findPreferenceSafe<ListPreference>(R.string.video_level_key) ?: error("video_level_key not found")
     }
 
     private val audioEnablePreference: SwitchPreference by lazy {
-        this.findPreference(getString(R.string.audio_enable_key))!!
+        findPreferenceSafe<SwitchPreference>(R.string.audio_enable_key) ?: error("audio_enable_key not found")
     }
 
     private val audioSettingsCategory: PreferenceCategory by lazy {
-        this.findPreference(getString(R.string.audio_settings_key))!!
+        findPreferenceSafe<PreferenceCategory>(R.string.audio_settings_key) ?: error("audio_settings_key not found")
     }
 
     private val audioEncoderListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.audio_encoder_key))!!
+        findPreferenceSafe<ListPreference>(R.string.audio_encoder_key) ?: error("audio_encoder_key not found")
     }
 
     private val audioChannelConfigListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.audio_channel_config_key))!!
+        findPreferenceSafe<ListPreference>(R.string.audio_channel_config_key) ?: error("audio_channel_config_key not found")
     }
 
     private val audioBitrateListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.audio_bitrate_key))!!
+        findPreferenceSafe<ListPreference>(R.string.audio_bitrate_key) ?: error("audio_bitrate_key not found")
     }
 
     private val audioSampleRateListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.audio_sample_rate_key))!!
+        findPreferenceSafe<ListPreference>(R.string.audio_sample_rate_key) ?: error("audio_sample_rate_key not found")
     }
 
     private val audioByteFormatListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.audio_byte_format_key))!!
+        findPreferenceSafe<ListPreference>(R.string.audio_byte_format_key) ?: error("audio_byte_format_key not found")
     }
 
     private val audioProfileListPreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.audio_profile_key))!!
+        findPreferenceSafe<ListPreference>(R.string.audio_profile_key) ?: error("audio_profile_key not found")
     }
 
     private val endpointTypePreference: ListPreference by lazy {
-        this.findPreference(getString(R.string.endpoint_type_key))!!
+        findPreferenceSafe<ListPreference>(R.string.endpoint_type_key) ?: error("endpoint_type_key not found")
     }
 
     private val rtmpEndpointPreference: PreferenceCategory by lazy {
-        this.findPreference(getString(R.string.rtmp_server_key))!!
+        findPreferenceSafe<PreferenceCategory>(R.string.rtmp_server_key) ?: error("rtmp_server_key not found")
     }
 
     private val srtEndpointPreference: PreferenceCategory by lazy {
-        this.findPreference(getString(R.string.srt_server_key))!!
+        findPreferenceSafe<PreferenceCategory>(R.string.srt_server_key) ?: error("srt_server_key not found")
     }
 
     private val fileEndpointPreference: PreferenceCategory by lazy {
-        this.findPreference(getString(R.string.file_endpoint_key))!!
+        findPreferenceSafe<PreferenceCategory>(R.string.file_endpoint_key) ?: error("file_endpoint_key not found")
     }
 
     private val serverIpPreference: EditTextPreference by lazy {
-        this.findPreference(getString(R.string.srt_server_ip_key))!!
+        findPreferenceSafe<EditTextPreference>(R.string.srt_server_ip_key) ?: error("srt_server_ip_key not found")
     }
 
     private val serverPortPreference: EditTextPreference by lazy {
-        this.findPreference(getString(R.string.srt_server_port_key))!!
+        findPreferenceSafe<EditTextPreference>(R.string.srt_server_port_key) ?: error("srt_server_port_key not found")
     }
 
     private val serverEnableBitrateRegulationPreference: SwitchPreference by lazy {
-        this.findPreference(getString(R.string.srt_server_enable_bitrate_regulation_key))!!
+        findPreferenceSafe<SwitchPreference>(R.string.srt_server_enable_bitrate_regulation_key) ?: error("srt_server_enable_bitrate_regulation_key not found")
     }
 
     private val serverTargetVideoBitratePreference: SeekBarPreference by lazy {
-        this.findPreference(getString(R.string.srt_server_video_target_bitrate_key))!!
+        findPreferenceSafe<SeekBarPreference>(R.string.srt_server_video_target_bitrate_key) ?: error("srt_server_video_target_bitrate_key not found")
     }
 
     private val serverMinVideoBitratePreference: SeekBarPreference by lazy {
-        this.findPreference(getString(R.string.srt_server_video_min_bitrate_key))!!
+        findPreferenceSafe<SeekBarPreference>(R.string.srt_server_video_min_bitrate_key) ?: error("srt_server_video_min_bitrate_key not found")
     }
 
     private val fileNamePreference: EditTextPreference by lazy {
-        this.findPreference(getString(R.string.file_name_key))!!
+        findPreferenceSafe<EditTextPreference>(R.string.file_name_key) ?: error("file_name_key not found")
     }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
@@ -194,7 +206,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-        loadVideoSettings(videoEncoderListPreference.value)
+        videoEncoderListPreference.value?.let { loadVideoSettings(it) }
     }
 
     private fun loadVideoSettings(encoder: String) {
@@ -211,13 +223,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
             requireContext(), encoder, requireContext().defaultCameraId
         )
         videoFpsListPreference.entryValues.filter { fps ->
-            supportedFramerates.any { it.contains(fps.toString().toInt()) }
+            supportedFramerates.any { it.contains(fps.toString().toIntOrNull() ?: 0) }
         }.toTypedArray().run {
             videoFpsListPreference.entries = this
             videoFpsListPreference.entryValues = this
         }
         videoFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
-            val fps = (newValue as String).toInt()
+            val fps = (newValue as? String)?.toIntOrNull() ?: return@setOnPreferenceChangeListener true
             val unsupportedCameras = requireContext().cameras.filter {
                 !requireContext().isFrameRateSupported(it, fps)
             }
@@ -271,7 +283,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-        loadVideoLevel(encoder, videoProfileListPreference.value.toInt())
+        videoProfileListPreference.value?.toIntOrNull()?.let { loadVideoLevel(encoder, it) }
     }
 
     private fun loadVideoLevel(encoder: String, profile: Int) {
@@ -406,9 +418,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         if (endpointTypePreference.entry == null) {
             endpointTypePreference.value = "${EndpointType.SRT.id}"
         }
-        setEndpointType(endpointTypePreference.value.toInt())
+        endpointTypePreference.value?.toIntOrNull()?.let { setEndpointType(it) }
         endpointTypePreference.setOnPreferenceChangeListener { _, newValue ->
-            setEndpointType((newValue as String).toInt())
+            (newValue as? String)?.toIntOrNull()?.let { setEndpointType(it) }
             true
         }
 
@@ -474,10 +486,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         // Update file extension
         if (endpoint.hasFileCapabilities) {
-            // Remove previous extension
-            FileExtension.entries.forEach {
-                fileNamePreference.text = fileNamePreference.text?.substringBeforeLast(".")
-            }
+            // Remove previous extension (only once)
+            fileNamePreference.text = fileNamePreference.text?.substringBeforeLast(".") ?: "output"
             // Add correct extension
             fileNamePreference.text += when {
                 endpoint.hasFLVCapabilities -> {
