@@ -157,6 +157,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         super.onResume()
         loadPreferences()
     }
+    
+    private fun roundBitrate(value: Int, step: Int = 500): Int {
+        return (value / step) * step
+    }
 
     private fun loadVideoSettings() {
         // Inflates video encoders
@@ -234,6 +238,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
         streamerInfo.video.getSupportedBitrates(encoder).run {
             videoBitrateSeekBar.min = maxOf(videoBitrateSeekBar.min, lower / 1000) // to kb/s
             videoBitrateSeekBar.max = minOf(videoBitrateSeekBar.max, upper / 1000) // to kb/s
+        }
+        
+        videoBitrateSeekBar.setOnPreferenceChangeListener { _, newValue ->
+            val rounded = roundBitrate(newValue as Int)
+            if (rounded != newValue) {
+                videoBitrateSeekBar.value = rounded
+                false
+            } else {
+                true
+            }
         }
 
         // Inflates profile
@@ -418,17 +432,29 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
 
         serverTargetVideoBitratePreference.setOnPreferenceChangeListener { _, newValue ->
-            if ((newValue as Int) < serverMinVideoBitratePreference.value) {
-                serverMinVideoBitratePreference.value = newValue
+            val rounded = roundBitrate(newValue as Int)
+            if (rounded < serverMinVideoBitratePreference.value) {
+                serverMinVideoBitratePreference.value = rounded
             }
-            true
+            if (rounded != newValue) {
+                serverTargetVideoBitratePreference.value = rounded
+                false
+            } else {
+                true
+            }
         }
 
         serverMinVideoBitratePreference.setOnPreferenceChangeListener { _, newValue ->
-            if ((newValue as Int) > serverTargetVideoBitratePreference.value) {
-                serverTargetVideoBitratePreference.value = newValue
+            val rounded = roundBitrate(newValue as Int)
+            if (rounded > serverTargetVideoBitratePreference.value) {
+                serverTargetVideoBitratePreference.value = rounded
             }
-            true
+            if (rounded != newValue) {
+                serverMinVideoBitratePreference.value = rounded
+                false
+            } else {
+                true
+            }
         }
     }
 
