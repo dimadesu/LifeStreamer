@@ -206,7 +206,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-        loadVideoSettings(videoEncoderListPreference.value)
+        videoEncoderListPreference.value?.let { loadVideoSettings(it) }
     }
 
     private fun loadVideoSettings(encoder: String) {
@@ -223,13 +223,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
             requireContext(), encoder, requireContext().defaultCameraId
         )
         videoFpsListPreference.entryValues.filter { fps ->
-            supportedFramerates.any { it.contains(fps.toString().toInt()) }
+            supportedFramerates.any { it.contains(fps.toString().toIntOrNull() ?: 0) }
         }.toTypedArray().run {
             videoFpsListPreference.entries = this
             videoFpsListPreference.entryValues = this
         }
         videoFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
-            val fps = (newValue as String).toInt()
+            val fps = (newValue as? String)?.toIntOrNull() ?: return@setOnPreferenceChangeListener true
             val unsupportedCameras = requireContext().cameras.filter {
                 !requireContext().isFrameRateSupported(it, fps)
             }
@@ -283,7 +283,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-        loadVideoLevel(encoder, videoProfileListPreference.value.toInt())
+        videoProfileListPreference.value?.toIntOrNull()?.let { loadVideoLevel(encoder, it) }
     }
 
     private fun loadVideoLevel(encoder: String, profile: Int) {
@@ -418,9 +418,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         if (endpointTypePreference.entry == null) {
             endpointTypePreference.value = "${EndpointType.SRT.id}"
         }
-        setEndpointType(endpointTypePreference.value.toInt())
+        endpointTypePreference.value?.toIntOrNull()?.let { setEndpointType(it) }
         endpointTypePreference.setOnPreferenceChangeListener { _, newValue ->
-            setEndpointType((newValue as String).toInt())
+            (newValue as? String)?.toIntOrNull()?.let { setEndpointType(it) }
             true
         }
 
@@ -486,10 +486,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         // Update file extension
         if (endpoint.hasFileCapabilities) {
-            // Remove previous extension
-            FileExtension.entries.forEach {
-                fileNamePreference.text = fileNamePreference.text?.substringBeforeLast(".")
-            }
+            // Remove previous extension (only once)
+            fileNamePreference.text = fileNamePreference.text?.substringBeforeLast(".") ?: "output"
             // Add correct extension
             fileNamePreference.text += when {
                 endpoint.hasFLVCapabilities -> {
