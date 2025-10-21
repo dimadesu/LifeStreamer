@@ -373,11 +373,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     serviceScope.launch(Dispatchers.Default) {
                         try {
                             // Check if we're using RTMP source - can't start from notification
-                            val currentStreamer = streamer
-                            val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
-                            val isRtmpSource = videoSource?.javaClass?.simpleName == "RTMPVideoSource"
-                            
-                            if (isRtmpSource) {
+                            if (isUsingRtmpSource()) {
                                 Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
                                 showCannotStartRtmpNotification()
                                 return@launch
@@ -446,11 +442,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             val isStreaming = streamer?.isStreamingFlow?.value ?: false
                             if (!isStreaming) {
                                 // Check if we're using RTMP source - can't start from notification
-                                val currentStreamer = streamer
-                                val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
-                                val isRtmpSource = videoSource?.javaClass?.simpleName == "RTMPVideoSource"
-                                
-                                if (isRtmpSource) {
+                                if (isUsingRtmpSource()) {
                                     Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
                                     showCannotStartRtmpNotification()
                                     return@launch
@@ -902,6 +894,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         )
 
         customNotificationUtils.notify(notification)
+    }
+    
+    /**
+     * Check if the current video source is RTMP.
+     * RTMP sources cannot be started from notifications due to MediaProjection permission requirements.
+     * 
+     * @return true if current video source is RTMP, false otherwise
+     */
+    private fun isUsingRtmpSource(): Boolean {
+        val currentStreamer = streamer
+        val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
+        return videoSource?.javaClass?.simpleName == "RTMPVideoSource"
     }
     
     /**
