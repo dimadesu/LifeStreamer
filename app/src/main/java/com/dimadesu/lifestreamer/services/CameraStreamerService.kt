@@ -372,6 +372,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification action: START_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
                         try {
+                            // Check if we're using RTMP source - can't start from notification
+                            val currentStreamer = streamer
+                            val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
+                            val isRtmpSource = videoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                            
+                            if (isRtmpSource) {
+                                Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
+                                showCannotStartRtmpNotification()
+                                return@launch
+                            }
+                            
                             startStreamFromConfiguredEndpoint()
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification failed: ${e.message}")
@@ -434,6 +445,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         try {
                             val isStreaming = streamer?.isStreamingFlow?.value ?: false
                             if (!isStreaming) {
+                                // Check if we're using RTMP source - can't start from notification
+                                val currentStreamer = streamer
+                                val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
+                                val isRtmpSource = videoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                                
+                                if (isRtmpSource) {
+                                    Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
+                                    showCannotStartRtmpNotification()
+                                    return@launch
+                                }
+                                
                                 // Start using configured endpoint from DataStore
                                 startStreamFromConfiguredEndpoint()
                                 // Refresh notification to show Stop action
@@ -856,6 +878,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
             wakeLock = null
         }
+    }
+    
+    /**
+     * Show a notification when user tries to start RTMP stream from notification.
+     * RTMP streams can only be started from the app due to MediaProjection permission requirements.
+     */
+    private fun showCannotStartRtmpNotification() {
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText("Can't start with RTMP source via notification")
+            .setSmallIcon(R.drawable.ic_baseline_linked_camera_24)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setOnlyAlertOnce(true)
+            .setSound(null)
+            .setContentIntent(openPendingIntent)
+            .build()
+
+        customNotificationUtils.notify(notification)
     }
     
     /**
