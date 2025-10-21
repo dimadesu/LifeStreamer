@@ -885,17 +885,31 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * RTMP streams can only be started from the app due to MediaProjection permission requirements.
      */
     private fun showCannotStartRtmpNotification() {
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle(getString(R.string.app_name))
+        // Use onCreateNotification to show the standard notification with all buttons
+        val notification = onCreateNotification()
+        
+        // But override the content text to show the error message
+        val updatedNotification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle(notification.extras?.getString("android.title") ?: getString(R.string.app_name))
             .setContentText("Can't start with RTMP source via notification")
             .setSmallIcon(R.drawable.ic_baseline_linked_camera_24)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setOnlyAlertOnce(true)
             .setSound(null)
             .setContentIntent(openPendingIntent)
+            .addAction(
+                R.drawable.ic_baseline_linked_camera_24,
+                "Start",
+                startPendingIntent
+            )
+            .addAction(
+                R.drawable.ic_baseline_linked_camera_24,
+                "Exit",
+                exitPendingIntent
+            )
             .build()
 
-        customNotificationUtils.notify(notification)
+        customNotificationUtils.notify(updatedNotification)
     }
     
     /**
