@@ -877,10 +877,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * RTMP streams can only be started from the app due to MediaProjection permission requirements.
      */
     private fun showCannotStartRtmpNotification() {
-        // Use the same notification builder as onCreateNotification but with custom error text
-        val notification = customNotificationUtils.createServiceNotification(
+        val notification = createDefaultNotification(
+            content = "Can't start with RTMP source from notification"
+        )
+        customNotificationUtils.notify(notification)
+    }
+    
+    /**
+     * Create a standard notification with default settings.
+     * Used by onCreateNotification() and other notification methods.
+     * 
+     * @param content The notification content text
+     * @return Notification object
+     */
+    private fun createDefaultNotification(content: String): Notification {
+        return customNotificationUtils.createServiceNotification(
             title = getString(R.string.service_notification_title),
-            content = "Can't start with RTMP source from notification",
+            content = content,
             iconResourceId = notificationIconResourceId,
             isForeground = true,
             showStart = true,
@@ -892,8 +905,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
         )
-
-        customNotificationUtils.notify(notification)
     }
     
     /**
@@ -1167,19 +1178,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onCreateNotification(): Notification {
-        return customNotificationUtils.createServiceNotification(
-            title = getString(R.string.service_notification_title),
-            content = getString(R.string.service_notification_text_created),
-            iconResourceId = notificationIconResourceId,
-            isForeground = true,
-            showStart = true,
-            showStop = false,
-            startPending = startPendingIntent,
-            stopPending = stopPendingIntent,
-            muteLabel = currentMuteLabel(),
-            mutePending = mutePendingIntent,
-            exitPending = exitPendingIntent,
-            openPending = openPendingIntent
+        return createDefaultNotification(
+            content = getString(R.string.service_notification_text_created)
         )
     }
 
