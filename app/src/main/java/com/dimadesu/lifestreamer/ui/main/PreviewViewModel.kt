@@ -59,6 +59,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.Camer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFrameRateSupported
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
+import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.core.utils.extensions.isClosedException
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
@@ -926,13 +927,34 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
             Log.i(TAG, "  hasAudioSource: $hasAudioSource (${audioSource?.javaClass?.simpleName})")
 
-            // Special case: If video source is bitmap (RTMP fallback) but no audio, ensure microphone is set
-            if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
-                Log.w(TAG, "Bitmap source detected without audio - setting microphone")
-                try {
-                    setServiceAudioSource(MicrophoneSourceFactory())
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set microphone for bitmap source: ${e.message}")
+            // Special case: If video source is RTMP or bitmap but no audio, ensure audio source is set
+            if (hasVideoSource && !hasAudioSource) {
+                when {
+                    videoSource is RTMPVideoSource -> {
+                        Log.w(TAG, "RTMP video source detected without audio - setting audio source")
+                        try {
+                            // For RTMP, try MediaProjection first, fallback to microphone
+                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                            if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                                Log.i(TAG, "Set MediaProjection audio for RTMP source")
+                            } else {
+                                setServiceAudioSource(MicrophoneSourceFactory())
+                                Log.i(TAG, "Set microphone audio for RTMP source (MediaProjection not available)")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set audio for RTMP source: ${e.message}")
+                            setServiceAudioSource(MicrophoneSourceFactory())
+                        }
+                    }
+                    videoSource is IBitmapSource -> {
+                        Log.w(TAG, "Bitmap source detected without audio - setting microphone")
+                        try {
+                            setServiceAudioSource(MicrophoneSourceFactory())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set microphone for bitmap source: ${e.message}")
+                        }
+                    }
                 }
             }
 
