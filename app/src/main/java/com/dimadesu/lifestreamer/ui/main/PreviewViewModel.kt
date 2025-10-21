@@ -85,6 +85,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -95,6 +97,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val rotationRepository = RotationRepository.getInstance(application)
     val mediaProjectionHelper = MediaProjectionHelper(application)
     private val buildStreamerUseCase = BuildStreamerUseCase(application, storageRepository)
+
+    // Mutex to prevent race conditions on rapid start/stop operations
+    private val streamOperationMutex = Mutex()
 
     // Service binding for background streaming
     /**
@@ -891,9 +896,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun startStream() {
         viewModelScope.launch {
-            // Clear manual stop flag when starting a new stream
-            userStoppedManually = false
-            Log.i(TAG, "startStream() - Reset userStoppedManually=false")
+            streamOperationMutex.withLock {
+                Log.d(TAG, "startStream() - Acquired lock")
+                // Clear manual stop flag when starting a new stream
+                userStoppedManually = false
+                Log.i(TAG, "startStream() - Reset userStoppedManually=false")
             
             _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
@@ -1000,6 +1007,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
                 }
             }
+            } // Release mutex lock
+            Log.d(TAG, "startStream() - Released lock")
         }
     }
 
@@ -1109,8 +1118,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun stopStream() {
         viewModelScope.launch {
-            try {
-                val currentStreamer = serviceStreamer
+            streamOperationMutex.withLock {
+                Log.d(TAG, "stopStream() - Acquired lock")
+                try {
+                    val currentStreamer = serviceStreamer
 
                 if (currentStreamer == null) {
                     Log.w(TAG, "Service streamer not ready, cannot stop stream")
@@ -1235,6 +1246,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rotationIgnoredDuringReconnection = null
                 }
             }
+            } // Release mutex lock
+            Log.d(TAG, "stopStream() - Released lock")
         }
     }
 
