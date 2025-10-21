@@ -102,12 +102,12 @@ internal object RtmpSourceSwitchHelper {
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
             
             // Add delay before switching audio to allow clean transition
-            // This prevents audio glitches when switching from MediaProjection to Microphone
-            delay(150)
+            // Increased delay gives more time for previous audio source to fully release
+            delay(300)
             
             // Now set audio to microphone
             streamer.setAudioSource(MicrophoneSourceFactory())
-            Log.i(TAG, "Switched to bitmap fallback with microphone audio (with clean transition)")
+            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
@@ -203,12 +203,12 @@ internal object RtmpSourceSwitchHelper {
                             postRtmpStatus(null)
                             Log.i(TAG, "Successfully connected to RTMP source")
                             
-                            // Notify caller that RTMP is connected (for monitoring)
+                                                        // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
 
                             // Add delay before switching audio to allow clean transition
-                            // This prevents audio glitches when switching between audio sources
-                            delay(150)
+                            // Increased delay gives more time for previous audio source to fully release
+                            delay(300)
 
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
@@ -218,7 +218,7 @@ internal object RtmpSourceSwitchHelper {
                                 // Use MediaProjection audio when streaming
                                 try {
                                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                                    Log.i(TAG, "Set MediaProjection audio for RTMP (with clean transition)")
+                                    Log.i(TAG, "Set MediaProjection audio for RTMP")
                                 } catch (ae: Exception) {
                                     Log.w(TAG, "MediaProjection audio failed, using microphone: ${ae.message}")
                                     try {
