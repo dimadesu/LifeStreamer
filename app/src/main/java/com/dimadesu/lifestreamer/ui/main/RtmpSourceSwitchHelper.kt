@@ -98,10 +98,16 @@ internal object RtmpSourceSwitchHelper {
 
     suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
-            // Set video to bitmap and audio to microphone
+            // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
+            
+            // Add delay before switching audio to allow clean transition
+            // This prevents audio glitches when switching from MediaProjection to Microphone
+            delay(150)
+            
+            // Now set audio to microphone
             streamer.setAudioSource(MicrophoneSourceFactory())
-            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
+            Log.i(TAG, "Switched to bitmap fallback with microphone audio (with clean transition)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
@@ -200,6 +206,10 @@ internal object RtmpSourceSwitchHelper {
                             // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
 
+                            // Add delay before switching audio to allow clean transition
+                            // This prevents audio glitches when switching between audio sources
+                            delay(150)
+
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
@@ -208,7 +218,7 @@ internal object RtmpSourceSwitchHelper {
                                 // Use MediaProjection audio when streaming
                                 try {
                                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                                    Log.i(TAG, "Set MediaProjection audio for RTMP")
+                                    Log.i(TAG, "Set MediaProjection audio for RTMP (with clean transition)")
                                 } catch (ae: Exception) {
                                     Log.w(TAG, "MediaProjection audio failed, using microphone: ${ae.message}")
                                     try {
