@@ -885,31 +885,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * RTMP streams can only be started from the app due to MediaProjection permission requirements.
      */
     private fun showCannotStartRtmpNotification() {
-        // Use onCreateNotification to show the standard notification with all buttons
-        val notification = onCreateNotification()
-        
-        // But override the content text to show the error message
-        val updatedNotification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle(notification.extras?.getString("android.title") ?: getString(R.string.app_name))
-            .setContentText("Can't start with RTMP source via notification")
-            .setSmallIcon(R.drawable.ic_baseline_linked_camera_24)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setOnlyAlertOnce(true)
-            .setSound(null)
-            .setContentIntent(openPendingIntent)
-            .addAction(
-                R.drawable.ic_baseline_linked_camera_24,
-                "Start",
-                startPendingIntent
-            )
-            .addAction(
-                R.drawable.ic_baseline_linked_camera_24,
-                "Exit",
-                exitPendingIntent
-            )
-            .build()
+        // Use the same notification builder as onCreateNotification but with custom error text
+        val notification = customNotificationUtils.createServiceNotification(
+            title = getString(R.string.service_notification_title),
+            content = "Can't start with RTMP source from notification",
+            iconResourceId = notificationIconResourceId,
+            isForeground = true,
+            showStart = true,
+            showStop = false,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = currentMuteLabel(),
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
+        )
 
-        customNotificationUtils.notify(updatedNotification)
+        customNotificationUtils.notify(notification)
     }
     
     /**
