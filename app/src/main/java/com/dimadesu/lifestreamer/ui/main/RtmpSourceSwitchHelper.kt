@@ -98,8 +98,14 @@ internal object RtmpSourceSwitchHelper {
 
     suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
-            // Set video to bitmap and audio to microphone
+            // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
+            
+            // Add delay before switching audio to allow clean transition
+            // Increased delay gives more time for previous audio source to fully release
+            delay(300)
+            
+            // Now set audio to microphone
             streamer.setAudioSource(MicrophoneSourceFactory())
             Log.i(TAG, "Switched to bitmap fallback with microphone audio")
         } catch (e: Exception) {
@@ -199,6 +205,10 @@ internal object RtmpSourceSwitchHelper {
                             
                             // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
+
+                            // Add delay before switching audio to allow clean transition
+                            // Increased delay gives more time for previous audio source to fully release
+                            delay(300)
 
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
