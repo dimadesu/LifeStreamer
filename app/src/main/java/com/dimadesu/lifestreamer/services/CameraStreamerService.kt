@@ -372,6 +372,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification action: START_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
                         try {
+                            // Check if we're using RTMP source - can't start from notification
+                            if (isUsingRtmpSource()) {
+                                Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
+                                showCannotStartRtmpNotification()
+                                return@launch
+                            }
+                            
                             startStreamFromConfiguredEndpoint()
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification failed: ${e.message}")
@@ -434,6 +441,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         try {
                             val isStreaming = streamer?.isStreamingFlow?.value ?: false
                             if (!isStreaming) {
+                                // Check if we're using RTMP source - can't start from notification
+                                if (isUsingRtmpSource()) {
+                                    Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
+                                    showCannotStartRtmpNotification()
+                                    return@launch
+                                }
+                                
                                 // Start using configured endpoint from DataStore
                                 startStreamFromConfiguredEndpoint()
                                 // Refresh notification to show Stop action
@@ -859,6 +873,53 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
     
     /**
+     * Show a notification when user tries to start RTMP stream from notification.
+     * RTMP streams can only be started from the app due to MediaProjection permission requirements.
+     */
+    private fun showCannotStartRtmpNotification() {
+        val notification = createDefaultNotification(
+            content = "Can't start with RTMP source from notification"
+        )
+        customNotificationUtils.notify(notification)
+    }
+    
+    /**
+     * Create a standard notification with default settings.
+     * Used by onCreateNotification() and other notification methods.
+     * 
+     * @param content The notification content text
+     * @return Notification object
+     */
+    private fun createDefaultNotification(content: String): Notification {
+        return customNotificationUtils.createServiceNotification(
+            title = getString(R.string.service_notification_title),
+            content = content,
+            iconResourceId = notificationIconResourceId,
+            isForeground = true,
+            showStart = true,
+            showStop = false,
+            startPending = startPendingIntent,
+            stopPending = stopPendingIntent,
+            muteLabel = currentMuteLabel(),
+            mutePending = mutePendingIntent,
+            exitPending = exitPendingIntent,
+            openPending = openPendingIntent
+        )
+    }
+    
+    /**
+     * Check if the current video source is RTMP.
+     * RTMP sources cannot be started from notifications due to MediaProjection permission requirements.
+     * 
+     * @return true if current video source is RTMP, false otherwise
+     */
+    private fun isUsingRtmpSource(): Boolean {
+        val currentStreamer = streamer
+        val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
+        return videoSource?.javaClass?.simpleName == "RTMPVideoSource"
+    }
+    
+    /**
      * Acquire network wake lock to prevent network throttling in background
      * Especially important for SRT streaming
      */
@@ -1117,19 +1178,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onCreateNotification(): Notification {
-        return customNotificationUtils.createServiceNotification(
-            title = getString(R.string.service_notification_title),
-            content = getString(R.string.service_notification_text_created),
-            iconResourceId = notificationIconResourceId,
-            isForeground = true,
-            showStart = true,
-            showStop = false,
-            startPending = startPendingIntent,
-            stopPending = stopPendingIntent,
-            muteLabel = currentMuteLabel(),
-            mutePending = mutePendingIntent,
-            exitPending = exitPendingIntent,
-            openPending = openPendingIntent
+        return createDefaultNotification(
+            content = getString(R.string.service_notification_text_created)
         )
     }
 
