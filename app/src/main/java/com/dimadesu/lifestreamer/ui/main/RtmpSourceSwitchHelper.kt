@@ -203,7 +203,7 @@ internal object RtmpSourceSwitchHelper {
                             postRtmpStatus(null)
                             Log.i(TAG, "Successfully connected to RTMP source")
                             
-                                                        // Notify caller that RTMP is connected (for monitoring)
+                            // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
 
                             // Add delay before switching audio to allow clean transition
