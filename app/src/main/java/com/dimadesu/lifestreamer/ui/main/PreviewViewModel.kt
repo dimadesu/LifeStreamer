@@ -1152,12 +1152,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
                 
-                // Release the endpoint connection to allow fresh connection on next start
+                // Close the endpoint connection to allow fresh connection on next start
                 try {
-                    currentStreamer.release()
-                    Log.i(TAG, "Endpoint connection released")
+                    currentStreamer.close()
+                    Log.i(TAG, "Endpoint connection closed")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error releasing endpoint: ${e.message}", e)
+                    Log.w(TAG, "Error closing endpoint: ${e.message}", e)
                 }
 
                 // Wait for stream to actually stop before resetting sources
@@ -1293,12 +1293,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
                 
-                // Release the endpoint connection before reconnecting
+                // Close the endpoint connection before reconnecting
                 try {
-                    currentStreamer.release()
-                    Log.d(TAG, "Endpoint connection released before reconnection")
+                    currentStreamer.close()
+                    Log.d(TAG, "Endpoint connection closed before reconnection")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error releasing endpoint: ${e.message}", e)
+                    Log.w(TAG, "Error closing endpoint: ${e.message}", e)
                 }
 
                 // Wait for stream to actually stop before reconnecting
