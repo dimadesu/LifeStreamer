@@ -1048,8 +1048,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try {
                 // Indicate we're attempting to connect/open
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
+                // Use NonCancellable for camera configuration to prevent "Broken pipe" errors
+                // if coroutine is cancelled during camera setup
                 withTimeout(10000) { // 10s open timeout
-                    currentStreamer.open(descriptor)
+                    withContext(NonCancellable) {
+                        currentStreamer.open(descriptor)
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
@@ -1064,7 +1068,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try {
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
-                currentStreamer.startStream()
+                // Protect startStream() from cancellation to prevent camera configuration errors
+                withContext(NonCancellable) {
+                    currentStreamer.startStream()
+                }
                 // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
                 // derive it from isStreamingFlow.value to ensure accuracy
                 Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
