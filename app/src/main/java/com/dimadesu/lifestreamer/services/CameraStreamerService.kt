@@ -1068,7 +1068,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try {
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
-                currentStreamer.startStream()
+                // Protect startStream() from cancellation to prevent camera configuration errors
+                withContext(NonCancellable) {
+                    currentStreamer.startStream()
+                }
                 // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
                 // derive it from isStreamingFlow.value to ensure accuracy
                 Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")

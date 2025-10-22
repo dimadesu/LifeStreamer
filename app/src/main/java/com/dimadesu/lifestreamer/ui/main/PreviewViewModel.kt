@@ -346,7 +346,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
             
-            currentStreamer.startStream()
+            // Protect startStream() from cancellation to prevent camera configuration errors
+            withContext(NonCancellable) {
+                currentStreamer.startStream()
+            }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             true
         } catch (e: TimeoutCancellationException) {
