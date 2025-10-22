@@ -408,13 +408,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun loadEndpoint() {
+        // Migrate old resource-ID based values to stable integer IDs
+        migrateEndpointTypeValue()
+        
         // Inflates endpoint
         val supportedEndpoint = EndpointType.entries.map { "${it.id}" }.toTypedArray()
         endpointTypePreference.entryValues = supportedEndpoint
         endpointTypePreference.entries =
-            supportedEndpoint.map { getString(it.toInt()) }
+            EndpointType.entries.map { getString(it.labelResId) }
                 .toTypedArray()
-        if (endpointTypePreference.entry == null) {
+        // Only set default if user has never set a value (check .value not .entry)
+        // .entry can be null during initialization even with saved value
+        if (endpointTypePreference.value.isNullOrEmpty()) {
             endpointTypePreference.value = "${EndpointType.SRT.id}"
         }
         endpointTypePreference.value?.toIntOrNull()?.let { setEndpointType(it) }
@@ -516,6 +521,52 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 else -> {
                     throw IOException("Unknown file type")
                 }
+            }
+        }
+    }
+
+    /**
+     * Migrates old resource-ID based endpoint type values to stable integer IDs.
+     * This fixes the bug where endpoint types would randomly change after rebuilds
+     * because resource IDs can change between builds.
+     */
+    private fun migrateEndpointTypeValue() {
+        val currentValue = endpointTypePreference.value
+        if (currentValue.isNullOrEmpty()) return
+        
+        val intValue = currentValue.toIntOrNull() ?: return
+        
+        // Check if this looks like a resource ID (large number > 100)
+        // New stable IDs are 0-7, so any value > 100 is likely an old resource ID
+        if (intValue > 100) {
+            // Try to map old resource ID to new stable ID by matching the label
+            val oldLabel = try {
+                getString(intValue)
+            } catch (e: Exception) {
+                null
+            }
+            
+            if (oldLabel != null) {
+                // Find matching endpoint type by label
+                val newEndpointType = EndpointType.entries.find { 
+                    getString(it.labelResId) == oldLabel 
+                }
+                
+                if (newEndpointType != null) {
+                    endpointTypePreference.value = "${newEndpointType.id}"
+                    android.util.Log.i("SettingsFragment", 
+                        "Migrated endpoint type from resource ID $intValue to stable ID ${newEndpointType.id} ($oldLabel)")
+                } else {
+                    // Couldn't find match, reset to SRT default
+                    endpointTypePreference.value = "${EndpointType.SRT.id}"
+                    android.util.Log.w("SettingsFragment", 
+                        "Could not migrate endpoint type $intValue, resetting to SRT")
+                }
+            } else {
+                // Resource ID no longer valid, reset to SRT default
+                endpointTypePreference.value = "${EndpointType.SRT.id}"
+                android.util.Log.w("SettingsFragment", 
+                    "Invalid old endpoint type resource ID $intValue, resetting to SRT")
             }
         }
     }
