@@ -117,7 +117,7 @@
     <string name="endpoint">Endpoint</string>
 
     <string name="endpoint_type">Type</string>
-    <string name="endpoint_type_key">endpoint_type_key</string>
+    <string name="endpoint_type_key">endpoint_type_key_v2</string>
     <string name="to_ts_file">Write to a TS file</string>
     <string name="to_flv_file">Write to a FLV file</string>
     <string name="to_srt">Stream to a remote SRT device</string>
