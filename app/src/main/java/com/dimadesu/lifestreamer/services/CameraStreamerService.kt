@@ -391,6 +391,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     serviceScope.launch(Dispatchers.Default) {
                         try {
                             streamer?.stopStream()
+                            
+                            // Close the endpoint to allow fresh connection on next start
+                            try {
+                                streamer?.close()
+                                Log.i(TAG, "Endpoint closed after stop from notification")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "Stop from notification failed: ${e.message}")
                         }
@@ -427,6 +435,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             _userStoppedFromNotification.emit(Unit)
                             
                             streamer?.stopStream()
+                            
+                            // Close the endpoint to allow fresh connection on next start
+                            try {
+                                streamer?.close()
+                                Log.i(TAG, "Endpoint closed after stop from notification")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
+                            }
+                            
                             // Refresh notification to show Start action on main thread
                             val notification = onCloseNotification() ?: onCreateNotification()
                             withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
