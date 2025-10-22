@@ -1153,11 +1153,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 
                 // Close the endpoint connection to allow fresh connection on next start
+                // Without this, the endpoint stays open and cannot be reopened on next start
                 try {
                     currentStreamer.close()
-                    Log.i(TAG, "Endpoint connection closed")
+                    Log.i(TAG, "Endpoint connection closed - ready for next start")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error closing endpoint: ${e.message}", e)
+                    Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                 }
 
                 // Wait for stream to actually stop before resetting sources
@@ -1294,11 +1295,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 
                 // Close the endpoint connection before reconnecting
+                // This ensures clean state for reconnection attempt
                 try {
                     currentStreamer.close()
-                    Log.d(TAG, "Endpoint connection closed before reconnection")
+                    Log.i(TAG, "Endpoint closed before reconnection - clean slate established")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error closing endpoint: ${e.message}", e)
+                    Log.e(TAG, "CRITICAL: Failed to close endpoint before reconnection!", e)
                 }
 
                 // Wait for stream to actually stop before reconnecting
