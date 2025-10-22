@@ -412,9 +412,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val supportedEndpoint = EndpointType.entries.map { "${it.id}" }.toTypedArray()
         endpointTypePreference.entryValues = supportedEndpoint
         endpointTypePreference.entries =
-            supportedEndpoint.map { getString(it.toInt()) }
+            EndpointType.entries.map { getString(it.labelResId) }
                 .toTypedArray()
-        if (endpointTypePreference.entry == null) {
+        // Only set default if user has never set a value (check .value not .entry)
+        // .entry can be null during initialization even with saved value
+        if (endpointTypePreference.value.isNullOrEmpty()) {
             endpointTypePreference.value = "${EndpointType.SRT.id}"
         }
         endpointTypePreference.value?.toIntOrNull()?.let { setEndpointType(it) }
