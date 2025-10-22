@@ -163,10 +163,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
             PreferencesDataStoreAdapter(requireContext().dataStore, lifecycleScope)
 
         setPreferencesFromResource(R.xml.root_preferences, rootKey)
-    }
-
-    override fun onResume() {
-        super.onResume()
+        
+        // Load preferences after XML is inflated to avoid timing issues
+        // where lazy properties are accessed before preferences are ready
         loadPreferences()
     }
     
