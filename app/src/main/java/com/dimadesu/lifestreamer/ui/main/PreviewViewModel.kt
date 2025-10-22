@@ -1151,13 +1151,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
-
-                // Wait for stream to actually stop before resetting sources
-                // This prevents race condition where setServiceAudioSource skips due to isStreaming still being true
+                
+                // Wait for stream to actually stop before closing endpoint
+                // This prevents calling close() while stopStream() is still executing
                 var retries = 0
                 while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
                     kotlinx.coroutines.delay(100)
                     retries++
+                }
+                
+                if (retries >= 50) {
+                    Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
+                }
+                
+                // Close the endpoint connection to allow fresh connection on next start
+                // Without this, the endpoint stays open and cannot be reopened on next start
+                try {
+                    currentStreamer.close()
+                    Log.i(TAG, "Endpoint connection closed - ready for next start")
+                } catch (e: Exception) {
+                    Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                 }
                 
                 if (currentStreamer.isStreamingFlow.value == true) {
@@ -1283,6 +1296,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.d(TAG, "Bitrate regulator removed")
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                }
+                
+                // Close the endpoint connection before reconnecting
+                // This ensures clean state for reconnection attempt
+                try {
+                    currentStreamer.close()
+                    Log.i(TAG, "Endpoint closed before reconnection - clean slate established")
+                } catch (e: Exception) {
+                    Log.e(TAG, "CRITICAL: Failed to close endpoint before reconnection!", e)
                 }
 
                 // Wait for stream to actually stop before reconnecting
