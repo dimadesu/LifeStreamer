@@ -1151,6 +1151,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
+                
+                // Release the endpoint connection to allow fresh connection on next start
+                try {
+                    currentStreamer.release()
+                    Log.i(TAG, "Endpoint connection released")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing endpoint: ${e.message}", e)
+                }
 
                 // Wait for stream to actually stop before resetting sources
                 // This prevents race condition where setServiceAudioSource skips due to isStreaming still being true
@@ -1283,6 +1291,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.d(TAG, "Bitrate regulator removed")
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                }
+                
+                // Release the endpoint connection before reconnecting
+                try {
+                    currentStreamer.release()
+                    Log.d(TAG, "Endpoint connection released before reconnection")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing endpoint: ${e.message}", e)
                 }
 
                 // Wait for stream to actually stop before reconnecting
