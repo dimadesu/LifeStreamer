@@ -87,6 +87,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -323,9 +325,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             Log.i(TAG, "startServiceStreaming: serviceStreamer available, calling open()...")
 
-            // Add timeout to prevent hanging
+            // Add timeout to prevent hanging, but use NonCancellable for camera configuration
+            // to prevent "Broken pipe" errors if coroutine is cancelled during camera setup
             withTimeout(10000) { // 10 second timeout
-                currentStreamer.open(descriptor)
+                withContext(NonCancellable) {
+                    currentStreamer.open(descriptor)
+                }
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
             
