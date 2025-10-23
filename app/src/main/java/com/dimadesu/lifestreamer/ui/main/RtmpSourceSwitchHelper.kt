@@ -234,13 +234,21 @@ internal object RtmpSourceSwitchHelper {
                             // Set audio source: Use ExoPlayer audio directly from RTMP stream
                             // This extracts decoded PCM audio with automatic format conversion
                             try {
+                                Log.i(TAG, "[DEBUG] Setting ExoPlayer audio source for RTMP...")
+                                Log.i(TAG, "[DEBUG] Audio processor state - active: ${audioProcessor.isActive()}, queue size: ${audioProcessor.getQueueSize()}")
+                                
                                 currentStreamer.setAudioSource(ExoPlayerAudioSourceFactory(exoPlayerInstance, audioProcessor))
-                                Log.i(TAG, "Set ExoPlayer audio source for RTMP (direct extraction with format conversion)")
+                                
+                                Log.i(TAG, "[DEBUG] ✓ Successfully set ExoPlayer audio source for RTMP (direct extraction with format conversion)")
                             } catch (ae: Exception) {
+                                Log.e(TAG, "[DEBUG] ✗ ExoPlayer audio source FAILED: ${ae.javaClass.simpleName}: ${ae.message}", ae)
+                                Log.e(TAG, "[DEBUG] Stack trace:", ae)
                                 Log.w(TAG, "ExoPlayer audio source failed, falling back to microphone: ${ae.message}", ae)
                                 try {
                                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                    Log.i(TAG, "[DEBUG] ✓ Microphone fallback successful")
                                 } catch (micEx: Exception) {
+                                    Log.e(TAG, "[DEBUG] ✗ Microphone fallback FAILED: ${micEx.message}")
                                     Log.w(TAG, "Microphone fallback failed: ${micEx.message}")
                                 }
                             }

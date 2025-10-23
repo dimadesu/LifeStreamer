@@ -40,6 +40,8 @@ class ExoPlayerAudioSource(
     
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow = _isStreamingFlow.asStateFlow()
+    
+    private var frameCounter = 0L
 
     override suspend fun configure(config: AudioSourceConfig) {
         this.config = config
@@ -61,7 +63,8 @@ class ExoPlayerAudioSource(
         // Configure the audio processor with target format
         audioProcessor.configure(config)
         
-        Logger.i(TAG, "Configured ExoPlayer audio source: ${config.sampleRate}Hz, $channelCount channels, buffer=$bufferSize bytes")
+        Logger.i(TAG, "[DEBUG] Configured ExoPlayer audio source: ${config.sampleRate}Hz, $channelCount channels, buffer=$bufferSize bytes")
+        Logger.i(TAG, "[DEBUG] Format details - byteFormat: ${config.byteFormat}, channelConfig: ${config.channelConfig}")
     }
 
     override suspend fun startStream() {
@@ -72,7 +75,7 @@ class ExoPlayerAudioSource(
         
         audioProcessor.start()
         _isStreamingFlow.tryEmit(true)
-        Logger.i(TAG, "Started ExoPlayer audio stream")
+        Logger.i(TAG, "[DEBUG] Started ExoPlayer audio stream - processor active: ${audioProcessor.isActive()}")
     }
 
     override suspend fun stopStream() {
@@ -105,6 +108,7 @@ class ExoPlayerAudioSource(
             audioProcessor.getNextAudioFrame(bufferSize)
         } catch (e: InterruptedException) {
             frame.close()
+            Logger.e(TAG, "[DEBUG] Audio frame retrieval interrupted: ${e.message}")
             throw IllegalArgumentException("Audio frame retrieval interrupted: ${e.message}")
         }
 
@@ -113,9 +117,17 @@ class ExoPlayerAudioSource(
             buffer.put(audioData)
             buffer.flip()
             frame.timestampInUs = TimeUtils.currentTime()
+            
+            // Log every 100 frames to avoid spam
+            if (frameCounter % 100 == 0L) {
+                Logger.d(TAG, "[DEBUG] Got audio frame #$frameCounter: ${audioData.size} bytes, queue size: ${audioProcessor.getQueueSize()}")
+            }
+            frameCounter++
+            
             return frame
         } else {
             frame.close()
+            Logger.w(TAG, "[DEBUG] No audio data available from processor queue (timeout)")
             throw IllegalArgumentException("No audio data available")
         }
     }
@@ -148,6 +160,10 @@ class ExoPlayerAudioProcessor : AudioProcessor {
         private var outputBuffer: ByteBuffer = AudioProcessor.EMPTY_BUFFER
         private val outputBufferMutex = Mutex()
         
+        private var queueInputCounter = 0L
+        
+        fun getQueueSize(): Int = audioQueue.size
+        
         fun configure(config: AudioSourceConfig) {
             this.targetConfig = config
             
@@ -177,11 +193,14 @@ class ExoPlayerAudioProcessor : AudioProcessor {
         fun start() {
             processingActive = true
             audioQueue.clear()
+            queueInputCounter = 0L
+            Log.i(TAG, "[DEBUG] Audio processor started - ready to receive audio from ExoPlayer")
         }
         
         fun stop() {
             processingActive = false
             audioQueue.clear()
+            Log.i(TAG, "[DEBUG] Audio processor stopped - received $queueInputCounter frames total")
         }
         
         fun getNextAudioFrame(bufferSize: Int): ByteArray? {
@@ -194,22 +213,36 @@ class ExoPlayerAudioProcessor : AudioProcessor {
         override fun configure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
             this.inputAudioFormat = inputAudioFormat
             
-            Log.i(TAG, "ExoPlayer input format: ${inputAudioFormat.sampleRate}Hz, ${inputAudioFormat.channelCount}ch, encoding=${inputAudioFormat.encoding}")
-            Log.i(TAG, "Requested output format: ${outputAudioFormat.sampleRate}Hz, ${outputAudioFormat.channelCount}ch, encoding=${outputAudioFormat.encoding}")
+            Log.i(TAG, "[DEBUG] ExoPlayer input format: ${inputAudioFormat.sampleRate}Hz, ${inputAudioFormat.channelCount}ch, encoding=${inputAudioFormat.encoding}")
+            Log.i(TAG, "[DEBUG] Requested output format: ${outputAudioFormat.sampleRate}Hz, ${outputAudioFormat.channelCount}ch, encoding=${outputAudioFormat.encoding}")
             
             // Return the output format we want - ExoPlayer will handle resampling/conversion
-            return if (outputAudioFormat != AudioProcessor.AudioFormat.NOT_SET) {
+            val result = if (outputAudioFormat != AudioProcessor.AudioFormat.NOT_SET) {
                 outputAudioFormat
             } else {
                 // Fallback to input format if not configured yet
+                Log.w(TAG, "[DEBUG] Output format not set, using input format")
                 inputAudioFormat
             }
+            
+            val needsConversion = inputAudioFormat.sampleRate != result.sampleRate || 
+                                 inputAudioFormat.channelCount != result.channelCount ||
+                                 inputAudioFormat.encoding != result.encoding
+            Log.i(TAG, "[DEBUG] Format conversion needed: $needsConversion")
+            
+            return result
         }
 
         override fun isActive(): Boolean = processingActive
 
         override fun queueInput(inputBuffer: ByteBuffer) {
-            if (!processingActive || !inputBuffer.hasRemaining()) {
+            if (!processingActive) {
+                Log.w(TAG, "[DEBUG] queueInput called but processor not active")
+                return
+            }
+            
+            if (!inputBuffer.hasRemaining()) {
+                Log.w(TAG, "[DEBUG] queueInput called with empty buffer")
                 return
             }
             
@@ -219,8 +252,15 @@ class ExoPlayerAudioProcessor : AudioProcessor {
             inputBuffer.get(audioData)
             
             // Add to queue (drop if queue is full to prevent blocking)
-            if (!audioQueue.offer(audioData)) {
-                Log.w(TAG, "Audio queue full, dropping frame (size=$size)")
+            val queued = audioQueue.offer(audioData)
+            
+            if (queueInputCounter % 100 == 0L) {
+                Log.d(TAG, "[DEBUG] queueInput #$queueInputCounter: $size bytes, queued=$queued, queue size=${audioQueue.size}")
+            }
+            queueInputCounter++
+            
+            if (!queued) {
+                Log.w(TAG, "[DEBUG] Audio queue full, dropping frame (size=$size)")
             }
             
             // Store as output buffer for getOutput()
