@@ -18,13 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
-import android.media.projection.MediaProjection
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
-import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import com.dimadesu.lifestreamer.rtmp.audio.ExoPlayerAudioSourceFactory
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
-import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
@@ -152,8 +149,6 @@ internal object RtmpSourceSwitchHelper {
         currentStreamer: SingleStreamer,
         testBitmap: Bitmap,
         storageRepository: DataStoreRepository,
-        mediaProjectionHelper: MediaProjectionHelper,
-        streamingMediaProjection: MediaProjection?,
         postError: (String) -> Unit,
         postRtmpStatus: (String?) -> Unit,
         onRtmpConnected: ((ExoPlayer) -> Unit)? = null

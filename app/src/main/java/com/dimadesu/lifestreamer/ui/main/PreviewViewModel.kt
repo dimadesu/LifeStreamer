@@ -183,12 +183,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Determines if MediaProjection is required for the current streaming setup.
-     * MediaProjection is needed when streaming from RTMP source for audio capture.
+     * Since we now use ExoPlayerAudioSource for RTMP audio extraction, MediaProjection is no longer needed.
      */
     fun requiresMediaProjection(): Boolean {
-        val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
-        // If video source is not a camera source, it's likely RTMP and needs MediaProjection for audio
-        return currentVideoSource != null && currentVideoSource !is ICameraSource
+        // MediaProjection is no longer required - we extract audio directly from ExoPlayer
+        return false
     }
 
     // Streamer errors (nullable to support single-event pattern - cleared after observation)
@@ -1693,8 +1692,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     currentStreamer = currentStreamer,
                     testBitmap = testBitmap,
                     storageRepository = storageRepository,
-                    mediaProjectionHelper = mediaProjectionHelper,
-                    streamingMediaProjection = streamingMediaProjection,
                     postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                     postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
                     onRtmpConnected = { player -> 
@@ -1728,69 +1725,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 is ICameraSource -> {
                     Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
 
-                    // Only request MediaProjection when switching to RTMP while streaming.
-                    // Requesting projection while not streaming leads to poor UX (unexpected
-                    // permission prompts). If not streaming, skip the request — audio can be
-                    // upgraded later when the user starts streaming or explicitly requests it.
-                    val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
-                            && isCurrentlyStreaming
-                            && streamingMediaProjection == null
-                            && mediaProjectionHelper.getMediaProjection() == null
-
-                    if (needProjection) {
-                        if (mediaProjectionLauncher != null) {
-                            Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
-                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
-                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
-                                viewModelScope.launch {
-                                    streamingMediaProjection = projection
-                                    if (projection == null) {
-                                        _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
-                                        return@launch
-                                    }
-
-                                    // Now that we have projection, perform the RTMP source switch
-                                    // Cancel any existing retry job first
-                                    rtmpRetryJob?.cancel()
-                                    rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-                                        application = application,
-                                        currentStreamer = currentStreamer,
-                                        testBitmap = testBitmap,
-                                        storageRepository = storageRepository,
-                                        mediaProjectionHelper = mediaProjectionHelper,
-                                        streamingMediaProjection = streamingMediaProjection,
-                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-                                        postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                                        onRtmpConnected = { player -> monitorRtmpConnection(player) }
-                                    )
-                                }
-                            }
-                            // Return early; the actual switch will happen in the projection callback
-                            return@launch
-                        } else {
-                            Log.w(TAG, "MediaProjection required but no launcher available to request it")
-                            _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
-                            return@launch
-                        }
-                    } else {
-                        if (!isCurrentlyStreaming) {
-                            Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
-                        }
-
-                        // Cancel any existing retry job first
-                        rtmpRetryJob?.cancel()
-                        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-                            application = application,
-                            currentStreamer = currentStreamer,
-                            testBitmap = testBitmap,
-                            storageRepository = storageRepository,
-                            mediaProjectionHelper = mediaProjectionHelper,
-                            streamingMediaProjection = streamingMediaProjection,
-                            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-                            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                            onRtmpConnected = { player -> monitorRtmpConnection(player) }
-                        )
-                    }
+                    // No MediaProjection needed - we extract audio directly from ExoPlayer
+                    // Cancel any existing retry job first
+                    rtmpRetryJob?.cancel()
+                    rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+                        application = application,
+                        currentStreamer = currentStreamer,
+                        testBitmap = testBitmap,
+                        storageRepository = storageRepository,
+                        postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                        postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+                        onRtmpConnected = { player -> monitorRtmpConnection(player) }
+                    )
                 }
                 else -> {
                     Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
