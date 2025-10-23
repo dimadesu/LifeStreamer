@@ -33,12 +33,14 @@ internal object RtmpSourceSwitchHelper {
         audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> = emptyArray()
     ): ExoPlayer =
         withContext(Dispatchers.Main) {
+            // Optimized buffer settings for RTMP live streaming
+            // These values reduce rebuffering while keeping latency reasonable
             val loadControl = DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
-                    250, // Start playback after only 250ms of buffering
-                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+                    2000,  // Min buffer: 2 seconds (up from default 50s to handle jitter)
+                    10000, // Max buffer: 10 seconds (reasonable for live streaming)
+                    1500,  // Buffer before playback: 1.5 seconds (was 250ms - too aggressive!)
+                    2000   // Buffer after rebuffer: 2 seconds (more conservative restart)
                 )
                 .build()
 
