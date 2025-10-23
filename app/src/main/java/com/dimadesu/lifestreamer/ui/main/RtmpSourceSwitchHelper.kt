@@ -70,7 +70,12 @@ internal object RtmpSourceSwitchHelper {
             ).createMediaSource(mediaItem)
 
             exoPlayer.setMediaSource(mediaSource)
-            exoPlayer.volume = 0f
+            // IMPORTANT: Must set volume > 0 for AudioProcessor to receive audio
+            // Setting to 0 causes ExoPlayer to skip audio processing entirely
+            // Use very low volume (0.01) to keep it essentially silent
+            exoPlayer.volume = 0.01f
+            Log.i(TAG, "[DEBUG] Set ExoPlayer volume to 0.01 to enable audio processing")
+            
             // Add a lightweight error listener so callers can observe failures in logs
             exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
