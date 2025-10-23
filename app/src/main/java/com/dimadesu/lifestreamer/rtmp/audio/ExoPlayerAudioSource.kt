@@ -157,7 +157,9 @@ class ExoPlayerAudioProcessor : AudioProcessor {
         )
         
         private var targetConfig: AudioSourceConfig? = null
-        private var processingActive = false
+        // IMPORTANT: Must start as true! ExoPlayer checks isActive() during initialization
+        // If false, it will skip this processor entirely and never call queueInput()
+        private var processingActive = true
         
         // Buffer queue to hold audio frames
         private val audioQueue = ArrayBlockingQueue<ByteArray>(100)
