@@ -148,7 +148,13 @@ class ExoPlayerAudioSource(
  */
 class ExoPlayerAudioProcessor : AudioProcessor {
         private var inputAudioFormat: AudioProcessor.AudioFormat = AudioProcessor.AudioFormat.NOT_SET
-        private var outputAudioFormat: AudioProcessor.AudioFormat = AudioProcessor.AudioFormat.NOT_SET
+        
+        // Initialize with default format (48kHz stereo PCM16) - will be updated by StreamPack if needed
+        private var outputAudioFormat: AudioProcessor.AudioFormat = AudioProcessor.AudioFormat(
+            48000, // 48kHz sample rate
+            2,     // Stereo
+            C.ENCODING_PCM_16BIT
+        )
         
         private var targetConfig: AudioSourceConfig? = null
         private var processingActive = false
@@ -181,13 +187,16 @@ class ExoPlayerAudioProcessor : AudioProcessor {
                 else -> C.ENCODING_PCM_16BIT
             }
             
+            // Update output format (this happens AFTER ExoPlayer already called configure())
+            // But that's okay - ExoPlayer will handle any format differences
             outputAudioFormat = AudioProcessor.AudioFormat(
                 config.sampleRate,
                 channelCount,
                 encoding
             )
             
-            Log.i(TAG, "AudioProcessor configured: ${config.sampleRate}Hz, $channelCount ch, encoding=$encoding")
+            Log.i(TAG, "[DEBUG] AudioProcessor re-configured by StreamPack: ${config.sampleRate}Hz, $channelCount ch, encoding=$encoding")
+            Log.i(TAG, "[DEBUG] Note: ExoPlayer already configured with initial format, will convert as needed")
         }
         
         fun start() {
@@ -213,24 +222,22 @@ class ExoPlayerAudioProcessor : AudioProcessor {
         override fun configure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
             this.inputAudioFormat = inputAudioFormat
             
+            Log.i(TAG, "[DEBUG] ========== ExoPlayer AudioProcessor.configure() called ==========")
             Log.i(TAG, "[DEBUG] ExoPlayer input format: ${inputAudioFormat.sampleRate}Hz, ${inputAudioFormat.channelCount}ch, encoding=${inputAudioFormat.encoding}")
-            Log.i(TAG, "[DEBUG] Requested output format: ${outputAudioFormat.sampleRate}Hz, ${outputAudioFormat.channelCount}ch, encoding=${outputAudioFormat.encoding}")
+            Log.i(TAG, "[DEBUG] Will return output format: ${outputAudioFormat.sampleRate}Hz, ${outputAudioFormat.channelCount}ch, encoding=${outputAudioFormat.encoding}")
             
-            // Return the output format we want - ExoPlayer will handle resampling/conversion
-            val result = if (outputAudioFormat != AudioProcessor.AudioFormat.NOT_SET) {
-                outputAudioFormat
-            } else {
-                // Fallback to input format if not configured yet
-                Log.w(TAG, "[DEBUG] Output format not set, using input format")
-                inputAudioFormat
-            }
-            
-            val needsConversion = inputAudioFormat.sampleRate != result.sampleRate || 
-                                 inputAudioFormat.channelCount != result.channelCount ||
-                                 inputAudioFormat.encoding != result.encoding
+            val needsConversion = inputAudioFormat.sampleRate != outputAudioFormat.sampleRate || 
+                                 inputAudioFormat.channelCount != outputAudioFormat.channelCount ||
+                                 inputAudioFormat.encoding != outputAudioFormat.encoding
             Log.i(TAG, "[DEBUG] Format conversion needed: $needsConversion")
             
-            return result
+            if (needsConversion) {
+                Log.i(TAG, "[DEBUG] ExoPlayer will automatically convert ${inputAudioFormat.sampleRate}Hz/${inputAudioFormat.channelCount}ch " +
+                          "-> ${outputAudioFormat.sampleRate}Hz/${outputAudioFormat.channelCount}ch")
+            }
+            
+            // Return the output format we want - ExoPlayer will handle resampling/conversion
+            return outputAudioFormat
         }
 
         override fun isActive(): Boolean = processingActive
