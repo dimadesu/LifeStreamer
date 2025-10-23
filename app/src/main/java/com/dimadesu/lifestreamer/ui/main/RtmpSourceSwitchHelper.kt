@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.first
 import android.media.projection.MediaProjection
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
+import com.dimadesu.lifestreamer.rtmp.audio.ExoPlayerAudioSourceFactory
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
@@ -29,7 +30,11 @@ import kotlinx.coroutines.isActive
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
 
-    suspend fun createExoPlayer(application: Application, url: String): ExoPlayer =
+    suspend fun createExoPlayer(
+        application: Application, 
+        url: String,
+        audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> = emptyArray()
+    ): ExoPlayer =
         withContext(Dispatchers.Main) {
             val loadControl = DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
@@ -40,7 +45,25 @@ internal object RtmpSourceSwitchHelper {
                 )
                 .build()
 
+            // Create custom renderer factory if we have audio processors
+            val renderersFactory = if (audioProcessors.isNotEmpty()) {
+                object : androidx.media3.exoplayer.DefaultRenderersFactory(application) {
+                    override fun buildAudioSink(
+                        context: android.content.Context,
+                        enableFloatOutput: Boolean,
+                        enableAudioTrackPlaybackParams: Boolean
+                    ): androidx.media3.exoplayer.audio.AudioSink {
+                        return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                            .setAudioProcessors(audioProcessors)
+                            .build()
+                    }
+                }
+            } else {
+                androidx.media3.exoplayer.DefaultRenderersFactory(application)
+            }
+
             val exoPlayer = ExoPlayer.Builder(application)
+                .setRenderersFactory(renderersFactory)
                 .setLoadControl(loadControl)
                 .build()
 
@@ -166,8 +189,11 @@ internal object RtmpSourceSwitchHelper {
                         application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
                     }
 
+                    // Create audio processor for extracting audio from ExoPlayer
+                    val audioProcessor = com.dimadesu.lifestreamer.rtmp.audio.ExoPlayerAudioProcessor()
+                    
                     val exoPlayerInstance = try {
-                        createExoPlayer(application, videoSourceUrl)
+                        createExoPlayer(application, videoSourceUrl, arrayOf(audioProcessor))
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
                         null
@@ -210,58 +236,17 @@ internal object RtmpSourceSwitchHelper {
                             // Increased delay gives more time for previous audio source to fully release
                             delay(300)
 
-                            // Set audio source: prefer MediaProjection if streaming, otherwise microphone
-                            val isStreaming = currentStreamer.isStreamingFlow.value == true
-                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                            
-                            if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                // Use MediaProjection audio when streaming
-                                try {
-                                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                                    Log.i(TAG, "Set MediaProjection audio for RTMP")
-                                } catch (ae: Exception) {
-                                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${ae.message}")
-                                    try {
-                                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                                    } catch (micEx: Exception) {
-                                        Log.w(TAG, "Microphone fallback failed: ${micEx.message}")
-                                    }
-                                }
-                            } else {
-                                // Use microphone when not streaming or MediaProjection unavailable
+                            // Set audio source: Use ExoPlayer audio directly from RTMP stream
+                            // This extracts decoded PCM audio with automatic format conversion
+                            try {
+                                currentStreamer.setAudioSource(ExoPlayerAudioSourceFactory(exoPlayerInstance, audioProcessor))
+                                Log.i(TAG, "Set ExoPlayer audio source for RTMP (direct extraction with format conversion)")
+                            } catch (ae: Exception) {
+                                Log.w(TAG, "ExoPlayer audio source failed, falling back to microphone: ${ae.message}", ae)
                                 try {
                                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                                } catch (ae: Exception) {
-                                    Log.w(TAG, "Failed to set microphone audio: ${ae.message}")
-                                }
-                                
-                                // Launch background task to upgrade to MediaProjection if streaming starts
-                                if (!isStreaming && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                    CoroutineScope(Dispatchers.Default).launch {
-                                        try {
-                                            val deadline = System.currentTimeMillis() + 10_000L
-                                            var upgradedProjection = projection ?: mediaProjectionHelper.getMediaProjection()
-                                            if (upgradedProjection == null) {
-                                                while (System.currentTimeMillis() < deadline) {
-                                                    delay(500L)
-                                                    upgradedProjection = mediaProjectionHelper.getMediaProjection()
-                                                    if (upgradedProjection != null) break
-                                                }
-                                            }
-                                            upgradedProjection?.let { mp ->
-                                                if (currentStreamer.isStreamingFlow.value == true) {
-                                                    try {
-                                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
-                                                        Log.d(TAG, "Upgraded to MediaProjection audio")
-                                                    } catch (upgradeEx: Exception) {
-                                                        Log.w(TAG, "MediaProjection upgrade failed: ${upgradeEx.message}")
-                                                    }
-                                                }
-                                            }
-                                        } catch (bgEx: Exception) {
-                                            Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
-                                        }
-                                    }
+                                } catch (micEx: Exception) {
+                                    Log.w(TAG, "Microphone fallback failed: ${micEx.message}")
                                 }
                             }
                             
