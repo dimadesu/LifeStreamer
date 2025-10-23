@@ -30,11 +30,10 @@ android {
         }
     }
     
-    androidComponents {
-        onVariants { variant ->
-            variant.outputs.forEach { output ->
-                output.outputFileName.set("LifeStreamer-${variant.name}.apk")
-            }
+    applicationVariants.all {
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
+                "LifeStreamer-${name}.apk"
         }
     }
     compileOptions {
