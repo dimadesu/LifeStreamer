@@ -42,6 +42,7 @@ class ExoPlayerAudioSource(
     override val isStreamingFlow = _isStreamingFlow.asStateFlow()
     
     private var frameCounter = 0L
+    private var silenceFrameCounter = 0L
 
     override suspend fun configure(config: AudioSourceConfig) {
         this.config = config
@@ -74,6 +75,8 @@ class ExoPlayerAudioSource(
         }
         
         audioProcessor.start()
+        frameCounter = 0
+        silenceFrameCounter = 0
         _isStreamingFlow.tryEmit(true)
         Logger.i(TAG, "[DEBUG] Started ExoPlayer audio stream - processor active: ${audioProcessor.isActive()}")
     }
@@ -112,8 +115,10 @@ class ExoPlayerAudioSource(
             throw IllegalArgumentException("Audio frame retrieval interrupted: ${e.message}")
         }
 
+        val buffer = frame.rawBuffer
+        
         if (audioData != null) {
-            val buffer = frame.rawBuffer
+            // We have real audio data - use it
             buffer.put(audioData)
             buffer.flip()
             frame.timestampInUs = TimeUtils.currentTime()
@@ -126,9 +131,19 @@ class ExoPlayerAudioSource(
             
             return frame
         } else {
-            frame.close()
-            Logger.w(TAG, "[DEBUG] No audio data available from processor queue (timeout)")
-            throw IllegalArgumentException("No audio data available")
+            // No audio available (buffering/rebuffering) - generate silence to keep encoder happy
+            // This prevents stuttering during temporary network issues
+            val silenceData = ByteArray(bufferSize) // All zeros = silence for PCM16
+            buffer.put(silenceData)
+            buffer.flip()
+            frame.timestampInUs = TimeUtils.currentTime()
+            
+            if (silenceFrameCounter % 100 == 0L) {
+                Logger.w(TAG, "[DEBUG] Generating silence frame #$silenceFrameCounter (no audio from RTMP stream)")
+            }
+            silenceFrameCounter++
+            
+            return frame
         }
     }
 
@@ -246,17 +261,19 @@ class ExoPlayerAudioProcessor : AudioProcessor {
 
         override fun queueInput(inputBuffer: ByteBuffer) {
             if (!processingActive) {
-                Log.w(TAG, "[DEBUG] queueInput called but processor not active")
                 return
             }
             
-            if (!inputBuffer.hasRemaining()) {
-                Log.w(TAG, "[DEBUG] queueInput called with empty buffer")
+            val size = inputBuffer.remaining()
+            
+            // ExoPlayer sends empty buffers during silence/gaps - skip them silently
+            if (size == 0) {
                 return
             }
+            
+            queueInputCounter++
             
             // Copy audio data from ExoPlayer's buffer
-            val size = inputBuffer.remaining()
             val audioData = ByteArray(size)
             inputBuffer.get(audioData)
             
@@ -266,7 +283,6 @@ class ExoPlayerAudioProcessor : AudioProcessor {
             if (queueInputCounter % 100 == 0L) {
                 Log.d(TAG, "[DEBUG] queueInput #$queueInputCounter: $size bytes, queued=$queued, queue size=${audioQueue.size}")
             }
-            queueInputCounter++
             
             if (!queued) {
                 Log.w(TAG, "[DEBUG] Audio queue full, dropping frame (size=$size)")
