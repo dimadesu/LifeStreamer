@@ -129,7 +129,7 @@
 
     <string name="srt_server">SRT Server</string>
     <string name="srt_server_key">srt_server_key</string>
-    <string name="server_ip">IP</string>
+    <string name="server_ip">Server address or IP (without srt:// prefix)</string>
     <string name="srt_server_ip_key">srt_server_ip_key</string>
     <string name="default_srt_server_url">127.0.0.1</string>
     <string name="server_port">Port</string>
