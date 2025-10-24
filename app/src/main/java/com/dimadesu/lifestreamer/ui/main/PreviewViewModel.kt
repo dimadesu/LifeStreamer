@@ -59,6 +59,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.Camer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFrameRateSupported
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
+import com.dimadesu.lifestreamer.rtmp.audio.SilenceAudioSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.core.utils.extensions.isClosedException
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
@@ -1042,19 +1043,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     try {
                         // Check video source type to determine correct audio source
                         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
-                        val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                        val isRtmpOrBitmap = currentVideoSource?.javaClass?.simpleName != "CameraSource"
                         
-                        if (isRtmpVideo) {
-                            // Real RTMP video source - use MediaProjection for audio capture
+                        if (isRtmpOrBitmap) {
+                            // RTMP or Bitmap source - use MediaProjection if available, otherwise silence (never mic)
                             try {
                                 setServiceAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
-                                Log.i(TAG, "MediaProjection audio configured for RTMP")
+                                Log.i(TAG, "MediaProjection audio configured for RTMP/Bitmap source")
                             } catch (audioError: Exception) {
-                                Log.w(TAG, "MediaProjection audio failed, using microphone: ${audioError.message}")
-                                setServiceAudioSource(MicrophoneSourceFactory())
+                                Log.w(TAG, "MediaProjection audio failed, using silence: ${audioError.message}")
+                                setServiceAudioSource(SilenceAudioSourceFactory())
                             }
                         } else {
-                            // Camera or Bitmap source - use microphone for audio
+                            // Camera source - use microphone for audio
                             setServiceAudioSource(MicrophoneSourceFactory())
                         }
 
@@ -1395,7 +1396,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Executing reconnection attempt...")
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
 
-                // Check if we need to restore MediaProjection audio for RTMP source
+                // Check if we need to restore MediaProjection audio for RTMP source (or keep silence if not available)
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
                 val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
@@ -1405,9 +1406,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 if (isRtmpVideo) {
                     // For RTMP video source, ensure we have proper audio source
-                    // Priority: MediaProjection > existing audio > microphone fallback
+                    // Priority: MediaProjection > Silence (never mic for RTMP)
                     val hasMediaProjection = streamingMediaProjection != null || mediaProjectionHelper.getMediaProjection() != null
                     val currentAudioIsMediaProjection = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                    val currentAudioIsSilence = currentAudioSource?.javaClass?.simpleName?.contains("Silence") == true
                     
                     if (hasMediaProjection && !currentAudioIsMediaProjection) {
                         // Restore MediaProjection audio for RTMP stream
@@ -1417,21 +1419,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 Log.d(TAG, "Restoring MediaProjection audio for RTMP reconnection")
                                 setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
                             } else {
-                                Log.w(TAG, "MediaProjection became null, using microphone for reconnection")
-                                setServiceAudioSource(MicrophoneSourceFactory())
+                                Log.w(TAG, "MediaProjection became null, using silence for reconnection")
+                                setServiceAudioSource(SilenceAudioSourceFactory())
                             }
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to restore MediaProjection audio, using microphone: ${e.message}")
-                            setServiceAudioSource(MicrophoneSourceFactory())
+                            Log.w(TAG, "Failed to restore MediaProjection audio, using silence: ${e.message}")
+                            setServiceAudioSource(SilenceAudioSourceFactory())
                         }
                     } else if (currentAudioIsMediaProjection) {
                         Log.d(TAG, "Audio source already set to MediaProjection, keeping it")
+                    } else if (currentAudioIsSilence) {
+                        Log.d(TAG, "Audio source already set to Silence, keeping it (MediaProjection not available)")
                     } else {
-                        Log.d(TAG, "No MediaProjection available, ensuring microphone audio for RTMP")
+                        Log.d(TAG, "No MediaProjection available, using silence audio for RTMP")
                         try {
-                            setServiceAudioSource(MicrophoneSourceFactory())
+                            setServiceAudioSource(SilenceAudioSourceFactory())
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to set microphone audio: ${e.message}")
+                            Log.w(TAG, "Failed to set silence audio: ${e.message}")
                         }
                     }
                 }
