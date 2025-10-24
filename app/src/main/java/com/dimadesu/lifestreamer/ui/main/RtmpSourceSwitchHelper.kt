@@ -96,7 +96,12 @@ internal object RtmpSourceSwitchHelper {
         }
     }
 
-    suspend fun switchToBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
+    suspend fun switchToBitmapFallback(
+        streamer: SingleStreamer,
+        bitmap: Bitmap,
+        mediaProjection: MediaProjection? = null,
+        mediaProjectionHelper: MediaProjectionHelper? = null
+    ) {
         try {
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
@@ -105,9 +110,22 @@ internal object RtmpSourceSwitchHelper {
             // Increased delay gives more time for previous audio source to fully release
             delay(300)
             
-            // Now set audio to microphone
-            streamer.setAudioSource(MicrophoneSourceFactory())
-            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
+            // Audio follows video: For RTMP/Bitmap, prefer MediaProjection, fallback to mic
+            val projection = mediaProjection ?: mediaProjectionHelper?.getMediaProjection()
+            if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                try {
+                    streamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
+                    Log.i(TAG, "Switched to bitmap fallback with MediaProjection audio")
+                } catch (e: Exception) {
+                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
+                    streamer.setAudioSource(MicrophoneSourceFactory())
+                    Log.i(TAG, "Switched to bitmap fallback with microphone audio")
+                }
+            } else {
+                // No MediaProjection available - use microphone
+                streamer.setAudioSource(MicrophoneSourceFactory())
+                Log.i(TAG, "Switched to bitmap fallback with microphone audio (no MediaProjection)")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
@@ -176,7 +194,7 @@ internal object RtmpSourceSwitchHelper {
                     if (exoPlayerInstance == null) {
                         // Set bitmap fallback on first attempt only
                         if (isFirstAttempt) {
-                            switchToBitmapFallback(currentStreamer, testBitmap)
+                            switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
                         }
                         if (isActive) {
                             postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
@@ -272,7 +290,7 @@ internal object RtmpSourceSwitchHelper {
                             try { exoPlayerInstance.release() } catch (_: Exception) {}
                             
                             if (isFirstAttempt) {
-                                switchToBitmapFallback(currentStreamer, testBitmap)
+                                switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
                             }
                             // Wait and retry
                             if (isActive) {
@@ -286,7 +304,7 @@ internal object RtmpSourceSwitchHelper {
                         try { exoPlayerInstance.release() } catch (_: Exception) {}
                         
                         if (isFirstAttempt) {
-                            switchToBitmapFallback(currentStreamer, testBitmap)
+                            switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
                         }
                         // Wait and retry
                         if (isActive) {
