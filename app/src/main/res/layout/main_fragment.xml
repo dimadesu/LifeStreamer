@@ -155,7 +155,7 @@
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:text='@{viewmodel.audioSourceIndicatorLiveData}'
-                app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null &amp;&amp; viewmodel.streamStatusLiveData == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING &amp;&amp; viewmodel.isRtmpOrBitmapSource}' />
+                app:goneUnless='@{viewmodel.audioSourceIndicatorLiveData != null}' />
 
         </LinearLayout>
 

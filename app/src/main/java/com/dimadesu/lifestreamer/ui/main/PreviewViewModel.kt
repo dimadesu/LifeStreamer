@@ -2137,7 +2137,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Get user-friendly label for audio source type.
      * Only 2 sources are used in the app:
      * - MicrophoneSourceFactory: Phone Mic
-     * - MediaProjectionAudioSourceFactory: RTMP Audio
+     * - MediaProjectionAudioSourceFactory: Media Projection Audio
      */
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
