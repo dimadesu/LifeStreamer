@@ -23,6 +23,8 @@ class SilenceAudioSource : IAudioSourceInternal, Releasable {
     
     private var config: AudioSourceConfig? = null
     private var bufferSize: Int = 0
+    private var samplesPerFrame: Int = 1024
+    private var lastTimestampUs: Long = 0L
     
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow = _isStreamingFlow.asStateFlow()
@@ -52,6 +54,9 @@ class SilenceAudioSource : IAudioSourceInternal, Releasable {
             Logger.d(TAG, "Already streaming")
             return
         }
+        
+        // Initialize timestamp - will use current time like AudioRecordSource
+        lastTimestampUs = 0L
         
         _isStreamingFlow.tryEmit(true)
         Logger.i(TAG, "Started silence audio stream")
@@ -85,6 +90,9 @@ class SilenceAudioSource : IAudioSourceInternal, Releasable {
         val silenceData = ByteArray(bufferSize) // All zeros = silence for PCM
         buffer.put(silenceData)
         buffer.flip()
+        
+        // Use current time for timestamp, matching AudioRecordSource behavior
+        // This mimics the fallback path in AudioRecordSource.getTimestampInUs()
         frame.timestampInUs = TimeUtils.currentTime()
         
         return frame
