@@ -215,25 +215,27 @@ internal object RtmpSourceSwitchHelper {
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
                             
+                            // Audio follows video: RTMP video source -> MediaProjection or Silence (never mic)
                             if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                // Use MediaProjection audio when streaming
+                                // Use MediaProjection audio when streaming with projection available
                                 try {
                                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                                    Log.i(TAG, "Set MediaProjection audio for RTMP")
+                                    Log.i(TAG, "Set MediaProjection audio for RTMP video")
                                 } catch (ae: Exception) {
-                                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${ae.message}")
+                                    Log.w(TAG, "MediaProjection audio failed, using silence: ${ae.message}")
                                     try {
-                                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                                    } catch (micEx: Exception) {
-                                        Log.w(TAG, "Microphone fallback failed: ${micEx.message}")
+                                        currentStreamer.setAudioSource(SilenceAudioSourceFactory())
+                                    } catch (silenceEx: Exception) {
+                                        Log.e(TAG, "Silence fallback failed: ${silenceEx.message}")
                                     }
                                 }
                             } else {
-                                // Use microphone when not streaming or MediaProjection unavailable
+                                // Use silence when not streaming or MediaProjection unavailable (never mic for RTMP)
                                 try {
-                                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                    currentStreamer.setAudioSource(SilenceAudioSourceFactory())
+                                    Log.i(TAG, "Set silence audio for RTMP video (no MediaProjection)")
                                 } catch (ae: Exception) {
-                                    Log.w(TAG, "Failed to set microphone audio: ${ae.message}")
+                                    Log.e(TAG, "Failed to set silence audio: ${ae.message}")
                                 }
                                 
                                 // Launch background task to upgrade to MediaProjection if streaming starts
