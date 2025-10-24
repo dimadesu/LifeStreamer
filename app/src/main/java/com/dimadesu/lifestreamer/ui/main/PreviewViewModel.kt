@@ -942,13 +942,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
             Log.i(TAG, "  hasAudioSource: $hasAudioSource (${audioSource?.javaClass?.simpleName})")
 
-            // Special case: If video source is bitmap (RTMP fallback) but no audio, ensure microphone is set
+            // Special case: If video source is bitmap (RTMP fallback) but no audio, use silence
             if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
-                Log.w(TAG, "Bitmap source detected without audio - setting microphone")
+                Log.w(TAG, "Bitmap source detected without audio - setting silence")
                 try {
-                    setServiceAudioSource(MicrophoneSourceFactory())
+                    setServiceAudioSource(SilenceAudioSourceFactory())
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set microphone for bitmap source: ${e.message}")
+                    Log.e(TAG, "Failed to set silence for bitmap source: ${e.message}")
                 }
             }
 
@@ -1197,23 +1197,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
                 }
                 
-                Log.i(TAG, "Stream confirmed stopped - now resetting audio source")
+                Log.i(TAG, "Stream confirmed stopped")
 
-                // Reset audio source to clean state
+                // Audio source management after stop:
+                // - RTMP/Bitmap sources: Keep MediaProjection or Silence (don't reset to mic)
+                // - Camera source: Ensure microphone is set
                 try {
                     val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
-                    if (currentVideoSource !is ICameraSource) {
-                        // We're on RTMP source - reset audio to microphone for clean state
-                        Log.i(TAG, "RTMP source detected after stop - resetting audio to microphone")
-                        setServiceAudioSource(MicrophoneSourceFactory())
-                    } else {
+                    if (currentVideoSource is ICameraSource) {
                         // Camera source - ensure microphone is set
                         Log.i(TAG, "Camera source detected after stop - ensuring microphone audio")
                         setServiceAudioSource(MicrophoneSourceFactory())
+                    } else {
+                        // RTMP/Bitmap source - keep current audio (MediaProjection or Silence)
+                        val currentAudio = currentStreamer.audioInput?.sourceFlow?.value?.javaClass?.simpleName
+                        Log.i(TAG, "RTMP/Bitmap source detected after stop - keeping audio source: $currentAudio")
+                        // Don't change audio source - keep MediaProjection or Silence
                     }
-                    Log.i(TAG, "Audio source reset to microphone after stream stop")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error resetting audio source after stop: ${e.message}", e)
+                    Log.w(TAG, "Error checking audio source after stop: ${e.message}", e)
                 }
 
                 Log.i(TAG, "Stream stop completed successfully")
