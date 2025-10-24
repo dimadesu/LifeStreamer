@@ -607,8 +607,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         // Set audio source and video source only if not streaming
         if (currentStreamer.withAudio) {
-            Log.i(TAG, "Audio source is enabled. Setting audio source")
-            setServiceAudioSource(MicrophoneSourceFactory())
+            Log.i(TAG, "Audio source is enabled. Determining correct audio source based on video type")
+            // Check if we have an RTMP or Bitmap video source
+            val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+            val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
+            
+            if (isRtmpOrBitmap) {
+                // RTMP or Bitmap source - use silence (MediaProjection not available during init)
+                Log.i(TAG, "RTMP/Bitmap video detected - using silence for audio initialization")
+                setServiceAudioSource(SilenceAudioSourceFactory())
+            } else {
+                // Camera source or no video source yet - use microphone
+                Log.i(TAG, "Camera video detected - using microphone for audio initialization")
+                setServiceAudioSource(MicrophoneSourceFactory())
+            }
         } else {
             Log.i(TAG, "Audio source is disabled")
         }
