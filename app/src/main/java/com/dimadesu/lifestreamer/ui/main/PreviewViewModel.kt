@@ -1686,7 +1686,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 rtmpRetryJob?.cancel()
                 
                 // Fallback to bitmap immediately - this will properly release the RTMPVideoSource
-                // and set microphone audio
+                // and set silence audio (never microphone for RTMP sources)
                 RtmpSourceSwitchHelper.switchToBitmapFallback(currentStreamer, testBitmap)
                 
                 // Small delay to let the video source release complete and surface processor cleanup

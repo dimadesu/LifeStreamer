@@ -14,6 +14,7 @@ import android.graphics.Bitmap
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
+import com.dimadesu.lifestreamer.rtmp.audio.SilenceAudioSourceFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -105,9 +106,9 @@ internal object RtmpSourceSwitchHelper {
             // Increased delay gives more time for previous audio source to fully release
             delay(300)
             
-            // Now set audio to microphone
-            streamer.setAudioSource(MicrophoneSourceFactory())
-            Log.i(TAG, "Switched to bitmap fallback with microphone audio")
+            // Now set audio to silence (never microphone for RTMP/bitmap sources)
+            streamer.setAudioSource(SilenceAudioSourceFactory())
+            Log.i(TAG, "Switched to bitmap fallback with silence audio")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
