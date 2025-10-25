@@ -476,39 +476,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 try {
-                    setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
                     Log.i(TAG, "Set MediaProjection audio for RTMP/Bitmap video")
                 } catch (e: Exception) {
                     Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
-                    setServiceAudioSource(MicrophoneSourceFactory())
+                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
                 }
             } else {
                 Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using microphone")
-                setServiceAudioSource(MicrophoneSourceFactory())
+                currentStreamer.setAudioSource(MicrophoneSourceFactory())
             }
         } else {
             // Camera source - use microphone
             Log.i(TAG, "Camera video detected, using microphone audio")
-            setServiceAudioSource(MicrophoneSourceFactory())
+            currentStreamer.setAudioSource(MicrophoneSourceFactory())
         }
-    }
-
-    private suspend fun setServiceAudioSource(audioSourceFactory: IAudioSourceInternal.Factory) {
-        // Don't change audio source while streaming to avoid configuration conflicts
-        if (serviceStreamer?.isStreamingFlow?.value == true) {
-            Log.i(TAG, "Skipping audio source change - streamer is currently streaming")
-            return
-        }
-        serviceStreamer?.setAudioSource(audioSourceFactory)
-    }
-
-    private suspend fun setServiceVideoSource(videoSourceFactory: IVideoSourceInternal.Factory) {
-        // Don't change video source while streaming to avoid configuration conflicts
-        if (serviceStreamer?.isStreamingFlow?.value == true) {
-            Log.i(TAG, "Skipping video source change - streamer is currently streaming")
-            return
-        }
-        serviceStreamer?.setVideoSource(videoSourceFactory)
     }
 
     /**
@@ -652,7 +634,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 ) == PackageManager.PERMISSION_GRANTED
             ) {
                 Log.i(TAG, "Camera permission granted, setting video source")
-                setServiceVideoSource(CameraSourceFactory())
+                currentStreamer.setVideoSource(CameraSourceFactory())
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }
@@ -1222,11 +1204,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     if (currentVideoSource !is ICameraSource) {
                         // We're on RTMP source - reset audio to microphone for clean state
                         Log.i(TAG, "RTMP source detected after stop - resetting audio to microphone")
-                        setServiceAudioSource(MicrophoneSourceFactory())
+                        serviceStreamer?.setAudioSource(MicrophoneSourceFactory())
                     } else {
                         // Camera source - ensure microphone is set
                         Log.i(TAG, "Camera source detected after stop - ensuring microphone audio")
-                        setServiceAudioSource(MicrophoneSourceFactory())
+                        serviceStreamer?.setAudioSource(MicrophoneSourceFactory())
                     }
                     Log.i(TAG, "Audio source reset to microphone after stream stop")
                 } catch (e: Exception) {
