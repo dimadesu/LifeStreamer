@@ -21,7 +21,7 @@
 
     <!-- Audio source labels -->
     <string name="audio_source_microphone">Microphone</string>
-    <string name="audio_source_rtmp">RTMP Audio</string>
+    <string name="audio_source_rtmp">Media Projection Audio</string>
     <string name="audio_source_none">No Audio</string>
 
     <!-- Notification action labels -->
