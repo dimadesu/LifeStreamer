@@ -176,8 +176,7 @@
             android:orientation="vertical"
             android:rotation="-90"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="@+id/settingsLayout"
-            app:layout_constraintTop_toTopOf="parent">
+            app:layout_constraintEnd_toEndOf="@+id/settingsLayout">
 
             <com.google.android.material.slider.Slider
                 android:layout_width="match_parent"
@@ -215,8 +214,7 @@
             android:layout_marginEnd="16dp"
             android:orientation="vertical"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent">
+            app:layout_constraintEnd_toEndOf="parent">
 
             <ImageButton
                 android:layout_width="wrap_content"
