@@ -33,10 +33,10 @@ internal object RtmpSourceSwitchHelper {
         withContext(Dispatchers.Main) {
             val loadControl = DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
-                    250, // Start playback after only 250ms of buffering
-                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,      // 50 seconds
+                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,      // 50 seconds
+                    2500, // Start playback after 2.5s of buffering (more stable than 250ms)
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS  // 5 seconds
                 )
                 .build()
 
@@ -60,7 +60,7 @@ internal object RtmpSourceSwitchHelper {
             exoPlayer
         }
 
-    suspend fun awaitReady(player: ExoPlayer, timeoutMs: Long = 2000): Boolean {
+    suspend fun awaitReady(player: ExoPlayer, timeoutMs: Long = 5000): Boolean {
         return try {
             withTimeout(timeoutMs) {
                 suspendCancellableCoroutine<Boolean> { cont ->
@@ -206,7 +206,7 @@ internal object RtmpSourceSwitchHelper {
                     try {
                         // Prepare and wait for the RTMP player to be ready before touching streamer
                         // ExoPlayer operations must run on Main thread
-                        withTimeout(3000) {
+                        withTimeout(8000) { // Allow time for 2.5s buffer + connection overhead
                             exoPlayerInstance.prepare()
                             exoPlayerInstance.playWhenReady = true
                             val ready = awaitReady(exoPlayerInstance)
