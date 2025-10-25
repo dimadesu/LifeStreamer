@@ -103,12 +103,12 @@ internal object RtmpSourceSwitchHelper {
         mediaProjectionHelper: MediaProjectionHelper? = null
     ) {
         try {
+            // Add delay before switching sources to allow previous sources to fully release
+            // This prevents resource conflicts when hot-swapping sources
+            delay(300)
+            
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
-            
-            // Add delay before switching audio to allow clean transition
-            // Increased delay gives more time for previous audio source to fully release
-            delay(300)
             
             // Audio follows video: For RTMP/Bitmap, prefer MediaProjection, fallback to mic
             val projection = mediaProjection ?: mediaProjectionHelper?.getMediaProjection()
@@ -215,6 +215,10 @@ internal object RtmpSourceSwitchHelper {
 
                         // ExoPlayer appears ready. Attach RTMP video to the streamer.
                         try {
+                            // Add delay before switching sources to allow previous sources to fully release
+                            // This prevents resource conflicts when hot-swapping sources
+                            delay(300)
+                            
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
                             // Clear status message on success
@@ -223,10 +227,6 @@ internal object RtmpSourceSwitchHelper {
                             
                             // Notify caller that RTMP is connected (for monitoring)
                             onRtmpConnected?.invoke(exoPlayerInstance)
-
-                            // Add delay before switching audio to allow clean transition
-                            // Increased delay gives more time for previous audio source to fully release
-                            delay(300)
 
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
