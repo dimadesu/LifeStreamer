@@ -1806,16 +1806,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         mediaProjectionHelper.release()
                     }
 
-                    // Switch to camera source with delay for clean transition
-                    currentStreamer.setVideoSource(CameraSourceFactory())
-                    Log.i(TAG, "Switched video to camera, waiting before audio switch...")
-                    
-                    // Add delay before switching audio to allow clean transition
-                    // This gives time for previous audio source (MediaProjection/Microphone) to fully release
+                    // Add delay before switching sources to allow RTMP/ExoPlayer to fully release
+                    // This prevents resource conflicts when hot-swapping sources
                     kotlinx.coroutines.delay(300)
                     
+                    // Switch to camera sources
+                    currentStreamer.setVideoSource(CameraSourceFactory())
                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                    Log.i(TAG, "Switched audio to microphone")
+                    Log.i(TAG, "Switched to camera video and microphone audio")
                 }
             }
 //            when (videoSource) {
