@@ -988,6 +988,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     private suspend fun startStreamFromConfiguredEndpoint() {
         try {
+            // Lock stream rotation before starting
+            // Use saved orientation if available, otherwise get current display rotation
+            val rotationToLock = getSavedStreamingOrientation() ?: run {
+                @Suppress("DEPRECATION")
+                val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                windowManager.defaultDisplay.rotation
+            }
+            lockStreamRotation(rotationToLock)
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Locked stream rotation to $rotationToLock")
+            
             // Wait a short time for streamer to be available (service may be starting)
             val currentStreamer = withTimeoutOrNull(5000) {
                 // Poll streamer until non-null or timeout
@@ -1063,6 +1073,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
                 return
+            }
+
+            // Apply saved rotation before starting stream
+            getSavedStreamingOrientation()?.let { savedRotation ->
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Applying saved rotation $savedRotation before starting stream")
+                try {
+                    (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation)?.setTargetRotation(savedRotation)
+                    Log.i(TAG, "startStreamFromConfiguredEndpoint: Successfully applied saved rotation $savedRotation")
+                } catch (e: Exception) {
+                    Log.e(TAG, "startStreamFromConfiguredEndpoint: Failed to apply saved rotation: ${e.message}")
+                }
             }
 
             try {
