@@ -606,8 +606,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         // Set audio source and video source only if not streaming
         if (currentStreamer.withAudio) {
-            Log.i(TAG, "Audio source is enabled. Setting audio source")
-            setServiceAudioSource(MicrophoneSourceFactory())
+            Log.i(TAG, "Audio source is enabled. Determining correct audio source based on video type")
+            // Check if we have an RTMP or Bitmap video source
+            val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+            val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
+            
+            if (isRtmpOrBitmap) {
+                // RTMP or Bitmap source - try MediaProjection, fallback to microphone
+                val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    Log.i(TAG, "RTMP/Bitmap video detected - using MediaProjection for audio initialization")
+                    try {
+                        setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                    } catch (e: Exception) {
+                        Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
+                        setServiceAudioSource(MicrophoneSourceFactory())
+                    }
+                } else {
+                    Log.i(TAG, "RTMP/Bitmap video detected but no MediaProjection - using microphone for audio initialization")
+                    setServiceAudioSource(MicrophoneSourceFactory())
+                }
+            } else {
+                // Camera source or no video source yet - use microphone
+                Log.i(TAG, "Camera video detected - using microphone for audio initialization")
+                setServiceAudioSource(MicrophoneSourceFactory())
+            }
         } else {
             Log.i(TAG, "Audio source is disabled")
         }
@@ -941,13 +964,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
             Log.i(TAG, "  hasAudioSource: $hasAudioSource (${audioSource?.javaClass?.simpleName})")
 
-            // Special case: If video source is bitmap (RTMP fallback) but no audio, ensure microphone is set
+            // Special case: If video source is bitmap (RTMP fallback) but no audio, set appropriate audio
             if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
-                Log.w(TAG, "Bitmap source detected without audio - setting microphone")
+                Log.w(TAG, "Bitmap source detected without audio - setting audio source")
                 try {
-                    setServiceAudioSource(MicrophoneSourceFactory())
+                    // Try MediaProjection first for bitmap (RTMP fallback)
+                    val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                    if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        setServiceAudioSource(MediaProjectionAudioSourceFactory(projection))
+                        Log.i(TAG, "Set MediaProjection audio for bitmap source")
+                    } else {
+                        setServiceAudioSource(MicrophoneSourceFactory())
+                        Log.i(TAG, "Set microphone audio for bitmap source (no MediaProjection)")
+                    }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set microphone for bitmap source: ${e.message}")
+                    Log.e(TAG, "Failed to set audio for bitmap source: ${e.message}")
+                    try {
+                        setServiceAudioSource(MicrophoneSourceFactory())
+                    } catch (micError: Exception) {
+                        Log.e(TAG, "Failed to set microphone fallback: ${micError.message}")
+                    }
                 }
             }
 
@@ -1042,19 +1078,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     try {
                         // Check video source type to determine correct audio source
                         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
-                        val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                        val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
                         
-                        if (isRtmpVideo) {
-                            // Real RTMP video source - use MediaProjection for audio capture
+                        if (isRtmpOrBitmap) {
+                            // RTMP or Bitmap video source - use MediaProjection for audio capture
                             try {
                                 setServiceAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
-                                Log.i(TAG, "MediaProjection audio configured for RTMP")
+                                Log.i(TAG, "MediaProjection audio configured for RTMP/Bitmap")
                             } catch (audioError: Exception) {
                                 Log.w(TAG, "MediaProjection audio failed, using microphone: ${audioError.message}")
                                 setServiceAudioSource(MicrophoneSourceFactory())
                             }
                         } else {
-                            // Camera or Bitmap source - use microphone for audio
+                            // Camera source - use microphone for audio
                             setServiceAudioSource(MicrophoneSourceFactory())
                         }
 
@@ -1395,16 +1431,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Executing reconnection attempt...")
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
 
-                // Check if we need to restore MediaProjection audio for RTMP source
+                // Check if we need to restore MediaProjection audio for RTMP/Bitmap source
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val isRtmpVideo = currentVideoSource?.javaClass?.simpleName == "RTMPVideoSource"
+                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
                 
-                Log.d(TAG, "Reconnection video source check: isRtmpVideo=$isRtmpVideo, videoSource=${currentVideoSource?.javaClass?.simpleName}")
+                Log.d(TAG, "Reconnection video source check: isRtmpOrBitmap=$isRtmpOrBitmap, videoSource=${currentVideoSource?.javaClass?.simpleName}")
                 Log.d(TAG, "Reconnection audio source: ${currentAudioSource?.javaClass?.simpleName}, MediaProjection available: ${streamingMediaProjection != null}")
                 
-                if (isRtmpVideo) {
-                    // For RTMP video source, ensure we have proper audio source
+                if (isRtmpOrBitmap) {
+                    // For RTMP/Bitmap video source, ensure we have proper audio source
                     // Priority: MediaProjection > existing audio > microphone fallback
                     val hasMediaProjection = streamingMediaProjection != null || mediaProjectionHelper.getMediaProjection() != null
                     val currentAudioIsMediaProjection = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
@@ -1427,7 +1463,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     } else if (currentAudioIsMediaProjection) {
                         Log.d(TAG, "Audio source already set to MediaProjection, keeping it")
                     } else {
-                        Log.d(TAG, "No MediaProjection available, ensuring microphone audio for RTMP")
+                        Log.d(TAG, "No MediaProjection available, ensuring microphone audio for RTMP/Bitmap")
                         try {
                             setServiceAudioSource(MicrophoneSourceFactory())
                         } catch (e: Exception) {
