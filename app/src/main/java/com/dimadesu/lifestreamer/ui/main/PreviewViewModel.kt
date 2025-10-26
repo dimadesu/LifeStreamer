@@ -319,6 +319,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return false
             }
 
+            // Validate that both video and audio sources are configured before starting stream
+            val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
+            if (!sourcesValid) {
+                Log.e(TAG, "startServiceStreaming: Cannot start stream: $sourceError")
+                if (!shouldSuppressErrors) {
+                    _streamerErrorLiveData.postValue("Missing video or audio source - please reinitialize")
+                }
+                return false
+            }
+            Log.i(TAG, "startServiceStreaming: Sources validated successfully")
+
             // Validate RTMP URL format
             val uri = descriptor.uri.toString()
             if (uri.startsWith("rtmp://")) {
@@ -337,6 +348,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
+            
+            // Wait for encoders to be initialized after open
+            // This prevents the race condition where video encoder isn't ready after rapid stop/start
+            Log.d(TAG, "startServiceStreaming: Waiting for encoders to initialize...")
+            val encodersReady = kotlinx.coroutines.withTimeoutOrNull(5000) {
+                while ((currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder == null 
+                       || (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder == null) {
+                    kotlinx.coroutines.delay(200)
+                }
+                true
+            } ?: false
+            
+            if (!encodersReady) {
+                val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
+                val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+                val errorMsg = "Encoders not ready (video=$videoEncoderExists, audio=$audioEncoderExists)"
+                Log.e(TAG, "startServiceStreaming: $errorMsg")
+                if (!shouldSuppressErrors) {
+                    _streamerErrorLiveData.postValue(errorMsg)
+                }
+                return false
+            }
+            val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
+            val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+            Log.i(TAG, "startServiceStreaming: Encoders ready - video=$videoEncoderExists, audio=$audioEncoderExists")
             
             // Apply saved rotation BEFORE starting stream (during reconnection)
             // This is the critical window where rotation can be set
@@ -385,6 +421,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _streamerErrorLiveData.postValue("Service streamer not available")
             return false
         }
+
+        // Validate that both video and audio sources are configured
+        val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
+        if (!sourcesValid) {
+            Log.e(TAG, "doStartStream: Cannot start stream: $sourceError")
+            if (!shouldAutoRetry) {
+                _streamerErrorLiveData.postValue("Missing video or audio source - please check configuration")
+            }
+            return false
+        }
+        Log.i(TAG, "doStartStream: Sources validated successfully")
 
         try {
             val descriptor = storageRepository.endpointDescriptorFlow.first()
@@ -461,6 +508,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         } catch (e: Exception) {
             Log.e(TAG, "stopServiceStreaming failed: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Validates that both video and audio sources are configured for a streamer.
+     * 
+     * @param streamer The streamer instance to validate
+     * @return Pair of (isValid, errorMessage). If valid, errorMessage is null.
+     */
+    private fun validateSourcesConfigured(streamer: SingleStreamer): Pair<Boolean, String?> {
+        val videoSource = streamer.videoInput?.sourceFlow?.value
+        val audioSource = streamer.audioInput?.sourceFlow?.value
+        
+        return if (videoSource == null || audioSource == null) {
+            val errorMsg = "video source=${videoSource != null}, audio source=${audioSource != null}"
+            false to errorMsg
+        } else {
+            Log.d(TAG, "Sources validated - video: ${videoSource.javaClass.simpleName}, audio: ${audioSource.javaClass.simpleName}")
+            true to null
         }
     }
 
@@ -1399,13 +1465,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Executing reconnection attempt...")
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
 
-                // Ensure audio source matches video source for RTMP/Bitmap
-                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
-                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
+                // Validate that both sources exist before attempting reconnection
+                val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
+                if (!sourcesValid) {
+                    Log.e(TAG, "Reconnection failed: $sourceError")
+                    _reconnectionStatusLiveData.postValue("Reconnection failed - sources not configured")
+                    isReconnecting = false
+                    _streamStatus.value = StreamStatus.ERROR
+                    return@launch
+                }
                 
-                Log.d(TAG, "Reconnection video source check: isRtmpOrBitmap=$isRtmpOrBitmap, videoSource=${currentVideoSource?.javaClass?.simpleName}")
-                Log.d(TAG, "Reconnection audio source: ${currentAudioSource?.javaClass?.simpleName}")
+                // Ensure audio source matches video source for RTMP/Bitmap
+                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value!!
+                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value!!
+                val isRtmpOrBitmap = currentVideoSource !is ICameraSource
+                
+                Log.d(TAG, "Reconnection video source check: isRtmpOrBitmap=$isRtmpOrBitmap, videoSource=${currentVideoSource.javaClass.simpleName}")
+                Log.d(TAG, "Reconnection audio source: ${currentAudioSource.javaClass.simpleName}")
                 
                 if (isRtmpOrBitmap) {
                     // For RTMP/Bitmap video source, ensure audio source matches
