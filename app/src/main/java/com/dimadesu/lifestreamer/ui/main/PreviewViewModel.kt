@@ -1373,6 +1373,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 rtmpRetryJob = null
                 Log.d(TAG, "Cancelled RTMP retry job before reconnection")
                 
+                // For RTMP/Bitmap sources with MediaProjection audio: switch to microphone before close()
+                // MediaProjection tokens become invalid after close(), so we can't reuse them
+                // We'll upgrade back to MediaProjection after successful reconnection with a fresh token
+                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
+                val hasMediaProjectionAudio = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                
+                if (isRtmpOrBitmap && hasMediaProjectionAudio) {
+                    try {
+                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        Log.d(TAG, "Switched to microphone before reconnection (MediaProjection token will be stale)")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to switch to microphone before reconnection: ${e.message}")
+                    }
+                }
+                
                 // Clean up current connection
                 Log.d(TAG, "Stopping failed stream before reconnection...")
                 currentStreamer.stopStream()
