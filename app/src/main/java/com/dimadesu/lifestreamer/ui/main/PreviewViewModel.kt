@@ -1536,6 +1536,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (videoSource is ICameraSource) {
             viewModelScope.launch {
                 try {
+                    // Add delay before switching camera to allow previous camera to fully release
+                    // This prevents resource conflicts when hot-swapping cameras
+                    delay(300)
                     currentStreamer.setNextCameraId(application)
                     Log.i(TAG, "Camera toggled successfully")
                 } catch (e: Exception) {
