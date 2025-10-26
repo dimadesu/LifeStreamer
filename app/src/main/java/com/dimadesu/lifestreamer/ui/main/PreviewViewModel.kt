@@ -67,6 +67,7 @@ import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.Media
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSettings
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.IBitmapSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
@@ -1644,13 +1645,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Cancel existing retry job if any
                 rtmpRetryJob?.cancel()
                 
-                // Fallback to bitmap immediately - will use MediaProjection if available, otherwise mic
-                RtmpSourceSwitchHelper.switchToBitmapFallback(
-                    currentStreamer, 
-                    testBitmap,
-                    streamingMediaProjection,
-                    mediaProjectionHelper
-                )
+                // Switch only VIDEO to bitmap - keep existing audio source to avoid glitches
+                currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
+                Log.i(TAG, "Switched to bitmap fallback (video only, keeping current audio source)")
                 
                 // Small delay to let the video source release complete and surface processor cleanup
                 delay(100)
