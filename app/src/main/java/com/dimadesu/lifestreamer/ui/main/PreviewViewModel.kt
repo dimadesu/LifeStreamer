@@ -136,6 +136,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Expose current mute state to the UI
     private val _isMutedLiveData = MutableLiveData<Boolean>(false)
     val isMutedLiveData: LiveData<Boolean> get() = _isMutedLiveData
+    
+    // Remember last used camera ID when switching to RTMP/bitmap sources
+    private var lastUsedCameraId: String? = null
 
     // Streamer access through service (with fallback for backward compatibility)
     val streamer: SingleStreamer?
@@ -1708,6 +1711,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             when (videoSource) {
                 is ICameraSource -> {
                     Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
+                    
+                    // Remember current camera ID before switching away
+                    lastUsedCameraId = videoSource.cameraId
+                    Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
 
                     // Only request MediaProjection when switching to RTMP while streaming.
                     // Requesting projection while not streaming leads to poor UX (unexpected
@@ -1813,10 +1820,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // This prevents resource conflicts when hot-swapping sources
                     kotlinx.coroutines.delay(300)
                     
-                    // Switch to camera sources
-                    currentStreamer.setVideoSource(CameraSourceFactory())
+                    // Switch to camera sources - restore last used camera if available
+                    val cameraId = lastUsedCameraId
+                    currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                    Log.i(TAG, "Switched to camera video and microphone audio")
+                    if (cameraId != null) {
+                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) and microphone audio")
+                    } else {
+                        Log.i(TAG, "Switched to camera video (default camera) and microphone audio")
+                    }
                 }
             }
 //            when (videoSource) {
