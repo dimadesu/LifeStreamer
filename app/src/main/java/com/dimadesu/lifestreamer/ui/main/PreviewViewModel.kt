@@ -1271,24 +1271,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
                 }
                 
-                Log.i(TAG, "Stream confirmed stopped - now resetting audio source")
-
-                // Reset audio source to clean state
-                try {
-                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
-                    if (currentVideoSource !is ICameraSource) {
-                        // We're on RTMP source - reset audio to microphone for clean state
-                        Log.i(TAG, "RTMP source detected after stop - resetting audio to microphone")
-                        serviceStreamer?.setAudioSource(MicrophoneSourceFactory())
-                    } else {
-                        // Camera source - ensure microphone is set
-                        Log.i(TAG, "Camera source detected after stop - ensuring microphone audio")
-                        serviceStreamer?.setAudioSource(MicrophoneSourceFactory())
-                    }
-                    Log.i(TAG, "Audio source reset to microphone after stream stop")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error resetting audio source after stop: ${e.message}", e)
-                }
+                // Don't reset audio source here - it will be properly set when starting next stream
+                // Resetting after stop/close can leave the source in a broken state
+                Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
 
                 Log.i(TAG, "Stream stop completed successfully")
                 
