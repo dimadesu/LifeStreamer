@@ -277,6 +277,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
+    private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -1384,9 +1385,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (isRtmpOrBitmap && hasMediaProjectionAudio) {
                     try {
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                        Log.d(TAG, "Switched to microphone before reconnection (MediaProjection token will be stale)")
+                        needsMediaProjectionAudioRestore = true
+                        Log.d(TAG, "Switched to microphone before reconnection (will restore MediaProjection after)")
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to switch to microphone before reconnection: ${e.message}")
+                        needsMediaProjectionAudioRestore = false
                     }
                 }
                 
@@ -1510,6 +1513,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null
+                    
+                    // Restore MediaProjection audio if we switched to microphone before reconnection
+                    if (needsMediaProjectionAudioRestore) {
+                        Log.d(TAG, "Restoring MediaProjection audio after reconnection")
+                        needsMediaProjectionAudioRestore = false
+                        
+                        try {
+                            // Get MediaProjection from helper if we don't have it yet
+                            val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                            if (mediaProjection != null) {
+                                // Set MediaProjection audio source directly
+                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
+                                Log.i(TAG, "Restored MediaProjection audio after reconnection")
+                            } else {
+                                Log.w(TAG, "Could not restore MediaProjection audio: MediaProjection not available")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
+                        }
+                    }
                     
                     // Clear success message after 3 seconds
                     viewModelScope.launch {
