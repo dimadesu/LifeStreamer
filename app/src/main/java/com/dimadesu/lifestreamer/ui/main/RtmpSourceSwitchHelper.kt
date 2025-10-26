@@ -213,21 +213,16 @@ internal object RtmpSourceSwitchHelper {
                             if (!ready) throw Exception("ExoPlayer did not become ready")
                         }
 
-                        // ExoPlayer appears ready. Attach RTMP video to the streamer.
+                        // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {
                             // Add delay before switching sources to allow previous sources to fully release
                             // This prevents resource conflicts when hot-swapping sources
                             delay(300)
                             
+                            // Switch video source
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
-                            // Clear status message on success
-                            postRtmpStatus(null)
-                            Log.i(TAG, "Successfully connected to RTMP source")
-                            
-                            // Notify caller that RTMP is connected (for monitoring)
-                            onRtmpConnected?.invoke(exoPlayerInstance)
-
+                            // Switch audio source immediately after video
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
@@ -289,6 +284,13 @@ internal object RtmpSourceSwitchHelper {
                                     }
                                 }
                             }
+                            
+                            // Clear status message and notify caller after both video and audio are set
+                            postRtmpStatus(null)
+                            Log.i(TAG, "Successfully connected to RTMP source (video + audio)")
+                            
+                            // Notify caller that RTMP is connected (for monitoring)
+                            onRtmpConnected?.invoke(exoPlayerInstance)
                             
                             // Success - exit retry loop
                             return@launch
