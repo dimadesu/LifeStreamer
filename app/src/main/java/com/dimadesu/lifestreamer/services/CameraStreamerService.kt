@@ -124,8 +124,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
     // Critical error flow for the UI to show dialogs (non-transient errors)
-    // Use a replay of 0 so only fresh errors are observed by listeners
-    private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0)
+    // Use replay=1 to cache the last error for late subscribers (e.g., when starting from notification before UI is bound)
+    private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 0)
     val criticalErrors = _criticalErrors.asSharedFlow()
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
