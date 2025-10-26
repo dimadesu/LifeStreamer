@@ -1465,23 +1465,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@launch
                 }
                 
-                // Ensure audio source matches video source for RTMP/Bitmap
+                // During reconnection, DON'T reset audio source - it may invalidate MediaProjection token
+                // The audio source is already correctly configured from before the disconnection
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value!!
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value!!
-                val isRtmpOrBitmap = currentVideoSource !is ICameraSource
                 
-                Log.d(TAG, "Reconnection video source check: isRtmpOrBitmap=$isRtmpOrBitmap, videoSource=${currentVideoSource.javaClass.simpleName}")
-                Log.d(TAG, "Reconnection audio source: ${currentAudioSource.javaClass.simpleName}")
-                
-                if (isRtmpOrBitmap) {
-                    // For RTMP/Bitmap video source, ensure audio source matches
-                    Log.d(TAG, "RTMP/Bitmap source detected, ensuring correct audio source")
-                    try {
-                        setAudioSourceBasedOnVideoSource()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to set audio source during reconnection: ${e.message}")
-                    }
-                }
+                Log.d(TAG, "Reconnection video source: ${currentVideoSource.javaClass.simpleName}")
+                Log.d(TAG, "Reconnection audio source: ${currentAudioSource.javaClass.simpleName} (keeping existing)")
 
                 // Use the same stream start logic as initial connection
                 // Pass shouldAutoRetry=true to suppress error dialogs during reconnection
