@@ -277,6 +277,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
+    private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -1367,6 +1368,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Stop current stream cleanly before reconnecting
         viewModelScope.launch {
             try {
+                // Cancel any RTMP retry/upgrade tasks before reconnecting
+                // This prevents stale MediaProjection token from being used
+                rtmpRetryJob?.cancel()
+                rtmpRetryJob = null
+                Log.d(TAG, "Cancelled RTMP retry job before reconnection")
+                
+                // For RTMP/Bitmap sources with MediaProjection audio: switch to microphone before close()
+                // MediaProjection tokens become invalid after close(), so we can't reuse them
+                // We'll upgrade back to MediaProjection after successful reconnection with a fresh token
+                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
+                val hasMediaProjectionAudio = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                
+                if (isRtmpOrBitmap && hasMediaProjectionAudio) {
+                    try {
+                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        needsMediaProjectionAudioRestore = true
+                        Log.d(TAG, "Switched to microphone before reconnection (will restore MediaProjection after)")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to switch to microphone before reconnection: ${e.message}")
+                        needsMediaProjectionAudioRestore = false
+                    }
+                }
+                
                 // Clean up current connection
                 Log.d(TAG, "Stopping failed stream before reconnection...")
                 currentStreamer.stopStream()
@@ -1465,23 +1491,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@launch
                 }
                 
-                // Ensure audio source matches video source for RTMP/Bitmap
+                // During reconnection, DON'T reset audio source - it may invalidate MediaProjection token
+                // The audio source is already correctly configured from before the disconnection
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value!!
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value!!
-                val isRtmpOrBitmap = currentVideoSource !is ICameraSource
                 
-                Log.d(TAG, "Reconnection video source check: isRtmpOrBitmap=$isRtmpOrBitmap, videoSource=${currentVideoSource.javaClass.simpleName}")
-                Log.d(TAG, "Reconnection audio source: ${currentAudioSource.javaClass.simpleName}")
-                
-                if (isRtmpOrBitmap) {
-                    // For RTMP/Bitmap video source, ensure audio source matches
-                    Log.d(TAG, "RTMP/Bitmap source detected, ensuring correct audio source")
-                    try {
-                        setAudioSourceBasedOnVideoSource()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to set audio source during reconnection: ${e.message}")
-                    }
-                }
+                Log.d(TAG, "Reconnection video source: ${currentVideoSource.javaClass.simpleName}")
+                Log.d(TAG, "Reconnection audio source: ${currentAudioSource.javaClass.simpleName} (keeping existing)")
 
                 // Use the same stream start logic as initial connection
                 // Pass shouldAutoRetry=true to suppress error dialogs during reconnection
@@ -1497,6 +1513,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null
+                    
+                    // Restore MediaProjection audio if we switched to microphone before reconnection
+                    if (needsMediaProjectionAudioRestore) {
+                        Log.d(TAG, "Restoring MediaProjection audio after reconnection")
+                        needsMediaProjectionAudioRestore = false
+                        
+                        try {
+                            // Get MediaProjection from helper if we don't have it yet
+                            val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                            if (mediaProjection != null) {
+                                // Set MediaProjection audio source directly
+                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
+                                Log.i(TAG, "Restored MediaProjection audio after reconnection")
+                            } else {
+                                Log.w(TAG, "Could not restore MediaProjection audio: MediaProjection not available")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
+                        }
+                    }
                     
                     // Clear success message after 3 seconds
                     viewModelScope.launch {
