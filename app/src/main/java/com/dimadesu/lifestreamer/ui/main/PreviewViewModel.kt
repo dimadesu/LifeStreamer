@@ -910,12 +910,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 try {
                     svc.criticalErrors.collect { errorMessage ->
                         Log.w(TAG, "Critical error from service: $errorMessage")
-                        // Only trigger reconnection if not already reconnecting and user didn't manually stop
-                        if (!isReconnecting && !userStoppedManually) {
-                            Log.i(TAG, "Triggering reconnection due to service critical error")
+                        
+                        // Critical errors from notification starts should trigger reconnection
+                        // regardless of userStoppedManually flag (it's a new start attempt)
+                        // Only skip if already reconnecting
+                        if (!isReconnecting) {
+                            Log.i(TAG, "Triggering reconnection due to service critical error (notification start failure)")
+                            // Reset userStoppedManually since this is a new start attempt from notification
+                            userStoppedManually = false
                             handleDisconnection(errorMessage, isInitialConnection = true)
                         } else {
-                            Log.d(TAG, "Skipping reconnection trigger - isReconnecting=$isReconnecting, userStopped=$userStoppedManually")
+                            Log.d(TAG, "Skipping reconnection trigger - already reconnecting")
                         }
                     }
                 } catch (e: Exception) {

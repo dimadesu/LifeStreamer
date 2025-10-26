@@ -124,8 +124,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
     // Critical error flow for the UI to show dialogs (non-transient errors)
-    // Use replay=1 to cache the last error for late subscribers (e.g., when starting from notification before UI is bound)
-    private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 0)
+    // Use replay=0 because we'll handle notification-start timing differently
+    private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val criticalErrors = _criticalErrors.asSharedFlow()
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
@@ -467,9 +467,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 
                                 // Start using configured endpoint from DataStore
                                 startStreamFromConfiguredEndpoint()
-                                // Refresh notification to show Stop action
-                                val notification = onOpenNotification() ?: onCreateNotification()
-                                withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
+                                
+                                // Only update notification to "live" if stream actually started
+                                // Check isStreamingFlow after a short delay to let it update
+                                delay(100)
+                                val didStart = streamer?.isStreamingFlow?.value ?: false
+                                if (didStart) {
+                                    Log.i(TAG, "Stream started successfully from notification - showing live notification")
+                                    val notification = onOpenNotification() ?: onCreateNotification()
+                                    withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
+                                } else {
+                                    Log.i(TAG, "Stream did not start from notification - error notification already shown")
+                                }
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification receiver failed: ${e.message}")
