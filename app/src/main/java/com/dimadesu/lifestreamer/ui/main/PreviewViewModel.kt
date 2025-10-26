@@ -319,6 +319,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return false
             }
 
+            // Validate that both video and audio sources are configured before starting stream
+            val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+            val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+            if (videoSource == null || audioSource == null) {
+                val errorMsg = "Cannot start stream: video source=${videoSource != null}, audio source=${audioSource != null}"
+                Log.e(TAG, "startServiceStreaming: $errorMsg")
+                if (!shouldSuppressErrors) {
+                    _streamerErrorLiveData.postValue("Missing video or audio source - please reinitialize")
+                }
+                return false
+            }
+            Log.i(TAG, "startServiceStreaming: Sources validated - video: ${videoSource.javaClass.simpleName}, audio: ${audioSource.javaClass.simpleName}")
+
             // Validate RTMP URL format
             val uri = descriptor.uri.toString()
             if (uri.startsWith("rtmp://")) {
@@ -385,6 +398,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _streamerErrorLiveData.postValue("Service streamer not available")
             return false
         }
+
+        // Validate that both video and audio sources are configured
+        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+        if (videoSource == null || audioSource == null) {
+            val errorMsg = "Cannot start stream: video source=${videoSource != null}, audio source=${audioSource != null}"
+            Log.e(TAG, "doStartStream: $errorMsg")
+            if (!shouldAutoRetry) {
+                _streamerErrorLiveData.postValue("Missing video or audio source - please check configuration")
+            }
+            return false
+        }
+        Log.i(TAG, "doStartStream: Sources validated - video: ${videoSource.javaClass.simpleName}, audio: ${audioSource.javaClass.simpleName}")
 
         try {
             val descriptor = storageRepository.endpointDescriptorFlow.first()
@@ -1402,7 +1428,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Ensure audio source matches video source for RTMP/Bitmap
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
+                
+                Log.d(TAG, "Reconnection source check: videoSource=${currentVideoSource?.javaClass?.simpleName}, audioSource=${currentAudioSource?.javaClass?.simpleName}")
+                
+                // Validate that both sources exist before attempting reconnection
+                if (currentVideoSource == null || currentAudioSource == null) {
+                    Log.e(TAG, "Reconnection failed: video source=${currentVideoSource != null}, audio source=${currentAudioSource != null}")
+                    _reconnectionStatusLiveData.postValue("Reconnection failed - sources not configured")
+                    isReconnecting = false
+                    _streamStatus.value = StreamStatus.ERROR
+                    return@launch
+                }
+                
+                val isRtmpOrBitmap = currentVideoSource !is ICameraSource
                 
                 Log.d(TAG, "Reconnection video source check: isRtmpOrBitmap=$isRtmpOrBitmap, videoSource=${currentVideoSource?.javaClass?.simpleName}")
                 Log.d(TAG, "Reconnection audio source: ${currentAudioSource?.javaClass?.simpleName}")

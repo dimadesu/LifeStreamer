@@ -1041,6 +1041,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 return
             }
 
+            // Final validation: Ensure both sources are still configured right before starting stream
+            val finalVideoCheck = videoInput?.sourceFlow?.value
+            val finalAudioCheck = audioInput?.sourceFlow?.value
+            if (finalVideoCheck == null || finalAudioCheck == null) {
+                val errorMsg = "Cannot start stream: video source=${finalVideoCheck != null}, audio source=${finalAudioCheck != null}"
+                Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
+                customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
+                serviceScope.launch { _criticalErrors.emit(errorMsg) }
+                return
+            }
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Final source validation passed - video: ${finalVideoCheck.javaClass.simpleName}, audio: ${finalAudioCheck.javaClass.simpleName}")
+
             Log.i(TAG, "startStreamFromConfiguredEndpoint: opening descriptor $descriptor")
             // Indicate start sequence
             try { _serviceStreamStatus.tryEmit(StreamStatus.STARTING) } catch (_: Throwable) {}
