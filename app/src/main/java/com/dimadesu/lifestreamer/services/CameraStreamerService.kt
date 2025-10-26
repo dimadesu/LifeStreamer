@@ -620,7 +620,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     try { _currentBitrateFlow.emit(videoBitrate) } catch (_: Throwable) {}
 
                     val bitrateText = videoBitrate?.let { b ->
-                        if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000)
+                        if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000)
                     } ?: ""
 
                     // Reuse the already computed statusLabel for the notification key
@@ -699,10 +699,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
         } else null
 
-        val bitrateText = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: ""
+        val bitrateText = videoBitrate?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
 
         val contentWithBitrate = if (status == StreamStatus.STREAMING) {
-            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: ""
+            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
             // content already contains statusLabel when streaming (e.g., "Live • 00:01:23"),
             // so avoid appending the statusLabel again. Just add bitrate after whatever
             // content we've computed.
@@ -774,7 +774,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val hours = totalSeconds / 3600
         val minutes = (totalSeconds % 3600) / 60
         val seconds = totalSeconds % 60
-        return if (hours > 0) String.format("%d:%02d:%02d", hours, minutes, seconds) else String.format("%d:%02d", minutes, seconds)
+        return if (hours > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds) else String.format(java.util.Locale.US, "%d:%02d", minutes, seconds)
     }
 
 
