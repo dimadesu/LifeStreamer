@@ -103,12 +103,12 @@ internal object RtmpSourceSwitchHelper {
         mediaProjectionHelper: MediaProjectionHelper? = null
     ) {
         try {
+            // Add delay before switching sources to allow previous sources to fully release
+            // This prevents resource conflicts when hot-swapping sources
+            delay(300)
+            
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
-            
-            // Add delay before switching audio to allow clean transition
-            // Increased delay gives more time for previous audio source to fully release
-            delay(300)
             
             // Audio follows video: For RTMP/Bitmap, prefer MediaProjection, fallback to mic
             val projection = mediaProjection ?: mediaProjectionHelper?.getMediaProjection()
@@ -213,21 +213,16 @@ internal object RtmpSourceSwitchHelper {
                             if (!ready) throw Exception("ExoPlayer did not become ready")
                         }
 
-                        // ExoPlayer appears ready. Attach RTMP video to the streamer.
+                        // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {
+                            // Add delay before switching sources to allow previous sources to fully release
+                            // This prevents resource conflicts when hot-swapping sources
+                            delay(300)
+                            
+                            // Switch video source
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
-                            // Clear status message on success
-                            postRtmpStatus(null)
-                            Log.i(TAG, "Successfully connected to RTMP source")
-                            
-                            // Notify caller that RTMP is connected (for monitoring)
-                            onRtmpConnected?.invoke(exoPlayerInstance)
-
-                            // Add delay before switching audio to allow clean transition
-                            // Increased delay gives more time for previous audio source to fully release
-                            delay(300)
-
+                            // Switch audio source immediately after video
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
@@ -289,6 +284,13 @@ internal object RtmpSourceSwitchHelper {
                                     }
                                 }
                             }
+                            
+                            // Clear status message and notify caller after both video and audio are set
+                            postRtmpStatus(null)
+                            Log.i(TAG, "Successfully connected to RTMP source (video + audio)")
+                            
+                            // Notify caller that RTMP is connected (for monitoring)
+                            onRtmpConnected?.invoke(exoPlayerInstance)
                             
                             // Success - exit retry loop
                             return@launch

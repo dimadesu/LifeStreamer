@@ -1536,6 +1536,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (videoSource is ICameraSource) {
             viewModelScope.launch {
                 try {
+                    // Add delay before switching camera to allow previous camera to fully release
+                    // This prevents resource conflicts when hot-swapping cameras
+                    delay(300)
                     currentStreamer.setNextCameraId(application)
                     Log.i(TAG, "Camera toggled successfully")
                 } catch (e: Exception) {
@@ -1806,9 +1809,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         mediaProjectionHelper.release()
                     }
 
-                    // Switch to camera source
+                    // Add delay before switching sources to allow RTMP/ExoPlayer to fully release
+                    // This prevents resource conflicts when hot-swapping sources
+                    kotlinx.coroutines.delay(300)
+                    
+                    // Switch to camera sources
                     currentStreamer.setVideoSource(CameraSourceFactory())
                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                    Log.i(TAG, "Switched to camera video and microphone audio")
                 }
             }
 //            when (videoSource) {
