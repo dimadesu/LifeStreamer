@@ -349,6 +349,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
             
+            // Wait for encoders to be initialized after open
+            // This prevents the race condition where video encoder isn't ready after rapid stop/start
+            Log.d(TAG, "startServiceStreaming: Waiting for encoders to initialize...")
+            val encodersReady = kotlinx.coroutines.withTimeoutOrNull(5000) {
+                while ((currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder == null 
+                       || (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder == null) {
+                    kotlinx.coroutines.delay(200)
+                }
+                true
+            } ?: false
+            
+            if (!encodersReady) {
+                val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
+                val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+                val errorMsg = "Encoders not ready (video=$videoEncoderExists, audio=$audioEncoderExists)"
+                Log.e(TAG, "startServiceStreaming: $errorMsg")
+                if (!shouldSuppressErrors) {
+                    _streamerErrorLiveData.postValue(errorMsg)
+                }
+                return false
+            }
+            val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
+            val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+            Log.i(TAG, "startServiceStreaming: Encoders ready - video=$videoEncoderExists, audio=$audioEncoderExists")
+            
             // Apply saved rotation BEFORE starting stream (during reconnection)
             // This is the critical window where rotation can be set
             service?.getSavedStreamingOrientation()?.let { savedRotation ->

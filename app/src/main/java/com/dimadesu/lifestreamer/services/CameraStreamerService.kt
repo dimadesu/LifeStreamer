@@ -1088,6 +1088,31 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         currentStreamer.open(descriptor)
                     }
                 }
+                
+                // Wait for encoders to be initialized after open
+                // This prevents the race condition where video encoder isn't ready after rapid stop/start
+                Log.d(TAG, "startStreamFromConfiguredEndpoint: Waiting for encoders to initialize...")
+                val encodersReady = withTimeoutOrNull(5000) {
+                    while ((currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder == null 
+                           || (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder == null) {
+                        delay(200)
+                    }
+                    true
+                } ?: false
+                
+                if (!encodersReady) {
+                    val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
+                    val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+                    val errorMsg = "Encoders not ready after open (video=$videoEncoderExists, audio=$audioEncoderExists)"
+                    Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
+                    customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
+                    serviceScope.launch { _criticalErrors.emit(errorMsg) }
+                    return
+                }
+                val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
+                val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Encoders ready - video=$videoEncoderExists, audio=$audioEncoderExists")
+                
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
