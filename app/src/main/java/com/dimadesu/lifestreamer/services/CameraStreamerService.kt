@@ -925,6 +925,28 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
     
     /**
+     * Validates that both video and audio sources are configured for the streamer.
+     * 
+     * @return Pair of (isValid, errorMessage). If valid, errorMessage is null.
+     */
+    private fun validateSourcesConfigured(): Pair<Boolean, String?> {
+        val currentStreamer = streamer
+        val videoInput = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput
+        val audioInput = (currentStreamer as? IWithAudioSource)?.audioInput
+        
+        val videoSource = videoInput?.sourceFlow?.value
+        val audioSource = audioInput?.sourceFlow?.value
+        
+        return if (videoSource == null || audioSource == null) {
+            val errorMsg = "video source=${videoSource != null}, audio source=${audioSource != null}"
+            false to errorMsg
+        } else {
+            Log.d(TAG, "Sources validated - video: ${videoSource.javaClass.simpleName}, audio: ${audioSource.javaClass.simpleName}")
+            true to null
+        }
+    }
+    
+    /**
      * Check if the current video source is RTMP.
      * RTMP sources cannot be started from notifications due to MediaProjection permission requirements.
      * 
@@ -1042,16 +1064,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
 
             // Final validation: Ensure both sources are still configured right before starting stream
-            val finalVideoCheck = videoInput?.sourceFlow?.value
-            val finalAudioCheck = audioInput?.sourceFlow?.value
-            if (finalVideoCheck == null || finalAudioCheck == null) {
-                val errorMsg = "Cannot start stream: video source=${finalVideoCheck != null}, audio source=${finalAudioCheck != null}"
+            val (sourcesValid, sourceError) = validateSourcesConfigured()
+            if (!sourcesValid) {
+                val errorMsg = "Cannot start stream: $sourceError"
                 Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
                 customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
                 serviceScope.launch { _criticalErrors.emit(errorMsg) }
                 return
             }
-            Log.i(TAG, "startStreamFromConfiguredEndpoint: Final source validation passed - video: ${finalVideoCheck.javaClass.simpleName}, audio: ${finalAudioCheck.javaClass.simpleName}")
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Final source validation passed")
 
             Log.i(TAG, "startStreamFromConfiguredEndpoint: opening descriptor $descriptor")
             // Indicate start sequence
