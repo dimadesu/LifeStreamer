@@ -522,7 +522,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         val svc = binder.getService()
                         viewModelScope.launch {
                             svc.currentBitrateFlow.collect { bits ->
-                                val text = bits?.let { b -> if (b >= 1_000_000) String.format("%.2f Mbps", b / 1_000_000.0) else String.format("%d kb/s", b / 1000) } ?: ""
+                                val text = bits?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
                                 _bitrateLiveData.postValue(text)
                             }
                         }
