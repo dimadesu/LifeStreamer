@@ -1367,6 +1367,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Stop current stream cleanly before reconnecting
         viewModelScope.launch {
             try {
+                // Cancel any RTMP retry/upgrade tasks before reconnecting
+                // This prevents stale MediaProjection token from being used
+                rtmpRetryJob?.cancel()
+                rtmpRetryJob = null
+                Log.d(TAG, "Cancelled RTMP retry job before reconnection")
+                
                 // Clean up current connection
                 Log.d(TAG, "Stopping failed stream before reconnection...")
                 currentStreamer.stopStream()
