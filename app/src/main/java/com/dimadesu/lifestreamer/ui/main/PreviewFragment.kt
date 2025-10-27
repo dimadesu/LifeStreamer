@@ -56,7 +56,7 @@ import io.github.thibaultbee.streampack.core.interfaces.IStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewableSource
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
-import com.dimadesu.lifestreamer.ui.views.PreviewView
+import io.github.thibaultbee.streampack.ui.views.PreviewView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
