@@ -27,7 +27,7 @@ class StreamerInfoFactory(
     context: Context,
     private val endpointType: EndpointType,
 ) {
-    private val endpoint = DynamicEndpointFactory().create(context)
+    private val endpoint = DynamicEndpointFactory().create(context, io.github.thibaultbee.streampack.core.pipelines.DispatcherProvider())
 
     fun build(): CameraStreamerConfigurationInfo {
         return when (endpointType) {

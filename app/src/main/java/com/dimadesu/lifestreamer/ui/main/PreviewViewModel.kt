@@ -2073,7 +2073,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     var exposureCompensation: Float
         @Bindable get() {
             val settings = cameraSettings
-            return if (settings != null && settings.isAvailableFlow.value) {
+            return if (settings != null && settings.isActiveFlow.value) {
                 settings.exposure.compensation * settings.exposure.availableCompensationStep.toFloat()
             } else {
                 0f
@@ -2083,7 +2083,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             cameraSettings?.let { settings ->
                 try {
                     settings.exposure.let {
-                        if (settings.isAvailableFlow.value) {
+                        if (settings.isActiveFlow.value) {
                             it.compensation = (value / it.availableCompensationStep.toFloat()).toInt()
                         }
                         notifyPropertyChanged(BR.exposureCompensation)
@@ -2104,7 +2104,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     var zoomRatio: Float
         @Bindable get() {
             val settings = cameraSettings
-            return if (settings != null && settings.isAvailableFlow.value) {
+            return if (settings != null && settings.isActiveFlow.value) {
                 settings.zoom.zoomRatio
             } else {
                 1f
@@ -2113,7 +2113,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         set(value) {
             cameraSettings?.let { settings ->
                 try {
-                    if (settings.isAvailableFlow.value) {
+                    if (settings.isActiveFlow.value) {
                         settings.zoom.zoomRatio = value
                     }
                     notifyPropertyChanged(BR.zoomRatio)
@@ -2147,7 +2147,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         @Bindable get() {
             val settings = cameraSettings
             return if ((settings != null) &&
-                settings.isAvailableFlow.value
+                settings.isActiveFlow.value
             ) {
                 settings.focus.lensDistance
             } else {
@@ -2158,7 +2158,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             cameraSettings?.let { settings ->
                 try {
                     settings.focus.let {
-                        if (settings.isAvailableFlow.value) {
+                        if (settings.isActiveFlow.value) {
                             it.lensDistance = value
                         }
                         notifyPropertyChanged(BR.lensDistance)
@@ -2186,7 +2186,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val settings = videoSource.settings
         // Set optical stabilization first
         // Do not set both video and optical stabilization at the same time
-        if (settings.isAvailableFlow.value) {
+        if (settings.isActiveFlow.value) {
             if (settings.stabilization.isOpticalAvailable) {
                 settings.stabilization.enableOptical = true
             } else {
