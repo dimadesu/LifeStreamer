@@ -31,6 +31,7 @@ import android.graphics.Rect
 
 class RTMPVideoSource (
     private val exoPlayer: ExoPlayer,
+    private val dispatcherProvider: io.github.thibaultbee.streampack.core.pipelines.IVideoDispatcherProvider
 ) : AbstractPreviewableSource(), IVideoSourceInternal {
     companion object {
         private const val TAG = "RTMPVideoSource"
@@ -569,7 +570,7 @@ class RTMPVideoSource (
 
                 // Create surface processor with SDR profile (most RTMP streams are SDR)
                 val processorFactory = DefaultSurfaceProcessorFactory()
-                surfaceProcessor = processorFactory.create(DynamicRangeProfile.sdr)
+                surfaceProcessor = processorFactory.create(DynamicRangeProfile.sdr, dispatcherProvider)
 
                 // Create input surface that ExoPlayer will render to
                 val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
@@ -693,8 +694,11 @@ class RTMPVideoSource (
     class Factory(
         private val exoPlayer: ExoPlayer,
     ) : IVideoSourceInternal.Factory {
-        override suspend fun create(context: Context): IVideoSourceInternal {
-            val customSrc = RTMPVideoSource(exoPlayer)
+        override suspend fun create(
+            context: Context,
+            dispatcherProvider: io.github.thibaultbee.streampack.core.pipelines.IVideoDispatcherProvider
+        ): IVideoSourceInternal {
+            val customSrc = RTMPVideoSource(exoPlayer, dispatcherProvider)
             return customSrc
         }
 

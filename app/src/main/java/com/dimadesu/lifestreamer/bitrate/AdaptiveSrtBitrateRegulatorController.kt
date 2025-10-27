@@ -20,7 +20,10 @@ class AdaptiveSrtBitrateRegulatorController {
         private val delayTimeInMs: Long = 200, // Moblin updates every 200ms
         private val mode: RegulatorMode = RegulatorMode.MOBLIN_FAST
     ) : BitrateRegulatorController.Factory() {
-        override fun newBitrateRegulatorController(pipelineOutput: IEncodingPipelineOutput): DummyBitrateRegulatorController {
+        override fun newBitrateRegulatorController(
+            pipelineOutput: IEncodingPipelineOutput,
+            coroutineDispatcher: kotlinx.coroutines.CoroutineDispatcher
+        ): DummyBitrateRegulatorController {
             require(pipelineOutput is IConfigurableVideoEncodingPipelineOutput) {
                 "Pipeline output must be an video encoding output"
             }
@@ -68,6 +71,7 @@ class AdaptiveSrtBitrateRegulatorController {
                 videoEncoder,
                 pipelineOutput.endpoint,
                 factory,
+                coroutineDispatcher,
                 bitrateRegulatorConfig,
                 delayTimeInMs
             )
