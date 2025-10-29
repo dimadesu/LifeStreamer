@@ -372,20 +372,31 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         
         // Restore orientation lock IMMEDIATELY in onStart() (before onResume()) to prevent
         // the Activity from rotating when returning from background during streaming.
-        // onStart() is called before the Activity's window is shown, so we can lock
-        // orientation before any rotation animation happens.
+        // Use the Service's saved orientation as the source of truth, since Fragment member
+        // variables can be reset during lifecycle transitions.
         val isInStreamingProcess = previewViewModel.streamStatus.value?.let { status ->
             status == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
             status == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
             status == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
         } ?: false
         
-        val hasRememberedOrientation = rememberedLockedOrientation != null
-        
-        if (isInStreamingProcess || hasRememberedOrientation) {
-            rememberedLockedOrientation?.let { rememberedOrientation ->
-                requireActivity().requestedOrientation = rememberedOrientation
-                Log.d(TAG, "onStart: Restored orientation lock early: $rememberedOrientation (rotation: $rememberedRotation)")
+        if (isInStreamingProcess) {
+            // Get saved orientation from Service (source of truth)
+            val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+            if (savedRotation != null) {
+                val orientation = when (savedRotation) {
+                    android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                    android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                    else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+                requireActivity().requestedOrientation = orientation
+                rememberedLockedOrientation = orientation
+                rememberedRotation = savedRotation
+                Log.d(TAG, "onStart: Restored orientation from Service: $orientation (rotation: $savedRotation)")
+            } else {
+                Log.d(TAG, "onStart: No saved orientation in Service, will lock in observer")
             }
         }
         
@@ -412,33 +423,33 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
-            // This ensures preview restarts with the correct orientation already locked
-            val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
-            val hasRememberedOrientation = rememberedLockedOrientation != null
+            // Get saved orientation from Service (source of truth)
             val currentStatus = previewViewModel.streamStatus.value
             val isInStreamingProcess = currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
             
-            // If we have a remembered orientation or are in any streaming-related state, restore lock
-            // Note: This is a secondary check - primary lock happens in onStart()
-            if (isCurrentlyStreaming || hasRememberedOrientation || isInStreamingProcess) {
-                Log.d(TAG, "onResume: Secondary check - restoring orientation (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, status: $currentStatus)")
+            if (isInStreamingProcess) {
+                Log.d(TAG, "onResume: Secondary check - restoring orientation from Service (status: $currentStatus)")
                 
-                // Restore the exact orientation that was locked when streaming started
-                // This prevents UI rotation when returning from background during streaming
-                // (onStart() should have already done this, but we re-apply it here as a safety check)
-                rememberedLockedOrientation?.let { rememberedOrientation ->
-                    requireActivity().requestedOrientation = rememberedOrientation
-                    
-                    // Also restore the service's rotation lock using the stored rotation value
-                    val rotation = rememberedRotation ?: android.view.Surface.ROTATION_0
-                    previewViewModel.service?.lockStreamRotation(rotation)
-                    Log.d(TAG, "Restored remembered orientation: $rememberedOrientation (rotation: $rotation)")
-                } ?: run {
-                    // Fallback to locking current orientation if we don't have a remembered one
+                // Get saved rotation from Service (survives Fragment lifecycle)
+                val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+                if (savedRotation != null) {
+                    val orientation = when (savedRotation) {
+                        android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                        android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                        else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    }
+                    requireActivity().requestedOrientation = orientation
+                    rememberedLockedOrientation = orientation
+                    rememberedRotation = savedRotation
+                    Log.d(TAG, "Restored orientation from Service: $orientation (rotation: $savedRotation)")
+                } else {
+                    // Fallback to locking current orientation if we don't have a saved one
                     lockOrientation()
-                    Log.d(TAG, "No remembered orientation, locked to current position")
+                    Log.d(TAG, "No saved orientation in Service, locked to current position")
                 }
                 
                 // SECOND: Give the orientation change time to propagate before restarting preview
@@ -462,7 +473,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
 
             // THIRD: Handle service foreground recovery if streaming
-            if (isCurrentlyStreaming || hasRememberedOrientation || isInStreamingProcess) {
+            if (isInStreamingProcess) {
                 previewViewModel.service?.let { service ->
                     try {
                         service.handleForegroundRecovery()
