@@ -459,48 +459,42 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             Log.d(TAG, "Preview already bound to streamer - skipping set")
             assignedStreamer = true
         } else {
-            // Defensive check: PreviewView will throw if the new source is already
-            // previewing. Avoid setting the streamer in that case because the
-            // preview is already active and managed elsewhere (service/background).
-            val newSource = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
-            if (newSource?.isPreviewingFlow?.value == true) {
-                Log.w(TAG, "New streamer's video source is already previewing - skipping set to avoid exception")
-            } else {
-                // Wait till streamer exists to set it to the SurfaceView. Setting the
-                // `streamer` property requires the PreviewView to have its internal
-                // coroutine scope (set in onAttachedToWindow). If the view is not yet
-                // attached, posting the assignment ensures it happens on the UI
-                // thread after attachment, preventing "lifecycleScope is not
-                // available" errors.
-                try {
-                    if (preview.isAttachedToWindow) {
-                        preview.streamer = streamer
-                        assignedStreamer = true
-                    } else {
-                        preview.post {
-                            try {
-                                preview.streamer = streamer
-                                Log.d(TAG, "Preview streamer assigned via post after attach")
-                                // Start preview asynchronously after assignment
-                                lifecycleScope.launch {
-                                    try {
-                                        startPreviewWhenReady(preview, streamer, posted = true)
-                                    } catch (t: Throwable) {
-                                        Log.w(TAG, "Posted preview start failed: ${t.message}")
-                                    }
+            // Set the streamer on the preview. Since all sources support dual output
+            // (preview + encoder), we can safely set the preview even if streaming is active.
+            // Wait till streamer exists to set it to the SurfaceView. Setting the
+            // `streamer` property requires the PreviewView to have its internal
+            // coroutine scope (set in onAttachedToWindow). If the view is not yet
+            // attached, posting the assignment ensures it happens on the UI
+            // thread after attachment, preventing "lifecycleScope is not
+            // available" errors.
+            try {
+                if (preview.isAttachedToWindow) {
+                    preview.streamer = streamer
+                    assignedStreamer = true
+                } else {
+                    preview.post {
+                        try {
+                            preview.streamer = streamer
+                            Log.d(TAG, "Preview streamer assigned via post after attach")
+                            // Start preview asynchronously after assignment
+                            lifecycleScope.launch {
+                                try {
+                                    startPreviewWhenReady(preview, streamer, posted = true)
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, "Posted preview start failed: ${t.message}")
                                 }
-                            } catch (t: Throwable) {
-                                Log.w(TAG, "Failed to set streamer on preview (posted): ${t.message}")
                             }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to set streamer on preview (posted): ${t.message}")
                         }
-                        // We optimistically mark as assigned since assignment will occur shortly
-                        assignedStreamer = true
                     }
-                } catch (e: IllegalArgumentException) {
-                    // Defensive catch: if PreviewView rejects the streamer because the
-                    // source is already previewing, log and continue without crashing.
-                    Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
+                    // We optimistically mark as assigned since assignment will occur shortly
+                    assignedStreamer = true
                 }
+            } catch (e: IllegalArgumentException) {
+                // Defensive catch: if PreviewView rejects the streamer for any reason,
+                // log and continue without crashing.
+                Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
             }
         }
 
@@ -548,12 +542,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     // This is normal during activity resume, so keep retrying
                     Log.d(TAG, "Preview or window not visible yet (view=$isVisible, window=$windowVisible, attempt=$attempt) - will retry")
                 } else {
-                    val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
-                    if (sourceAlreadyPreviewing) {
-                        Log.d(TAG, "Source is already previewing - skipping startPreview${if (posted) " (posted)" else ""}")
-                        started = true
-                        break
-                    }
+                    // Always try to start preview, even if source reports it's already previewing
+                    // This is important after returning from background when the surface was recreated
+                    // The camera session needs to be updated with the new surface reference
                     try {
                         preview.startPreview()
                         Log.d(TAG, "Preview started (${if (posted) "posted " else ""}attempt=$attempt)")
