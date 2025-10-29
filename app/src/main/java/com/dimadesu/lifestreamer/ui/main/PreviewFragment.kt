@@ -149,12 +149,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             if (isStreaming) {
                 // Check if Service already has a saved orientation (lifecycle restoration)
                 // If so, don't lock again - onStart()/onResume() will restore it
-                val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
-                if (savedRotation == null && rememberedLockedOrientation == null) {
-                    // Only lock if this is a NEW stream (not lifecycle restoration)
+                if (shouldLockOrientation("isStreamingLiveData observer")) {
                     lockOrientation()
-                } else {
-                    Log.d(TAG, "Already have saved orientation (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
                 }
             } else {
                 // Only unlock if we're truly stopped AND not reconnecting
@@ -176,23 +172,17 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     com.dimadesu.lifestreamer.models.StreamStatus.STARTING -> {
                         // Lock orientation as soon as we start attempting to stream
                         // But check Service first - if already saved, don't re-lock
-                        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
-                        if (savedRotation == null && rememberedLockedOrientation == null) {
+                        if (shouldLockOrientation("STARTING")) {
                             lockOrientation()
                             Log.d(TAG, "Locked orientation during STARTING")
-                        } else {
-                            Log.d(TAG, "Already have saved orientation during STARTING, not re-locking")
                         }
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING -> {
                         // Ensure orientation stays locked during reconnection
                         // But check Service first - if already saved, don't re-lock
-                        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
-                        if (savedRotation == null && rememberedLockedOrientation == null) {
+                        if (shouldLockOrientation("CONNECTING")) {
                             lockOrientation()
                             Log.d(TAG, "Locked orientation during CONNECTING/reconnection")
-                        } else {
-                            Log.d(TAG, "Already have saved orientation during CONNECTING, not re-locking")
                         }
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.NOT_STREAMING,
@@ -209,12 +199,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         // Orientation should already be locked by isStreamingLiveData observer
                         // This is just a safety check - but DON'T re-lock if we already have one
                         // Check both Service and Fragment to avoid overwriting during lifecycle
-                        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
-                        if (savedRotation == null && rememberedLockedOrientation == null) {
+                        if (shouldLockOrientation("STREAMING safety check")) {
                             lockOrientation()
                             Log.d(TAG, "Safety lock during STREAMING")
-                        } else {
-                            Log.d(TAG, "Already have saved orientation during STREAMING (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
                         }
                     }
                 }
@@ -293,6 +280,21 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to update bitrate text: ${t.message}")
             }
+        }
+    }
+
+    /**
+     * Helper to check if we should lock orientation for a NEW stream.
+     * Returns true if orientation should be locked (no saved state exists).
+     * Logs appropriate message if orientation is already saved.
+     */
+    private fun shouldLockOrientation(context: String): Boolean {
+        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+        return if (savedRotation == null && rememberedLockedOrientation == null) {
+            true // No saved orientation, proceed with lock
+        } else {
+            Log.d(TAG, "$context: Already have saved orientation (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
+            false
         }
     }
 
