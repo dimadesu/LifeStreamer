@@ -545,6 +545,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
     
     /**
+     * Explicitly update the service streaming status.
+     * Used by ViewModel to force status changes (e.g., when cancelling reconnection).
+     */
+    fun updateServiceStatus(status: StreamStatus) {
+        try {
+            _serviceStreamStatus.tryEmit(status)
+            Log.i(TAG, "Service status explicitly updated to: $status")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update service status: ${e.message}")
+        }
+    }
+    
+    /**
      * Explicitly unlock stream rotation when streaming truly stops (not during reconnection).
      * This should be called by the ViewModel when the stream is fully stopped.
      */

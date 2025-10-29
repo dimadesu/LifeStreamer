@@ -223,6 +223,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var rtmpBufferingStartTime = 0L
     private var bufferingCheckJob: kotlinx.coroutines.Job? = null
     private var isHandlingDisconnection = false // Guard flag to prevent duplicate disconnection handling
+    private var hasStartedStreamingInThisSession = false // Track if THIS ViewModel instance has started streaming
 
     // Streamer states
     val isStreamingLiveData: LiveData<Boolean>
@@ -340,17 +341,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
 
             Log.i(TAG, "startServiceStreaming: serviceStreamer available, calling open()...")
+            Log.d(TAG, "startServiceStreaming: URI = ${descriptor.uri}")
+            Log.d(TAG, "startServiceStreaming: Thread = ${Thread.currentThread().name}")
+            Log.d(TAG, "startServiceStreaming: Time = ${System.currentTimeMillis()}")
 
             // Add timeout to prevent hanging when network connection fails
-            // Don't use NonCancellable here - we need the timeout to work for network failures
+            // CRITICAL: Run open() on IO dispatcher to avoid main thread network restrictions
+            // on fresh app launch. Android may block/throttle network on main thread.
             try {
+                Log.d(TAG, "startServiceStreaming: Calling open() at ${System.currentTimeMillis()}")
                 withTimeout(5000) { // 5 second timeout
-                    currentStreamer.open(descriptor)
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        Log.d(TAG, "startServiceStreaming: open() running on thread: ${Thread.currentThread().name}")
+                        currentStreamer.open(descriptor)
+                    }
                 }
-                Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
+                Log.i(TAG, "startServiceStreaming: open() completed at ${System.currentTimeMillis()}, calling startStream()...")
             } catch (e: TimeoutCancellationException) {
-                Log.e(TAG, "startServiceStreaming: open() timed out after 5 seconds")
+                Log.e(TAG, "startServiceStreaming: open() timed out after 5 seconds at ${System.currentTimeMillis()}")
+                Log.e(TAG, "startServiceStreaming: Timeout exception: ${e.message}")
                 throw e // Re-throw to be caught by outer catch block
+            } catch (e: Exception) {
+                Log.e(TAG, "startServiceStreaming: open() failed with exception: ${e.javaClass.simpleName}: ${e.message}")
+                throw e
             }
             
             // Wait for encoders to be initialized after open
@@ -601,6 +614,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                     streamerFlow.value = serviceStreamer
                     _serviceReady.value = true
+                    
+                    // Log initial service state for debugging
+                    val initialServiceStatus = binder.serviceStreamStatus().value
+                    val initialStreamingState = binder.streamer.isStreamingFlow.value
+                    Log.i(TAG, "Service connected - Initial service status: $initialServiceStatus, isStreaming: $initialStreamingState")
+                    
                     // Collect service-provided stream status and map it to ViewModel status
                     try {
                         val svcStatusFlow = binder.serviceStreamStatus()
@@ -609,6 +628,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 try {
                                     // The service now publishes the shared StreamStatus enum; assign directly
                                     _streamStatus.value = svcStatus
+                                    Log.d(TAG, "Service status changed: $svcStatus")
                                 } catch (t: Throwable) {
                                     Log.w(TAG, "Failed to map service status: ${t.message}")
                                 }
@@ -693,14 +713,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         Log.i(TAG, "Initializing streamer sources - Audio enabled: ${currentStreamer.withAudio}, Video enabled: ${currentStreamer.withVideo}")
 
-        // Set audio source and video source only if not streaming
-        if (currentStreamer.withAudio) {
-            Log.i(TAG, "Audio source is enabled. Setting audio based on video source")
-            setAudioSourceBasedOnVideoSource()
-        } else {
-            Log.i(TAG, "Audio source is disabled")
-        }
-
+        // IMPORTANT: Set VIDEO source FIRST, then audio
+        // Audio source selection depends on video source type, so video must be initialized first
         if (currentStreamer.withVideo) {
             if (ActivityCompat.checkSelfPermission(
                     application,
@@ -709,11 +723,34 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             ) {
                 Log.i(TAG, "Camera permission granted, setting video source")
                 currentStreamer.setVideoSource(CameraSourceFactory())
+                
+                // Wait for video source to be actually set before configuring audio
+                Log.d(TAG, "Waiting for video source to be initialized...")
+                val videoSourceReady = kotlinx.coroutines.withTimeoutOrNull(3000) {
+                    while (currentStreamer.videoInput?.sourceFlow?.value == null) {
+                        kotlinx.coroutines.delay(50)
+                    }
+                    true
+                } ?: false
+                
+                if (videoSourceReady) {
+                    Log.i(TAG, "Video source initialized: ${currentStreamer.videoInput?.sourceFlow?.value?.javaClass?.simpleName}")
+                } else {
+                    Log.w(TAG, "Video source initialization timed out after 3s")
+                }
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }
         } else {
             Log.i(TAG, "Video source is disabled")
+        }
+
+        // Now set audio source based on the video source that was just initialized
+        if (currentStreamer.withAudio) {
+            Log.i(TAG, "Audio source is enabled. Setting audio based on video source")
+            setAudioSourceBasedOnVideoSource()
+        } else {
+            Log.i(TAG, "Audio source is disabled")
         }
 
         // Set up flow observers for the service-based streamer
@@ -792,14 +829,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         if (isStreaming) {
                             _streamStatus.value = StreamStatus.STREAMING
+                            hasStartedStreamingInThisSession = true // Mark that we've started streaming
                         } else {
                             // Stream stopped - check if this was unexpected (should trigger reconnection)
                             val wasStreaming = previousStatus == StreamStatus.STREAMING || 
                                               previousStatus == StreamStatus.CONNECTING
                             
-                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=$userStoppedManually, isReconnecting=$isReconnecting")
+                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=$userStoppedManually, isReconnecting=$isReconnecting, hasStartedInSession=$hasStartedStreamingInThisSession")
                             
-                            if (wasStreaming && !userStoppedManually && !isReconnecting) {
+                            // Only auto-reconnect if THIS ViewModel instance has started streaming
+                            // This prevents fresh ViewModel from auto-reconnecting to stale service state
+                            if (wasStreaming && !userStoppedManually && !isReconnecting && hasStartedStreamingInThisSession) {
                                 // Unexpected disconnection - trigger reconnection
                                 Log.w(TAG, "Unexpected stream stop detected - triggering reconnection")
                                 handleDisconnection("Stream stopped unexpectedly", isInitialConnection = false)
@@ -987,9 +1027,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun initializeVideoSource() {
         viewModelScope.launch {
+            Log.d(TAG, "initializeVideoSource() called")
             val currentStreamer = serviceStreamer
             if (currentStreamer?.videoInput?.sourceFlow?.value == null) {
+                Log.i(TAG, "Setting camera source (was null)")
                 currentStreamer?.setVideoSource(CameraSourceFactory())
+                Log.i(TAG, "Camera source set successfully")
             } else {
                 Log.i(TAG, "Camera source already set")
             }
@@ -1204,6 +1247,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     fun stopStream() {
+        // Capture the reconnecting state BEFORE clearing it
+        val wasReconnecting = isReconnecting
+        
         // Set userStoppedManually flag FIRST, before acquiring mutex
         // This allows reconnection logic to see the stop request immediately
         userStoppedManually = true
@@ -1211,7 +1257,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         isReconnecting = false
         _reconnectionStatusLiveData.value = null
         _streamStatus.value = StreamStatus.NOT_STREAMING // Clear UI status immediately
-        Log.i(TAG, "stopStream() - Set userStoppedManually=true and status=NOT_STREAMING (before mutex)")
+        Log.i(TAG, "stopStream() - Set userStoppedManually=true and status=NOT_STREAMING (before mutex), wasReconnecting=$wasReconnecting")
         
         viewModelScope.launch {
             streamOperationMutex.withLock {
@@ -1226,10 +1272,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 val currentStreamingState = currentStreamer.isStreamingFlow.value
                 val currentStatus = _streamStatus.value
-                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isReconnecting")
+                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, wasReconnecting: $wasReconnecting")
 
-                // If reconnecting, always cancel reconnection regardless of streaming state
-                if (isReconnecting) {
+                // If was reconnecting, always cancel reconnection regardless of streaming state
+                if (wasReconnecting) {
                     Log.i(TAG, "Cancelling active reconnection...")
                     reconnectTimer.stop()
                     isReconnecting = false
@@ -1242,6 +1288,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "Reconnection cancelled - endpoint closed")
                     } catch (e: Exception) {
                         Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                    }
+                    
+                    // CRITICAL: Tell the service to stop streaming and reset its status
+                    // This ensures when UI reconnects, it sees NOT_STREAMING instead of CONNECTING
+                    try {
+                        currentStreamer.stopStream()
+                        Log.i(TAG, "Streamer stopStream() called during reconnection cancel")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error calling stopStream during reconnection cancel: ${e.message}")
+                    }
+                    
+                    // Explicitly tell the service to reset its status to NOT_STREAMING
+                    // Even if stopStream() didn't trigger onStreamingStop(), we force the status
+                    try {
+                        service?.updateServiceStatus(StreamStatus.NOT_STREAMING)
+                        Log.i(TAG, "Service status explicitly reset to NOT_STREAMING")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error resetting service status: ${e.message}")
                     }
                     
                     // Set status to NOT_STREAMING and mark as user stopped
