@@ -555,6 +555,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     // This is normal during activity resume, so keep retrying
                     Log.d(TAG, "Preview or window not visible yet (view=$isVisible, window=$windowVisible, attempt=$attempt) - will retry")
                 } else {
+                    // Wait a bit longer on first attempt to give the PreviewView's surfaceFlow time to update
+                    // This prevents race condition where surface is recreated but flow hasn't updated yet
+                    if (attempt == 1) {
+                        Log.d(TAG, "First attempt - waiting for surface flow to update")
+                        delay(150)
+                    }
+                    
                     // Always try to start preview, even if source reports it's already previewing
                     // This is important after returning from background when the surface was recreated
                     // The camera session needs to be updated with the new surface reference
