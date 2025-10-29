@@ -534,9 +534,17 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             try {
                 val isAttached = preview.isAttachedToWindow
                 val hasSize = preview.width > 0 && preview.height > 0
+                val isVisible = preview.visibility == View.VISIBLE
+                val windowVisible = preview.windowVisibility == View.VISIBLE
+                
                 if (!isAttached || !hasSize) {
                     val which = if (posted) "posted start" else "start"
                     Log.d(TAG, "Preview not attached or has no size ($which attempt=$attempt) - will retry")
+                } else if (!isVisible || !windowVisible) {
+                    // Don't try to start preview if view or window is not visible
+                    // This prevents crashes when Surface is destroyed during window hide
+                    Log.d(TAG, "Preview or window not visible (view=$isVisible, window=$windowVisible) - aborting preview start")
+                    break
                 } else {
                     val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
                     if (sourceAlreadyPreviewing) {
@@ -549,6 +557,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         Log.d(TAG, "Preview started (${if (posted) "posted " else ""}attempt=$attempt)")
                         started = true
                         break
+                    } catch (e: IllegalArgumentException) {
+                        // Surface was abandoned - likely window went invisible
+                        if (e.message?.contains("Surface was abandoned") == true) {
+                            Log.w(TAG, "Surface abandoned during preview start - view likely went invisible")
+                            break
+                        }
+                        Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${e.message}")
                     } catch (t: Throwable) {
                         Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${t.message}")
                     }
