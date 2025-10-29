@@ -394,25 +394,41 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 // This prevents UI rotation when returning from background during streaming
                 rememberedLockedOrientation?.let { rememberedOrientation ->
                     requireActivity().requestedOrientation = rememberedOrientation
-                    Log.d(TAG, "Restored remembered orientation: $rememberedOrientation")
+                    
+                    // Also restore the service's rotation lock to prevent sensor-based rotation changes
+                    val rotation = when (rememberedOrientation) {
+                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT -> android.view.Surface.ROTATION_0
+                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE -> android.view.Surface.ROTATION_90
+                        ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT -> android.view.Surface.ROTATION_180
+                        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE -> android.view.Surface.ROTATION_270
+                        else -> android.view.Surface.ROTATION_0
+                    }
+                    previewViewModel.service?.lockStreamRotation(rotation)
+                    Log.d(TAG, "Restored remembered orientation: $rememberedOrientation (rotation: $rotation)")
                 } ?: run {
                     // Fallback to locking current orientation if we don't have a remembered one
                     lockOrientation()
                     Log.d(TAG, "No remembered orientation, locked to current position")
                 }
+                
+                // SECOND: Give the orientation change time to propagate before restarting preview
+                // This prevents the preview from starting in the wrong orientation
+                lifecycleScope.launch {
+                    delay(100) // Small delay to allow orientation to stabilize
+                    try {
+                        inflateStreamerPreview()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+                    }
+                }
             } else {
                 Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
-            }
-            
-            // SECOND: Now restart preview with orientation already locked
-            // Use the same guarded preview inflation logic to avoid races when the
-            // activity is re-created or the SurfaceView is being detached/attached
-            // (for example when tapping the notification). inflateStreamerPreview()
-            // sets the streamer and starts the preview only when safe.
-            try {
-                inflateStreamerPreview()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+                // Not streaming, start preview immediately
+                try {
+                    inflateStreamerPreview()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+                }
             }
 
             // THIRD: Handle service foreground recovery if streaming
