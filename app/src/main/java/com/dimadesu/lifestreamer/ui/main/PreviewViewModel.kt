@@ -1214,7 +1214,33 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 val currentStreamingState = currentStreamer.isStreamingFlow.value
                 val currentStatus = _streamStatus.value
-                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus")
+                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isReconnecting")
+
+                // If reconnecting, always cancel reconnection regardless of streaming state
+                if (isReconnecting) {
+                    Log.i(TAG, "Cancelling active reconnection...")
+                    reconnectTimer.stop()
+                    isReconnecting = false
+                    _reconnectionStatusLiveData.value = null
+                    _isTryingConnectionLiveData.postValue(false)
+                    
+                    // Close endpoint to abort any pending connection
+                    try {
+                        currentStreamer.close()
+                        Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                    }
+                    
+                    // Set status to NOT_STREAMING and mark as user stopped
+                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    userStoppedManually = true
+                    Log.i(TAG, "Reconnection cancelled by user")
+                    
+                    // Unlock stream rotation since we're truly stopped
+                    service?.unlockStreamRotation()
+                    return@launch
+                }
 
                 // If already stopped and not in CONNECTING state, don't do anything
                 if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
