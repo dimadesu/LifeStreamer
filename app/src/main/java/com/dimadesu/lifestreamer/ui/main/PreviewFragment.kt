@@ -67,9 +67,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         PreviewViewModelFactory(requireActivity().application)
     }
 
-    // Remember the orientation that was locked when streaming started
+    // Remember the orientation AND rotation that was locked when streaming started
     // This allows us to restore the exact same orientation when returning from background
     private var rememberedLockedOrientation: Int? = null
+    private var rememberedRotation: Int? = null
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
@@ -290,6 +291,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
         
         rememberedLockedOrientation = currentOrientation
+        rememberedRotation = rotation  // Store the rotation value too
         requireActivity().requestedOrientation = currentOrientation
         Log.d(TAG, "Orientation locked to: $currentOrientation (rotation: $rotation)")
         
@@ -304,6 +306,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
          * for the next stream.
          */
         rememberedLockedOrientation = null
+        rememberedRotation = null  // Clear rotation too
         requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
         Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
     }
@@ -395,14 +398,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 rememberedLockedOrientation?.let { rememberedOrientation ->
                     requireActivity().requestedOrientation = rememberedOrientation
                     
-                    // Also restore the service's rotation lock to prevent sensor-based rotation changes
-                    val rotation = when (rememberedOrientation) {
-                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT -> android.view.Surface.ROTATION_0
-                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE -> android.view.Surface.ROTATION_90
-                        ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT -> android.view.Surface.ROTATION_180
-                        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE -> android.view.Surface.ROTATION_270
-                        else -> android.view.Surface.ROTATION_0
-                    }
+                    // Also restore the service's rotation lock using the stored rotation value
+                    val rotation = rememberedRotation ?: android.view.Surface.ROTATION_0
                     previewViewModel.service?.lockStreamRotation(rotation)
                     Log.d(TAG, "Restored remembered orientation: $rememberedOrientation (rotation: $rotation)")
                 } ?: run {
