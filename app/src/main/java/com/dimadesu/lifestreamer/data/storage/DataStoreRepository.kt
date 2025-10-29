@@ -160,7 +160,8 @@ class DataStoreRepository(
                     host = ip,
                     port = port,
                     streamId = streamId,
-                    passPhrase = passPhrase
+                    passPhrase = passPhrase,
+                    connectionTimeout = 3000 // 3 second connection timeout for SRT handshake
                 )
             }
 

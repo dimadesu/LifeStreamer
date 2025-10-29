@@ -151,6 +151,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Override onCreate to use both camera and mediaProjection service types
      */
     override fun onCreate() {
+        // Disable StrictMode for network operations to prevent blocking on first SRT connection
+        // Android's StrictMode can block synchronous network calls on fresh app launch,
+        // causing the first connection to timeout while subsequent connections succeed
+        android.os.StrictMode.setThreadPolicy(
+            android.os.StrictMode.ThreadPolicy.Builder()
+                .permitAll()
+                .build()
+        )
+        
         // We intentionally avoid calling super.onCreate() here because the base
         // StreamerService starts a foreground service with the mediaProjection type
         // by default. We want to keep the change local to this app and ensure the
