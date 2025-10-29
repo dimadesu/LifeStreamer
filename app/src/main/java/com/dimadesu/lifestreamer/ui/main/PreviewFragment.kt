@@ -51,7 +51,6 @@ import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
-import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import io.github.thibaultbee.streampack.core.interfaces.IStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewableSource
@@ -68,9 +67,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         PreviewViewModelFactory(requireActivity().application)
     }
 
-    // Remember the orientation that was locked when streaming started
+    // Remember the orientation AND rotation that was locked when streaming started
     // This allows us to restore the exact same orientation when returning from background
     private var rememberedLockedOrientation: Int? = null
+    private var rememberedRotation: Int? = null
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
@@ -147,7 +147,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
             Log.d(TAG, "Streaming state changed to: $isStreaming, status: $currentStatus, reconnecting: $isReconnecting")
             if (isStreaming) {
-                lockOrientation()
+                // Check if Service already has a saved orientation (lifecycle restoration)
+                // If so, don't lock again - onStart()/onResume() will restore it
+                if (shouldLockOrientation("isStreamingLiveData observer")) {
+                    lockOrientation()
+                }
             } else {
                 // Only unlock if we're truly stopped AND not reconnecting
                 val shouldStayLocked = currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
@@ -167,14 +171,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 when (status) {
                     com.dimadesu.lifestreamer.models.StreamStatus.STARTING -> {
                         // Lock orientation as soon as we start attempting to stream
-                        if (rememberedLockedOrientation == null) {
+                        // But check Service first - if already saved, don't re-lock
+                        if (shouldLockOrientation("STARTING")) {
                             lockOrientation()
                             Log.d(TAG, "Locked orientation during STARTING")
                         }
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING -> {
                         // Ensure orientation stays locked during reconnection
-                        if (rememberedLockedOrientation == null) {
+                        // But check Service first - if already saved, don't re-lock
+                        if (shouldLockOrientation("CONNECTING")) {
                             lockOrientation()
                             Log.d(TAG, "Locked orientation during CONNECTING/reconnection")
                         }
@@ -191,8 +197,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.STREAMING -> {
                         // Orientation should already be locked by isStreamingLiveData observer
-                        // This is just a safety check
-                        if (rememberedLockedOrientation == null) {
+                        // This is just a safety check - but DON'T re-lock if we already have one
+                        // Check both Service and Fragment to avoid overwriting during lifecycle
+                        if (shouldLockOrientation("STREAMING safety check")) {
                             lockOrientation()
                             Log.d(TAG, "Safety lock during STREAMING")
                         }
@@ -205,12 +212,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         lifecycleScope.launch {
             previewViewModel.streamStatus.collect { status ->
                 Log.d(TAG, "Stream status changed to: $status")
+                // Check if we're reconnecting - if so, keep button as "Stop"
+                val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
+                
                 when (status) {
                     StreamStatus.ERROR, StreamStatus.NOT_STREAMING -> {
-                        // Reset button to "Start" state when error occurs or stream stops
-                        if (binding.liveButton.isChecked) {
+                        // Only reset button to "Start" if NOT reconnecting
+                        if (!isReconnecting && binding.liveButton.isChecked) {
                             Log.d(TAG, "Stream error/stopped - resetting button to Start")
                             binding.liveButton.isChecked = false
+                        } else if (isReconnecting && !binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream stopped but reconnecting - keeping button as Stop")
+                            binding.liveButton.isChecked = true
                         }
                     }
                     StreamStatus.STARTING, StreamStatus.CONNECTING -> {
@@ -242,50 +255,20 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.e(TAG, "Streamer is not a ICoroutineStreamer")
             }
             if (streamer is IWithVideoSource) {
-                    val videoSource = streamer.videoInput?.sourceFlow?.value
-                    val isRtmpSource = videoSource is RTMPVideoSource
-
-                    // For RTMP sources, we can enable preview alongside streaming
-                    // thanks to the surface processor that handles dual output
-                    if (streamer.isStreamingFlow.value == true && !isRtmpSource) {
-                        Log.i(TAG, "Streamer is streaming - skipping preview while live (non-RTMP source)")
-                        // Ensure preview view has no streamer assigned while streaming
-                        try {
-                            if (binding.preview.streamer == streamer) {
-                                binding.preview.streamer = null
-                            }
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to clear preview streamer while streaming: ${t.message}")
-                        }
-                    } else {
-                        if (isRtmpSource && streamer.isStreamingFlow.value == true) {
-                            Log.i(TAG, "RTMP source streaming - preview enabled alongside streaming")
-                        }
-                        inflateStreamerPreview(streamer)
-                    }
+                inflateStreamerPreview(streamer)
             } else {
                 Log.e(TAG, "Can't start preview, streamer is not a IVideoStreamer")
             }
         }
 
-        // Rebind preview when streaming stops so the UI preview returns to normal
-        // For RTMP sources, preview continues during streaming, so no need to rebind
+        // Rebind preview when streaming stops to ensure preview is active
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
             if (isStreaming == false) {
                 Log.d(TAG, "Streaming stopped - re-attaching preview if possible")
-                val streamer = previewViewModel.streamerLiveData.value
-                val videoSource = (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
-                val isRtmpSource = videoSource is RTMPVideoSource
-
-                if (!isRtmpSource) {
-                    // Only rebind for non-RTMP sources since RTMP sources maintain preview during streaming
-                    try {
-                        inflateStreamerPreview()
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
-                    }
-                } else {
-                    Log.d(TAG, "RTMP source - preview was maintained during streaming, no rebind needed")
+                try {
+                    inflateStreamerPreview()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
                 }
             }
         }
@@ -297,6 +280,21 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to update bitrate text: ${t.message}")
             }
+        }
+    }
+
+    /**
+     * Helper to check if we should lock orientation for a NEW stream.
+     * Returns true if orientation should be locked (no saved state exists).
+     * Logs appropriate message if orientation is already saved.
+     */
+    private fun shouldLockOrientation(context: String): Boolean {
+        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+        return if (savedRotation == null && rememberedLockedOrientation == null) {
+            true // No saved orientation, proceed with lock
+        } else {
+            Log.d(TAG, "$context: Already have saved orientation (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
+            false
         }
     }
 
@@ -321,6 +319,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
         
         rememberedLockedOrientation = currentOrientation
+        rememberedRotation = rotation  // Store the rotation value too
         requireActivity().requestedOrientation = currentOrientation
         Log.d(TAG, "Orientation locked to: $currentOrientation (rotation: $rotation)")
         
@@ -335,6 +334,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
          * for the next stream.
          */
         rememberedLockedOrientation = null
+        rememberedRotation = null  // Clear rotation too
         requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
         Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
     }
@@ -386,6 +386,37 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     @SuppressLint("MissingPermission")
     override fun onStart() {
         super.onStart()
+        
+        // Restore orientation lock IMMEDIATELY in onStart() (before onResume()) to prevent
+        // the Activity from rotating when returning from background during streaming.
+        // Use the Service's saved orientation as the source of truth, since Fragment member
+        // variables can be reset during lifecycle transitions.
+        val isInStreamingProcess = previewViewModel.streamStatus.value?.let { status ->
+            status == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
+            status == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
+            status == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
+        } ?: false
+        
+        if (isInStreamingProcess) {
+            // Get saved orientation from Service (source of truth)
+            val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+            if (savedRotation != null) {
+                val orientation = when (savedRotation) {
+                    android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                    android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                    else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+                requireActivity().requestedOrientation = orientation
+                rememberedLockedOrientation = orientation
+                rememberedRotation = savedRotation
+                Log.d(TAG, "onStart: Restored orientation from Service: $orientation (rotation: $savedRotation)")
+            } else {
+                Log.d(TAG, "onStart: No saved orientation in Service, will lock in observer")
+            }
+        }
+        
         requestCameraAndMicrophonePermissions()
     }
 
@@ -407,42 +438,59 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         super.onResume()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
-        // Since we no longer stop preview in onPause(), the preview should still be running
-        // We only need to ensure preview is started if it's not already running
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            // Use the same guarded preview inflation logic to avoid races when the
-            // activity is re-created or the SurfaceView is being detached/attached
-            // (for example when tapping the notification). inflateStreamerPreview()
-            // sets the streamer and starts the preview only when safe.
-            try {
-                inflateStreamerPreview()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
-            }
-
-            // Re-request audio focus / handle foreground recovery if streaming
-            val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
-            val hasRememberedOrientation = rememberedLockedOrientation != null
+            // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
+            // Get saved orientation from Service (source of truth)
             val currentStatus = previewViewModel.streamStatus.value
             val isInStreamingProcess = currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
             
-            // If we have a remembered orientation or are in any streaming-related state, restore lock
-            if (isCurrentlyStreaming || hasRememberedOrientation || isInStreamingProcess) {
-                Log.d(TAG, "App returned to foreground while streaming/connecting - handling recovery (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, status: $currentStatus)")
+            if (isInStreamingProcess) {
+                Log.d(TAG, "onResume: Secondary check - restoring orientation from Service (status: $currentStatus)")
                 
-                // Restore the exact orientation that was locked when streaming started
-                // This prevents UI rotation when returning from background during streaming
-                rememberedLockedOrientation?.let { rememberedOrientation ->
-                    requireActivity().requestedOrientation = rememberedOrientation
-                    Log.d(TAG, "Restored remembered orientation: $rememberedOrientation")
-                } ?: run {
-                    // Fallback to locking current orientation if we don't have a remembered one
+                // Get saved rotation from Service (survives Fragment lifecycle)
+                val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+                if (savedRotation != null) {
+                    val orientation = when (savedRotation) {
+                        android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                        android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                        else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    }
+                    requireActivity().requestedOrientation = orientation
+                    rememberedLockedOrientation = orientation
+                    rememberedRotation = savedRotation
+                    Log.d(TAG, "Restored orientation from Service: $orientation (rotation: $savedRotation)")
+                } else {
+                    // Fallback to locking current orientation if we don't have a saved one
                     lockOrientation()
-                    Log.d(TAG, "No remembered orientation, locked to current position")
+                    Log.d(TAG, "No saved orientation in Service, locked to current position")
                 }
                 
+                // SECOND: Give the orientation change time to propagate before restarting preview
+                // This prevents the preview from starting in the wrong orientation
+                lifecycleScope.launch {
+                    delay(100) // Small delay to allow orientation to stabilize
+                    try {
+                        inflateStreamerPreview()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+                    }
+                }
+            } else {
+                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
+                // Not streaming, start preview immediately
+                try {
+                    inflateStreamerPreview()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+                }
+            }
+
+            // THIRD: Handle service foreground recovery if streaming
+            if (isInStreamingProcess) {
                 previewViewModel.service?.let { service ->
                     try {
                         service.handleForegroundRecovery()
@@ -451,8 +499,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         Log.w(TAG, "Foreground recovery failed: ${t.message}")
                     }
                 }
-            } else {
-                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
             }
         }
     }
@@ -487,48 +533,42 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             Log.d(TAG, "Preview already bound to streamer - skipping set")
             assignedStreamer = true
         } else {
-            // Defensive check: PreviewView will throw if the new source is already
-            // previewing. Avoid setting the streamer in that case because the
-            // preview is already active and managed elsewhere (service/background).
-            val newSource = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
-            if (newSource?.isPreviewingFlow?.value == true) {
-                Log.w(TAG, "New streamer's video source is already previewing - skipping set to avoid exception")
-            } else {
-                // Wait till streamer exists to set it to the SurfaceView. Setting the
-                // `streamer` property requires the PreviewView to have its internal
-                // coroutine scope (set in onAttachedToWindow). If the view is not yet
-                // attached, posting the assignment ensures it happens on the UI
-                // thread after attachment, preventing "lifecycleScope is not
-                // available" errors.
-                try {
-                    if (preview.isAttachedToWindow) {
-                        preview.streamer = streamer
-                        assignedStreamer = true
-                    } else {
-                        preview.post {
-                            try {
-                                preview.streamer = streamer
-                                Log.d(TAG, "Preview streamer assigned via post after attach")
-                                // Start preview asynchronously after assignment
-                                lifecycleScope.launch {
-                                    try {
-                                        startPreviewWhenReady(preview, streamer, posted = true)
-                                    } catch (t: Throwable) {
-                                        Log.w(TAG, "Posted preview start failed: ${t.message}")
-                                    }
+            // Set the streamer on the preview. Since all sources support dual output
+            // (preview + encoder), we can safely set the preview even if streaming is active.
+            // Wait till streamer exists to set it to the SurfaceView. Setting the
+            // `streamer` property requires the PreviewView to have its internal
+            // coroutine scope (set in onAttachedToWindow). If the view is not yet
+            // attached, posting the assignment ensures it happens on the UI
+            // thread after attachment, preventing "lifecycleScope is not
+            // available" errors.
+            try {
+                if (preview.isAttachedToWindow) {
+                    preview.streamer = streamer
+                    assignedStreamer = true
+                } else {
+                    preview.post {
+                        try {
+                            preview.streamer = streamer
+                            Log.d(TAG, "Preview streamer assigned via post after attach")
+                            // Start preview asynchronously after assignment
+                            lifecycleScope.launch {
+                                try {
+                                    startPreviewWhenReady(preview, streamer, posted = true)
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, "Posted preview start failed: ${t.message}")
                                 }
-                            } catch (t: Throwable) {
-                                Log.w(TAG, "Failed to set streamer on preview (posted): ${t.message}")
                             }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to set streamer on preview (posted): ${t.message}")
                         }
-                        // We optimistically mark as assigned since assignment will occur shortly
-                        assignedStreamer = true
                     }
-                } catch (e: IllegalArgumentException) {
-                    // Defensive catch: if PreviewView rejects the streamer because the
-                    // source is already previewing, log and continue without crashing.
-                    Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
+                    // We optimistically mark as assigned since assignment will occur shortly
+                    assignedStreamer = true
                 }
+            } catch (e: IllegalArgumentException) {
+                // Defensive catch: if PreviewView rejects the streamer for any reason,
+                // log and continue without crashing.
+                Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
             }
         }
 
@@ -565,21 +605,40 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             try {
                 val isAttached = preview.isAttachedToWindow
                 val hasSize = preview.width > 0 && preview.height > 0
+                val isVisible = preview.visibility == View.VISIBLE
+                val windowVisible = preview.windowVisibility == View.VISIBLE
+                
                 if (!isAttached || !hasSize) {
                     val which = if (posted) "posted start" else "start"
                     Log.d(TAG, "Preview not attached or has no size ($which attempt=$attempt) - will retry")
+                } else if (!isVisible || !windowVisible) {
+                    // View or window not visible yet - wait for it to become visible
+                    // This is normal during activity resume, so keep retrying
+                    Log.d(TAG, "Preview or window not visible yet (view=$isVisible, window=$windowVisible, attempt=$attempt) - will retry")
                 } else {
-                    val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
-                    if (sourceAlreadyPreviewing) {
-                        Log.w(TAG, "Source is already previewing elsewhere - skipping startPreview${if (posted) " (posted)" else ""}")
-                        started = true
-                        break
+                    // Wait a bit longer on first attempt to give the PreviewView's surfaceFlow time to update
+                    // This prevents race condition where surface is recreated but flow hasn't updated yet
+                    if (attempt == 1) {
+                        Log.d(TAG, "First attempt - waiting for surface flow to update")
+                        delay(150)
                     }
+                    
+                    // Always try to start preview, even if source reports it's already previewing
+                    // This is important after returning from background when the surface was recreated
+                    // The camera session needs to be updated with the new surface reference
                     try {
                         preview.startPreview()
                         Log.d(TAG, "Preview started (${if (posted) "posted " else ""}attempt=$attempt)")
                         started = true
                         break
+                    } catch (e: IllegalArgumentException) {
+                        // Surface was abandoned - likely window went invisible mid-operation
+                        if (e.message?.contains("Surface was abandoned") == true) {
+                            Log.w(TAG, "Surface abandoned during preview start (attempt=$attempt) - window may have gone invisible")
+                            // Continue retrying in case window becomes visible again
+                        } else {
+                            Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${e.message}")
+                        }
                     } catch (t: Throwable) {
                         Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${t.message}")
                     }
