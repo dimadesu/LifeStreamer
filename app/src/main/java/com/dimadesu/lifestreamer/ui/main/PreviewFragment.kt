@@ -358,6 +358,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     @SuppressLint("MissingPermission")
     override fun onStart() {
         super.onStart()
+        
+        // Restore orientation lock IMMEDIATELY in onStart() (before onResume()) to prevent
+        // the Activity from rotating when returning from background during streaming.
+        // onStart() is called before the Activity's window is shown, so we can lock
+        // orientation before any rotation animation happens.
+        val isInStreamingProcess = previewViewModel.streamStatus.value?.let { status ->
+            status == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
+            status == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
+            status == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
+        } ?: false
+        
+        val hasRememberedOrientation = rememberedLockedOrientation != null
+        
+        if (isInStreamingProcess || hasRememberedOrientation) {
+            rememberedLockedOrientation?.let { rememberedOrientation ->
+                requireActivity().requestedOrientation = rememberedOrientation
+                Log.d(TAG, "onStart: Restored orientation lock early: $rememberedOrientation (rotation: $rememberedRotation)")
+            }
+        }
+        
         requestCameraAndMicrophonePermissions()
     }
 
@@ -390,11 +410,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
             
             // If we have a remembered orientation or are in any streaming-related state, restore lock
+            // Note: This is a secondary check - primary lock happens in onStart()
             if (isCurrentlyStreaming || hasRememberedOrientation || isInStreamingProcess) {
-                Log.d(TAG, "App returned to foreground while streaming/connecting - restoring orientation first (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, status: $currentStatus)")
+                Log.d(TAG, "onResume: Secondary check - restoring orientation (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, status: $currentStatus)")
                 
                 // Restore the exact orientation that was locked when streaming started
                 // This prevents UI rotation when returning from background during streaming
+                // (onStart() should have already done this, but we re-apply it here as a safety check)
                 rememberedLockedOrientation?.let { rememberedOrientation ->
                     requireActivity().requestedOrientation = rememberedOrientation
                     
