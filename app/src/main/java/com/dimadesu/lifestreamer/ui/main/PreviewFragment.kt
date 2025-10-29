@@ -147,7 +147,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
             Log.d(TAG, "Streaming state changed to: $isStreaming, status: $currentStatus, reconnecting: $isReconnecting")
             if (isStreaming) {
-                lockOrientation()
+                // Only lock orientation if we don't already have a remembered one.
+                // This prevents overwriting the saved orientation when returning from background,
+                // which could happen if the Activity is temporarily in the wrong orientation.
+                if (rememberedLockedOrientation == null) {
+                    lockOrientation()
+                } else {
+                    Log.d(TAG, "Already have saved orientation, not re-locking")
+                }
             } else {
                 // Only unlock if we're truly stopped AND not reconnecting
                 val shouldStayLocked = currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
@@ -191,10 +198,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.STREAMING -> {
                         // Orientation should already be locked by isStreamingLiveData observer
-                        // This is just a safety check
+                        // This is just a safety check - but DON'T re-lock if we already have one
+                        // because that would overwrite our saved orientation with whatever the
+                        // current Activity orientation happens to be during lifecycle transitions
                         if (rememberedLockedOrientation == null) {
                             lockOrientation()
                             Log.d(TAG, "Safety lock during STREAMING")
+                        } else {
+                            Log.d(TAG, "Already have saved orientation during STREAMING, not re-locking")
                         }
                     }
                 }
