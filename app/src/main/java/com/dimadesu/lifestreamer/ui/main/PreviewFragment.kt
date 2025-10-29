@@ -51,7 +51,6 @@ import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
-import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import io.github.thibaultbee.streampack.core.interfaces.IStreamer
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.IPreviewableSource
@@ -242,50 +241,20 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.e(TAG, "Streamer is not a ICoroutineStreamer")
             }
             if (streamer is IWithVideoSource) {
-                    val videoSource = streamer.videoInput?.sourceFlow?.value
-                    val isRtmpSource = videoSource is RTMPVideoSource
-
-                    // For RTMP sources, we can enable preview alongside streaming
-                    // thanks to the surface processor that handles dual output
-                    if (streamer.isStreamingFlow.value == true && !isRtmpSource) {
-                        Log.i(TAG, "Streamer is streaming - skipping preview while live (non-RTMP source)")
-                        // Ensure preview view has no streamer assigned while streaming
-                        try {
-                            if (binding.preview.streamer == streamer) {
-                                binding.preview.streamer = null
-                            }
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to clear preview streamer while streaming: ${t.message}")
-                        }
-                    } else {
-                        if (isRtmpSource && streamer.isStreamingFlow.value == true) {
-                            Log.i(TAG, "RTMP source streaming - preview enabled alongside streaming")
-                        }
-                        inflateStreamerPreview(streamer)
-                    }
+                inflateStreamerPreview(streamer)
             } else {
                 Log.e(TAG, "Can't start preview, streamer is not a IVideoStreamer")
             }
         }
 
-        // Rebind preview when streaming stops so the UI preview returns to normal
-        // For RTMP sources, preview continues during streaming, so no need to rebind
+        // Rebind preview when streaming stops to ensure preview is active
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
             if (isStreaming == false) {
                 Log.d(TAG, "Streaming stopped - re-attaching preview if possible")
-                val streamer = previewViewModel.streamerLiveData.value
-                val videoSource = (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
-                val isRtmpSource = videoSource is RTMPVideoSource
-
-                if (!isRtmpSource) {
-                    // Only rebind for non-RTMP sources since RTMP sources maintain preview during streaming
-                    try {
-                        inflateStreamerPreview()
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
-                    }
-                } else {
-                    Log.d(TAG, "RTMP source - preview was maintained during streaming, no rebind needed")
+                try {
+                    inflateStreamerPreview()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to re-attach preview after stop: ${t.message}")
                 }
             }
         }
@@ -571,7 +540,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 } else {
                     val sourceAlreadyPreviewing = source?.isPreviewingFlow?.value == true
                     if (sourceAlreadyPreviewing) {
-                        Log.w(TAG, "Source is already previewing elsewhere - skipping startPreview${if (posted) " (posted)" else ""}")
+                        Log.d(TAG, "Source is already previewing - skipping startPreview${if (posted) " (posted)" else ""}")
                         started = true
                         break
                     }
