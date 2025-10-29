@@ -312,17 +312,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * @param shouldSuppressErrors If true, errors won't be posted to streamerErrorLiveData (for auto-retry)
      */
     private suspend fun startServiceStreaming(descriptor: MediaDescriptor, shouldSuppressErrors: Boolean = false): Boolean {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.e(TAG, "startServiceStreaming: serviceStreamer is null!")
+            if (!shouldSuppressErrors) {
+                _streamerErrorLiveData.postValue("Service streamer not available")
+            }
+            return false
+        }
+        
         return try {
             Log.i(TAG, "startServiceStreaming: Opening streamer with descriptor: $descriptor")
-
-            val currentStreamer = serviceStreamer
-            if (currentStreamer == null) {
-                Log.e(TAG, "startServiceStreaming: serviceStreamer is null!")
-                if (!shouldSuppressErrors) {
-                    _streamerErrorLiveData.postValue("Service streamer not available")
-                }
-                return false
-            }
 
             // Validate that both video and audio sources are configured before starting stream
             val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
@@ -414,12 +414,27 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             true
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
+            // CRITICAL: Close the endpoint after timeout to clean up any partial state
+            // Without this, the endpoint may be left in a half-open state, preventing subsequent connection attempts
+            try {
+                Log.i(TAG, "startServiceStreaming: Closing endpoint after timeout to clean up state")
+                currentStreamer.close()
+            } catch (closeException: Exception) {
+                Log.e(TAG, "startServiceStreaming: Failed to close endpoint after timeout: ${closeException.message}")
+            }
             if (!shouldSuppressErrors) {
                 _streamerErrorLiveData.postValue("Connection timeout (5s) - check server address and network")
             }
             false
         } catch (e: Exception) {
             Log.e(TAG, "startServiceStreaming failed: ${e.message}", e)
+            // CRITICAL: Close the endpoint after any failure to clean up state
+            try {
+                Log.i(TAG, "startServiceStreaming: Closing endpoint after failure to clean up state")
+                currentStreamer.close()
+            } catch (closeException: Exception) {
+                Log.e(TAG, "startServiceStreaming: Failed to close endpoint after failure: ${closeException.message}")
+            }
             if (!shouldSuppressErrors) {
                 _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
             }
@@ -727,19 +742,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Camera permission granted, setting video source")
                 currentStreamer.setVideoSource(CameraSourceFactory())
                 
-                // Wait for video source to be actually set before configuring audio
+                // Wait for video source to be actually set and fully initialized
                 Log.d(TAG, "Waiting for video source to be initialized...")
-                val videoSourceReady = kotlinx.coroutines.withTimeoutOrNull(3000) {
+                val videoSourceReady = kotlinx.coroutines.withTimeoutOrNull(5000) {
+                    // Wait for source to exist
                     while (currentStreamer.videoInput?.sourceFlow?.value == null) {
                         kotlinx.coroutines.delay(50)
                     }
+                    // CRITICAL: Also wait for the camera to be fully active with all surfaces
+                    // Without this, startStream() will fail with "Target type must be in the current capture session"
+                    // Give the camera session time to add the stream output surface
+                    kotlinx.coroutines.delay(500)
                     true
                 } ?: false
                 
                 if (videoSourceReady) {
-                    Log.i(TAG, "Video source initialized: ${currentStreamer.videoInput?.sourceFlow?.value?.javaClass?.simpleName}")
+                    Log.i(TAG, "Video source initialized and surfaces ready: ${currentStreamer.videoInput?.sourceFlow?.value?.javaClass?.simpleName}")
                 } else {
-                    Log.w(TAG, "Video source initialization timed out after 3s")
+                    Log.w(TAG, "Video source initialization timed out after 5s")
                 }
             } else {
                 Log.w(TAG, "Camera permission not granted")
