@@ -341,14 +341,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             Log.i(TAG, "startServiceStreaming: serviceStreamer available, calling open()...")
 
-            // Add timeout to prevent hanging, but use NonCancellable for camera configuration
-            // to prevent "Broken pipe" errors if coroutine is cancelled during camera setup
-            withTimeout(10000) { // 10 second timeout
-                withContext(NonCancellable) {
+            // Add timeout to prevent hanging when network connection fails
+            // Don't use NonCancellable here - we need the timeout to work for network failures
+            try {
+                withTimeout(5000) { // 5 second timeout
                     currentStreamer.open(descriptor)
                 }
+                Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "startServiceStreaming: open() timed out after 5 seconds")
+                throw e // Re-throw to be caught by outer catch block
             }
-            Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
             
             // Wait for encoders to be initialized after open
             // This prevents the race condition where video encoder isn't ready after rapid stop/start
@@ -396,7 +399,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
             if (!shouldSuppressErrors) {
-                _streamerErrorLiveData.postValue("Connection timeout - check server address and network")
+                _streamerErrorLiveData.postValue("Connection timeout (5s) - check server address and network")
             }
             false
         } catch (e: Exception) {
@@ -1201,6 +1204,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     fun stopStream() {
+        // Set userStoppedManually flag FIRST, before acquiring mutex
+        // This allows reconnection logic to see the stop request immediately
+        userStoppedManually = true
+        reconnectTimer.stop()
+        isReconnecting = false
+        _reconnectionStatusLiveData.value = null
+        _streamStatus.value = StreamStatus.NOT_STREAMING // Clear UI status immediately
+        Log.i(TAG, "stopStream() - Set userStoppedManually=true and status=NOT_STREAMING (before mutex)")
+        
         viewModelScope.launch {
             streamOperationMutex.withLock {
                 Log.d(TAG, "stopStream() - Acquired lock")
@@ -1345,14 +1357,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
                 _streamStatus.value = StreamStatus.NOT_STREAMING
                 
-                // Mark that user stopped manually to prevent reconnection
-                userStoppedManually = true
-                Log.i(TAG, "stopStream() - Set userStoppedManually=true")
-                
-                // Cancel any pending reconnection attempts
-                reconnectTimer.stop()
-                isReconnecting = false
-                _reconnectionStatusLiveData.value = null
+                // Note: userStoppedManually, reconnectTimer.stop(), and isReconnecting
+                // are already set at the beginning of stopStream() before acquiring mutex
                 
                 _isTryingConnectionLiveData.postValue(false)
                 
@@ -1449,7 +1455,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Clean up current connection
                 Log.d(TAG, "Stopping failed stream before reconnection...")
-                currentStreamer.stopStream()
+                try {
+                    // Add timeout to prevent stopStream() from hanging
+                    // This can happen if the stream never fully started (failed during open())
+                    kotlinx.coroutines.withTimeoutOrNull(2000) {
+                        currentStreamer.stopStream()
+                    }
+                    Log.d(TAG, "stopStream() completed")
+                } catch (e: Exception) {
+                    Log.w(TAG, "stopStream() failed: ${e.message} - continuing with cleanup")
+                }
                 
                 // Remove any bitrate regulator
                 try {
@@ -1462,10 +1477,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Close the endpoint connection before reconnecting
                 // This ensures clean state for reconnection attempt
                 try {
-                    currentStreamer.close()
+                    // Add timeout to prevent close() from hanging
+                    // This can happen if the connection never fully opened
+                    kotlinx.coroutines.withTimeoutOrNull(2000) {
+                        currentStreamer.close()
+                    }
                     Log.i(TAG, "Endpoint closed before reconnection - clean slate established")
                 } catch (e: Exception) {
-                    Log.e(TAG, "CRITICAL: Failed to close endpoint before reconnection!", e)
+                    Log.e(TAG, "Failed to close endpoint before reconnection: ${e.message}")
                 }
 
                 // Wait for stream to actually stop before reconnecting
@@ -1487,6 +1506,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // - Camera source already has microphone audio
                 // - Changing sources mid-reconnection can cause initialization issues
                 // Sources are only reset during manual stopStream() to prepare for new configuration
+
+                // Check if user stopped during cleanup before scheduling reconnection
+                if (userStoppedManually) {
+                    Log.d(TAG, "User stopped during cleanup, skipping reconnection timer")
+                    isReconnecting = false
+                    _reconnectionStatusLiveData.postValue(null)
+                    return@launch
+                }
 
                 // Schedule reconnection after 5 seconds
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
