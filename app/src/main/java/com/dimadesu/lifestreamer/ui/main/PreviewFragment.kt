@@ -376,20 +376,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         super.onResume()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
-        // Since we no longer stop preview in onPause(), the preview should still be running
-        // We only need to ensure preview is started if it's not already running
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            // Use the same guarded preview inflation logic to avoid races when the
-            // activity is re-created or the SurfaceView is being detached/attached
-            // (for example when tapping the notification). inflateStreamerPreview()
-            // sets the streamer and starts the preview only when safe.
-            try {
-                inflateStreamerPreview()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
-            }
-
-            // Re-request audio focus / handle foreground recovery if streaming
+            // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
+            // This ensures preview restarts with the correct orientation already locked
             val isCurrentlyStreaming = previewViewModel.isStreamingLiveData.value ?: false
             val hasRememberedOrientation = rememberedLockedOrientation != null
             val currentStatus = previewViewModel.streamStatus.value
@@ -399,7 +388,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             
             // If we have a remembered orientation or are in any streaming-related state, restore lock
             if (isCurrentlyStreaming || hasRememberedOrientation || isInStreamingProcess) {
-                Log.d(TAG, "App returned to foreground while streaming/connecting - handling recovery (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, status: $currentStatus)")
+                Log.d(TAG, "App returned to foreground while streaming/connecting - restoring orientation first (streaming: $isCurrentlyStreaming, remembered: $hasRememberedOrientation, status: $currentStatus)")
                 
                 // Restore the exact orientation that was locked when streaming started
                 // This prevents UI rotation when returning from background during streaming
@@ -411,7 +400,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     lockOrientation()
                     Log.d(TAG, "No remembered orientation, locked to current position")
                 }
-                
+            } else {
+                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
+            }
+            
+            // SECOND: Now restart preview with orientation already locked
+            // Use the same guarded preview inflation logic to avoid races when the
+            // activity is re-created or the SurfaceView is being detached/attached
+            // (for example when tapping the notification). inflateStreamerPreview()
+            // sets the streamer and starts the preview only when safe.
+            try {
+                inflateStreamerPreview()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error while inflating/starting preview on resume: ${e.message}")
+            }
+
+            // THIRD: Handle service foreground recovery if streaming
+            if (isCurrentlyStreaming || hasRememberedOrientation || isInStreamingProcess) {
                 previewViewModel.service?.let { service ->
                     try {
                         service.handleForegroundRecovery()
@@ -420,8 +425,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         Log.w(TAG, "Foreground recovery failed: ${t.message}")
                     }
                 }
-            } else {
-                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
             }
         }
     }
