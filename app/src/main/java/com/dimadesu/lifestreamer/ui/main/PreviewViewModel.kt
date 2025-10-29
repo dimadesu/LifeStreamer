@@ -1213,12 +1213,36 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
 
                 val currentStreamingState = currentStreamer.isStreamingFlow.value
-                Log.i(TAG, "stopStream() called - Current streaming state: $currentStreamingState")
+                val currentStatus = _streamStatus.value
+                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus")
 
-                // If already stopped, don't do anything
-                if (currentStreamingState != true) {
+                // If already stopped and not in CONNECTING state, don't do anything
+                if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
                     Log.i(TAG, "Stream is already stopped, skipping stop sequence")
                     _isTryingConnectionLiveData.postValue(false)
+                    return@launch
+                }
+                
+                // If in CONNECTING state but not streaming, force stop the connection attempt
+                if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
+                    Log.i(TAG, "Stopping connection attempt...")
+                    // Cancel any pending reconnection attempts
+                    reconnectTimer.stop()
+                    isReconnecting = false
+                    _isTryingConnectionLiveData.postValue(false)
+                    
+                    // Close endpoint to abort connection attempt
+                    try {
+                        currentStreamer.close()
+                        Log.i(TAG, "Connection attempt aborted - endpoint closed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
+                    }
+                    
+                    // Set status to NOT_STREAMING and exit
+                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    userStoppedManually = true
+                    Log.i(TAG, "Connection attempt cancelled by user")
                     return@launch
                 }
 
