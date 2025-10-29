@@ -147,13 +147,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
             Log.d(TAG, "Streaming state changed to: $isStreaming, status: $currentStatus, reconnecting: $isReconnecting")
             if (isStreaming) {
-                // Only lock orientation if we don't already have a remembered one.
-                // This prevents overwriting the saved orientation when returning from background,
-                // which could happen if the Activity is temporarily in the wrong orientation.
-                if (rememberedLockedOrientation == null) {
+                // Check if Service already has a saved orientation (lifecycle restoration)
+                // If so, don't lock again - onStart()/onResume() will restore it
+                val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+                if (savedRotation == null && rememberedLockedOrientation == null) {
+                    // Only lock if this is a NEW stream (not lifecycle restoration)
                     lockOrientation()
                 } else {
-                    Log.d(TAG, "Already have saved orientation, not re-locking")
+                    Log.d(TAG, "Already have saved orientation (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
                 }
             } else {
                 // Only unlock if we're truly stopped AND not reconnecting
@@ -174,16 +175,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 when (status) {
                     com.dimadesu.lifestreamer.models.StreamStatus.STARTING -> {
                         // Lock orientation as soon as we start attempting to stream
-                        if (rememberedLockedOrientation == null) {
+                        // But check Service first - if already saved, don't re-lock
+                        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+                        if (savedRotation == null && rememberedLockedOrientation == null) {
                             lockOrientation()
                             Log.d(TAG, "Locked orientation during STARTING")
+                        } else {
+                            Log.d(TAG, "Already have saved orientation during STARTING, not re-locking")
                         }
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING -> {
                         // Ensure orientation stays locked during reconnection
-                        if (rememberedLockedOrientation == null) {
+                        // But check Service first - if already saved, don't re-lock
+                        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+                        if (savedRotation == null && rememberedLockedOrientation == null) {
                             lockOrientation()
                             Log.d(TAG, "Locked orientation during CONNECTING/reconnection")
+                        } else {
+                            Log.d(TAG, "Already have saved orientation during CONNECTING, not re-locking")
                         }
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.NOT_STREAMING,
@@ -199,13 +208,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     com.dimadesu.lifestreamer.models.StreamStatus.STREAMING -> {
                         // Orientation should already be locked by isStreamingLiveData observer
                         // This is just a safety check - but DON'T re-lock if we already have one
-                        // because that would overwrite our saved orientation with whatever the
-                        // current Activity orientation happens to be during lifecycle transitions
-                        if (rememberedLockedOrientation == null) {
+                        // Check both Service and Fragment to avoid overwriting during lifecycle
+                        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+                        if (savedRotation == null && rememberedLockedOrientation == null) {
                             lockOrientation()
                             Log.d(TAG, "Safety lock during STREAMING")
                         } else {
-                            Log.d(TAG, "Already have saved orientation during STREAMING, not re-locking")
+                            Log.d(TAG, "Already have saved orientation during STREAMING (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
                         }
                     }
                 }
@@ -216,12 +225,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         lifecycleScope.launch {
             previewViewModel.streamStatus.collect { status ->
                 Log.d(TAG, "Stream status changed to: $status")
+                // Check if we're reconnecting - if so, keep button as "Stop"
+                val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
+                
                 when (status) {
                     StreamStatus.ERROR, StreamStatus.NOT_STREAMING -> {
-                        // Reset button to "Start" state when error occurs or stream stops
-                        if (binding.liveButton.isChecked) {
+                        // Only reset button to "Start" if NOT reconnecting
+                        if (!isReconnecting && binding.liveButton.isChecked) {
                             Log.d(TAG, "Stream error/stopped - resetting button to Start")
                             binding.liveButton.isChecked = false
+                        } else if (isReconnecting && !binding.liveButton.isChecked) {
+                            Log.d(TAG, "Stream stopped but reconnecting - keeping button as Stop")
+                            binding.liveButton.isChecked = true
                         }
                     }
                     StreamStatus.STARTING, StreamStatus.CONNECTING -> {
