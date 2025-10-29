@@ -1250,6 +1250,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 
                 // If in CONNECTING state but not streaming, force stop the connection attempt
+                // This handles initial connection attempts that aren't part of reconnection
                 if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
                     Log.i(TAG, "Stopping connection attempt...")
                     // Cancel any pending reconnection attempts
@@ -1269,6 +1270,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                     userStoppedManually = true
                     Log.i(TAG, "Connection attempt cancelled by user")
+                    
+                    // Unlock stream rotation since we're truly stopped
+                    service?.unlockStreamRotation()
                     return@launch
                 }
 
