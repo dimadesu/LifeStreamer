@@ -1023,90 +1023,90 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@withLock
                 }
 
-            // Check if sources are configured
-            val hasVideoSource = currentStreamer.videoInput?.sourceFlow?.value != null
-            val hasAudioSource = currentStreamer.audioInput?.sourceFlow?.value != null
-            val videoSource = currentStreamer.videoInput?.sourceFlow?.value
-            val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+                // Check if sources are configured
+                val hasVideoSource = currentStreamer.videoInput?.sourceFlow?.value != null
+                val hasAudioSource = currentStreamer.audioInput?.sourceFlow?.value != null
+                val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+                val audioSource = currentStreamer.audioInput?.sourceFlow?.value
 
-            Log.i(TAG, "Source check before stream start:")
-            Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
-            Log.i(TAG, "  hasAudioSource: $hasAudioSource (${audioSource?.javaClass?.simpleName})")
+                Log.i(TAG, "Source check before stream start:")
+                Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
+                Log.i(TAG, "  hasAudioSource: $hasAudioSource (${audioSource?.javaClass?.simpleName})")
 
-            // Special case: If video source is bitmap (RTMP fallback) but no audio, set appropriate audio
-            if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
-                Log.w(TAG, "Bitmap source detected without audio - setting audio source")
+                // Special case: If video source is bitmap (RTMP fallback) but no audio, set appropriate audio
+                if (hasVideoSource && !hasAudioSource && videoSource is IBitmapSource) {
+                    Log.w(TAG, "Bitmap source detected without audio - setting audio source")
+                    try {
+                        setAudioSourceBasedOnVideoSource()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to set audio for bitmap source: ${e.message}")
+                    }
+                }
+
+                if (!hasVideoSource || !hasAudioSource) {
+                    Log.w(TAG, "Sources not fully configured - initializing...")
+                    initializeStreamerSources()
+                    kotlinx.coroutines.delay(500)
+                    
+                    // Re-check after initialization
+                    val videoAfterInit = currentStreamer.videoInput?.sourceFlow?.value
+                    val audioAfterInit = currentStreamer.audioInput?.sourceFlow?.value
+                    Log.i(TAG, "After initialization - Video: ${videoAfterInit?.javaClass?.simpleName}, Audio: ${audioAfterInit?.javaClass?.simpleName}")
+                    
+                    if (videoAfterInit == null || audioAfterInit == null) {
+                        val error = "Failed to initialize sources - Video: ${videoAfterInit != null}, Audio: ${audioAfterInit != null}"
+                        Log.e(TAG, error)
+                        _streamerErrorLiveData.postValue(error)
+                        return@withLock
+                    }
+                }
+
+                _isTryingConnectionLiveData.postValue(true)
+                _streamStatus.value = StreamStatus.CONNECTING
+                Log.i(TAG, "startStream: Set status to CONNECTING")
+                var autoRetryTriggered = false
                 try {
-                    setAudioSourceBasedOnVideoSource()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set audio for bitmap source: ${e.message}")
-                }
-            }
-
-            if (!hasVideoSource || !hasAudioSource) {
-                Log.w(TAG, "Sources not fully configured - initializing...")
-                initializeStreamerSources()
-                kotlinx.coroutines.delay(500)
-                
-                // Re-check after initialization
-                val videoAfterInit = currentStreamer.videoInput?.sourceFlow?.value
-                val audioAfterInit = currentStreamer.audioInput?.sourceFlow?.value
-                Log.i(TAG, "After initialization - Video: ${videoAfterInit?.javaClass?.simpleName}, Audio: ${audioAfterInit?.javaClass?.simpleName}")
-                
-                if (videoAfterInit == null || audioAfterInit == null) {
-                    val error = "Failed to initialize sources - Video: ${videoAfterInit != null}, Audio: ${audioAfterInit != null}"
-                    Log.e(TAG, error)
-                    _streamerErrorLiveData.postValue(error)
-                    return@withLock
-                }
-            }
-
-            _isTryingConnectionLiveData.postValue(true)
-            _streamStatus.value = StreamStatus.CONNECTING
-            Log.i(TAG, "startStream: Set status to CONNECTING")
-            var autoRetryTriggered = false
-            try {
-                val success = doStartStream(shouldAutoRetry = true)
-                if (!success) {
-                    Log.e(TAG, "Initial connection failed - isReconnecting=$isReconnecting, status=${_streamStatus.value}")
-                    // handleDisconnection was already called in doStartStream
-                    // Check if reconnection is active before clearing status
+                    val success = doStartStream(shouldAutoRetry = true)
+                    if (!success) {
+                        Log.e(TAG, "Initial connection failed - isReconnecting=$isReconnecting, status=${_streamStatus.value}")
+                        // handleDisconnection was already called in doStartStream
+                        // Check if reconnection is active before clearing status
+                        if (isReconnecting) {
+                            autoRetryTriggered = true
+                            Log.i(TAG, "Auto-retry triggered, keeping status=${_streamStatus.value}")
+                        } else {
+                            _streamStatus.value = StreamStatus.ERROR
+                            Log.i(TAG, "No auto-retry, setting status to ERROR")
+                        }
+                        return@withLock
+                    }
+                    Log.i(TAG, "Stream started successfully")
+                    _streamStatus.value = StreamStatus.STREAMING
+                } catch (e: Throwable) {
+                    Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=$isReconnecting", e)
+                    // Don't show error dialog if reconnection will handle it
+                    if (!isReconnecting) {
+                        _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                    }
+                    // Check if reconnection was triggered by the exception
                     if (isReconnecting) {
                         autoRetryTriggered = true
-                        Log.i(TAG, "Auto-retry triggered, keeping status=${_streamStatus.value}")
+                        Log.i(TAG, "Exception but reconnecting, keeping status=${_streamStatus.value}")
                     } else {
                         _streamStatus.value = StreamStatus.ERROR
-                        Log.i(TAG, "No auto-retry, setting status to ERROR")
+                        Log.i(TAG, "Exception and no reconnection, setting status to ERROR")
                     }
-                    return@withLock
+                } finally {
+                    Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${_streamStatus.value}")
+                    _isTryingConnectionLiveData.postValue(false)
+                    // Don't override status if auto-retry was triggered or if we're reconnecting
+                    if (!autoRetryTriggered && !isReconnecting && _streamStatus.value != StreamStatus.STREAMING) {
+                        Log.w(TAG, "startStream finally: Overriding status to NOT_STREAMING")
+                        _streamStatus.value = StreamStatus.NOT_STREAMING
+                    } else {
+                        Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
+                    }
                 }
-                Log.i(TAG, "Stream started successfully")
-                _streamStatus.value = StreamStatus.STREAMING
-            } catch (e: Throwable) {
-                Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=$isReconnecting", e)
-                // Don't show error dialog if reconnection will handle it
-                if (!isReconnecting) {
-                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
-                }
-                // Check if reconnection was triggered by the exception
-                if (isReconnecting) {
-                    autoRetryTriggered = true
-                    Log.i(TAG, "Exception but reconnecting, keeping status=${_streamStatus.value}")
-                } else {
-                    _streamStatus.value = StreamStatus.ERROR
-                    Log.i(TAG, "Exception and no reconnection, setting status to ERROR")
-                }
-            } finally {
-                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${_streamStatus.value}")
-                _isTryingConnectionLiveData.postValue(false)
-                // Don't override status if auto-retry was triggered or if we're reconnecting
-                if (!autoRetryTriggered && !isReconnecting && _streamStatus.value != StreamStatus.STREAMING) {
-                    Log.w(TAG, "startStream finally: Overriding status to NOT_STREAMING")
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                } else {
-                    Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
-                }
-            }
                 } finally {
                     Log.d(TAG, "startStream() - Released lock")
                 }
