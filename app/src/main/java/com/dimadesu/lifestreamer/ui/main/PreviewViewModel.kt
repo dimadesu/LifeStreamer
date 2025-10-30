@@ -414,27 +414,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             true
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
-            // CRITICAL: Close the endpoint after timeout to clean up any partial state
-            // Without this, the endpoint may be left in a half-open state, preventing subsequent connection attempts
-            try {
-                Log.i(TAG, "startServiceStreaming: Closing endpoint after timeout to clean up state")
-                currentStreamer.close()
-            } catch (closeException: Exception) {
-                Log.e(TAG, "startServiceStreaming: Failed to close endpoint after timeout: ${closeException.message}")
-            }
+            // TEST: Removed close() to see if cleanup is actually needed after timeout
             if (!shouldSuppressErrors) {
                 _streamerErrorLiveData.postValue("Connection timeout (5s) - check server address and network")
             }
             false
         } catch (e: Exception) {
             Log.e(TAG, "startServiceStreaming failed: ${e.message}", e)
-            // CRITICAL: Close the endpoint after any failure to clean up state
-            try {
-                Log.i(TAG, "startServiceStreaming: Closing endpoint after failure to clean up state")
-                currentStreamer.close()
-            } catch (closeException: Exception) {
-                Log.e(TAG, "startServiceStreaming: Failed to close endpoint after failure: ${closeException.message}")
-            }
+            // TEST: Removed close() to see if cleanup is actually needed after general failures
             if (!shouldSuppressErrors) {
                 _streamerErrorLiveData.postValue("Stream start failed: ${e.message}")
             }
