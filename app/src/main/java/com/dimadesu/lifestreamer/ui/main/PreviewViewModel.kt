@@ -1210,168 +1210,168 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 try {
                     val currentStreamer = serviceStreamer
 
-                if (currentStreamer == null) {
-                    Log.w(TAG, "Service streamer not ready, cannot stop stream")
-                    return@withLock
-                }
+                    if (currentStreamer == null) {
+                        Log.w(TAG, "Service streamer not ready, cannot stop stream")
+                        return@withLock
+                    }
 
-                val currentStreamingState = currentStreamer.isStreamingFlow.value
-                val currentStatus = _streamStatus.value
-                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isReconnecting")
+                    val currentStreamingState = currentStreamer.isStreamingFlow.value
+                    val currentStatus = _streamStatus.value
+                    Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isReconnecting")
 
-                // If reconnecting, always cancel reconnection regardless of streaming state
-                if (isReconnecting) {
-                    Log.i(TAG, "Cancelling active reconnection...")
-                    reconnectTimer.stop()
-                    isReconnecting = false
-                    _reconnectionStatusLiveData.value = null
-                    _isTryingConnectionLiveData.postValue(false)
-                    
-                    // Close endpoint to abort any pending connection
-                    try {
-                        currentStreamer.close()
-                        Log.i(TAG, "Reconnection cancelled - endpoint closed")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                    // If reconnecting, always cancel reconnection regardless of streaming state
+                    if (isReconnecting) {
+                        Log.i(TAG, "Cancelling active reconnection...")
+                        reconnectTimer.stop()
+                        isReconnecting = false
+                        _reconnectionStatusLiveData.value = null
+                        _isTryingConnectionLiveData.postValue(false)
+                        
+                        // Close endpoint to abort any pending connection
+                        try {
+                            currentStreamer.close()
+                            Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                        }
+                        
+                        // Set status to NOT_STREAMING and mark as user stopped
+                        _streamStatus.value = StreamStatus.NOT_STREAMING
+                        userStoppedManually = true
+                        Log.i(TAG, "Reconnection cancelled by user")
+                        
+                        // Unlock stream rotation since we're truly stopped
+                        service?.unlockStreamRotation()
+                        return@withLock
+                    }
+
+                    // If already stopped and not in CONNECTING state, don't do anything
+                    if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
+                        Log.i(TAG, "Stream is already stopped, skipping stop sequence")
+                        _isTryingConnectionLiveData.postValue(false)
+                        return@withLock
                     }
                     
-                    // Set status to NOT_STREAMING and mark as user stopped
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                    userStoppedManually = true
-                    Log.i(TAG, "Reconnection cancelled by user")
-                    
-                    // Unlock stream rotation since we're truly stopped
-                    service?.unlockStreamRotation()
-                    return@withLock
-                }
+                    // If in CONNECTING state but not streaming, force stop the connection attempt
+                    // This handles initial connection attempts that aren't part of reconnection
+                    if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
+                        Log.i(TAG, "Stopping connection attempt...")
+                        // Cancel any pending reconnection attempts
+                        reconnectTimer.stop()
+                        isReconnecting = false
+                        _isTryingConnectionLiveData.postValue(false)
+                        
+                        // Close endpoint to abort connection attempt
+                        try {
+                            currentStreamer.close()
+                            Log.i(TAG, "Connection attempt aborted - endpoint closed")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
+                        }
+                        
+                        // Set status to NOT_STREAMING and exit
+                        _streamStatus.value = StreamStatus.NOT_STREAMING
+                        userStoppedManually = true
+                        Log.i(TAG, "Connection attempt cancelled by user")
+                        
+                        // Unlock stream rotation since we're truly stopped
+                        service?.unlockStreamRotation()
+                        return@withLock
+                    }
 
-                // If already stopped and not in CONNECTING state, don't do anything
-                if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
-                    Log.i(TAG, "Stream is already stopped, skipping stop sequence")
-                    _isTryingConnectionLiveData.postValue(false)
-                    return@withLock
-                }
-                
-                // If in CONNECTING state but not streaming, force stop the connection attempt
-                // This handles initial connection attempts that aren't part of reconnection
-                if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
-                    Log.i(TAG, "Stopping connection attempt...")
+                    Log.i(TAG, "Stopping stream...")
+
+                    // Release MediaProjection FIRST to interrupt any ongoing capture
+                    streamingMediaProjection?.let { mediaProjection ->
+                        mediaProjection.stop()
+                        Log.i(TAG, "MediaProjection stopped")
+                    }
+                    streamingMediaProjection = null
+
+                    // Stop streaming via helper method
+                    try {
+                        stopServiceStreaming()
+                        Log.i(TAG, "Stream stop command sent")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error stopping stream: ${e.message}", e)
+                    }
+
+                    // Remove bitrate regulator
+                    try {
+                        currentStreamer.removeBitrateRegulatorController()
+                        Log.i(TAG, "Bitrate regulator removed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                    }
+                    
+                    // Wait for stream to actually stop before closing endpoint
+                    // This prevents calling close() while stopStream() is still executing
+                    var retries = 0
+                    while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
+                        kotlinx.coroutines.delay(100)
+                        retries++
+                    }
+                    
+                    if (retries >= 50) {
+                        Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
+                    }
+                    
+                    // Close the endpoint connection to allow fresh connection on next start
+                    // Without this, the endpoint stays open and cannot be reopened on next start
+                    try {
+                        currentStreamer.close()
+                        Log.i(TAG, "Endpoint connection closed - ready for next start")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
+                    }
+                    
+                    if (currentStreamer.isStreamingFlow.value == true) {
+                        Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
+                    }
+                    
+                    // Don't reset audio source here - it will be properly set when starting next stream
+                    // Resetting after stop/close can leave the source in a broken state
+                    Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
+
+                    Log.i(TAG, "Stream stop completed successfully")
+                    
+                    // Explicitly unlock stream rotation in the service
+                    // This allows rotation to follow sensor again when truly stopped
+                    service?.unlockStreamRotation()
+
+                } catch (e: Throwable) {
+                    Log.e(TAG, "stopStream failed", e)
+                    // Force clear state
+                    streamingMediaProjection?.stop()
+                    streamingMediaProjection = null
+                } finally {
+                    // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
+                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    
+                    // Mark that user stopped manually to prevent reconnection
+                    userStoppedManually = true
+                    Log.i(TAG, "stopStream() - Set userStoppedManually=true")
+                    
                     // Cancel any pending reconnection attempts
                     reconnectTimer.stop()
                     isReconnecting = false
+                    _reconnectionStatusLiveData.value = null
+                    
                     _isTryingConnectionLiveData.postValue(false)
                     
-                    // Close endpoint to abort connection attempt
-                    try {
-                        currentStreamer.close()
-                        Log.i(TAG, "Connection attempt aborted - endpoint closed")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
-                    }
-                    
-                    // Set status to NOT_STREAMING and exit
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                    userStoppedManually = true
-                    Log.i(TAG, "Connection attempt cancelled by user")
-                    
-                    // Unlock stream rotation since we're truly stopped
-                    service?.unlockStreamRotation()
-                    return@withLock
-                }
-
-                Log.i(TAG, "Stopping stream...")
-
-                // Release MediaProjection FIRST to interrupt any ongoing capture
-                streamingMediaProjection?.let { mediaProjection ->
-                    mediaProjection.stop()
-                    Log.i(TAG, "MediaProjection stopped")
-                }
-                streamingMediaProjection = null
-
-                // Stop streaming via helper method
-                try {
-                    stopServiceStreaming()
-                    Log.i(TAG, "Stream stop command sent")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping stream: ${e.message}", e)
-                }
-
-                // Remove bitrate regulator
-                try {
-                    currentStreamer.removeBitrateRegulatorController()
-                    Log.i(TAG, "Bitrate regulator removed")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-                }
-                
-                // Wait for stream to actually stop before closing endpoint
-                // This prevents calling close() while stopStream() is still executing
-                var retries = 0
-                while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
-                    kotlinx.coroutines.delay(100)
-                    retries++
-                }
-                
-                if (retries >= 50) {
-                    Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
-                }
-                
-                // Close the endpoint connection to allow fresh connection on next start
-                // Without this, the endpoint stays open and cannot be reopened on next start
-                try {
-                    currentStreamer.close()
-                    Log.i(TAG, "Endpoint connection closed - ready for next start")
-                } catch (e: Exception) {
-                    Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
-                }
-                
-                if (currentStreamer.isStreamingFlow.value == true) {
-                    Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
-                }
-                
-                // Don't reset audio source here - it will be properly set when starting next stream
-                // Resetting after stop/close can leave the source in a broken state
-                Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
-
-                Log.i(TAG, "Stream stop completed successfully")
-                
-                // Explicitly unlock stream rotation in the service
-                // This allows rotation to follow sensor again when truly stopped
-                service?.unlockStreamRotation()
-
-            } catch (e: Throwable) {
-                Log.e(TAG, "stopStream failed", e)
-                // Force clear state
-                streamingMediaProjection?.stop()
-                streamingMediaProjection = null
-            } finally {
-                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
-                _streamStatus.value = StreamStatus.NOT_STREAMING
-                
-                // Mark that user stopped manually to prevent reconnection
-                userStoppedManually = true
-                Log.i(TAG, "stopStream() - Set userStoppedManually=true")
-                
-                // Cancel any pending reconnection attempts
-                reconnectTimer.stop()
-                isReconnecting = false
-                _reconnectionStatusLiveData.value = null
-                
-                _isTryingConnectionLiveData.postValue(false)
-                
-                // Apply any rotation that was ignored during reconnection
-                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
-                    viewModelScope.launch {
-                        try {
-                            serviceStreamer?.setTargetRotation(ignoredRotation)
-                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to apply ignored rotation: $t")
+                    // Apply any rotation that was ignored during reconnection
+                    rotationIgnoredDuringReconnection?.let { ignoredRotation ->
+                        viewModelScope.launch {
+                            try {
+                                serviceStreamer?.setTargetRotation(ignoredRotation)
+                                Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to apply ignored rotation: $t")
+                            }
                         }
+                        rotationIgnoredDuringReconnection = null
                     }
-                    rotationIgnoredDuringReconnection = null
                 }
-            }
                 } finally {
                     Log.d(TAG, "stopStream() - Released lock")
                 }
