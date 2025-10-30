@@ -110,4 +110,4 @@ To prevent this issue in the future:
 
 This fix addresses the issue: "After StreamPack library update sometimes app gets stuck and cannot stream. Usually after killing UI it gets unblocked."
 
-The problem was not directly related to the StreamPack library update, but rather exposed an existing bug in the mutex lock handling that became more apparent after the update.
+The problem was not directly caused by the StreamPack library update, but rather the update exposed an existing bug in the mutex lock handling that became more apparent after the update.
