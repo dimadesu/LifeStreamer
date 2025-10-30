@@ -724,25 +724,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "Camera permission granted, setting video source")
                 currentStreamer.setVideoSource(CameraSourceFactory())
                 
-                // Wait for video source to be actually set and fully initialized
-                Log.d(TAG, "Waiting for video source to be initialized...")
-                val videoSourceReady = kotlinx.coroutines.withTimeoutOrNull(5000) {
-                    // Wait for source to exist
-                    while (currentStreamer.videoInput?.sourceFlow?.value == null) {
-                        kotlinx.coroutines.delay(50)
-                    }
-                    // CRITICAL: Also wait for the camera to be fully active with all surfaces
-                    // Without this, startStream() will fail with "Target type must be in the current capture session"
-                    // Give the camera session time to add the stream output surface
-                    kotlinx.coroutines.delay(500)
-                    true
-                } ?: false
-                
-                if (videoSourceReady) {
-                    Log.i(TAG, "Video source initialized and surfaces ready: ${currentStreamer.videoInput?.sourceFlow?.value?.javaClass?.simpleName}")
-                } else {
-                    Log.w(TAG, "Video source initialization timed out after 5s")
-                }
+                // TEST: Removed while loop, keeping only the 500ms delay
+                // If this causes issues, we need to wait for source to exist first
+                Log.d(TAG, "Waiting for video source surfaces to be initialized...")
+                kotlinx.coroutines.delay(500)
+                Log.i(TAG, "Video source initialization delay complete: ${currentStreamer.videoInput?.sourceFlow?.value?.javaClass?.simpleName}")
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }
