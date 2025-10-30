@@ -349,15 +349,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.d(TAG, "startServiceStreaming: Time = ${System.currentTimeMillis()}")
 
             // Add timeout to prevent hanging when network connection fails
-            // CRITICAL: Run open() on IO dispatcher to avoid main thread network restrictions
-            // on fresh app launch. Android may block/throttle network on main thread.
+            // TEST: Removed Dispatchers.IO wrapper to see if it's necessary
             try {
                 Log.d(TAG, "startServiceStreaming: Calling open() at ${System.currentTimeMillis()}")
                 withTimeout(5000) { // 5 second timeout
-                    withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        Log.d(TAG, "startServiceStreaming: open() running on thread: ${Thread.currentThread().name}")
-                        currentStreamer.open(descriptor)
-                    }
+                    Log.d(TAG, "startServiceStreaming: open() running on thread: ${Thread.currentThread().name}")
+                    currentStreamer.open(descriptor)
                 }
                 Log.i(TAG, "startServiceStreaming: open() completed at ${System.currentTimeMillis()}, calling startStream()...")
             } catch (e: TimeoutCancellationException) {
