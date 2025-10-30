@@ -997,30 +997,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             streamOperationMutex.withLock {
                 Log.d(TAG, "startStream() - Acquired lock")
-                // Clear manual stop flag when starting a new stream
-                userStoppedManually = false
-                Log.i(TAG, "startStream() - Reset userStoppedManually=false")
-            
-            _streamStatus.value = StreamStatus.STARTING
-            Log.i(TAG, "startStream() called")
-            
-            // Lock stream rotation BEFORE starting to ensure it matches UI orientation
-            // Get current display rotation and lock the service to it
-            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            val currentRotation = windowManager.defaultDisplay.rotation
-            service?.lockStreamRotation(currentRotation)
-            Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
-            
-            val currentStreamer = serviceStreamer
-            val serviceReady = _serviceReady.value
+                try {
+                    // Clear manual stop flag when starting a new stream
+                    userStoppedManually = false
+                    Log.i(TAG, "startStream() - Reset userStoppedManually=false")
+                
+                _streamStatus.value = StreamStatus.STARTING
+                Log.i(TAG, "startStream() called")
+                
+                // Lock stream rotation BEFORE starting to ensure it matches UI orientation
+                // Get current display rotation and lock the service to it
+                val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                val currentRotation = windowManager.defaultDisplay.rotation
+                service?.lockStreamRotation(currentRotation)
+                Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
+                
+                val currentStreamer = serviceStreamer
+                val serviceReady = _serviceReady.value
 
-            Log.i(TAG, "startStream: serviceStreamer = $currentStreamer, serviceReady = $serviceReady")
+                Log.i(TAG, "startStream: serviceStreamer = $currentStreamer, serviceReady = $serviceReady")
 
-            if (currentStreamer == null) {
-                Log.w(TAG, "Service streamer not ready, cannot start stream")
-                _streamerErrorLiveData.postValue("Streaming service not ready")
-                return@launch
-            }
+                if (currentStreamer == null) {
+                    Log.w(TAG, "Service streamer not ready, cannot start stream")
+                    _streamerErrorLiveData.postValue("Streaming service not ready")
+                    return@withLock
+                }
 
             // Check if sources are configured
             val hasVideoSource = currentStreamer.videoInput?.sourceFlow?.value != null
@@ -1056,7 +1057,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     val error = "Failed to initialize sources - Video: ${videoAfterInit != null}, Audio: ${audioAfterInit != null}"
                     Log.e(TAG, error)
                     _streamerErrorLiveData.postValue(error)
-                    return@launch
+                    return@withLock
                 }
             }
 
@@ -1077,7 +1078,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _streamStatus.value = StreamStatus.ERROR
                         Log.i(TAG, "No auto-retry, setting status to ERROR")
                     }
-                    return@launch
+                    return@withLock
                 }
                 Log.i(TAG, "Stream started successfully")
                 _streamStatus.value = StreamStatus.STREAMING
@@ -1106,8 +1107,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
                 }
             }
-            } // Release mutex lock
-            Log.d(TAG, "startStream() - Released lock")
+                } finally {
+                    Log.d(TAG, "startStream() - Released lock")
+                }
+            } // End withLock
         }
     }
 
@@ -1209,7 +1212,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 if (currentStreamer == null) {
                     Log.w(TAG, "Service streamer not ready, cannot stop stream")
-                    return@launch
+                    return@withLock
                 }
 
                 val currentStreamingState = currentStreamer.isStreamingFlow.value
@@ -1239,14 +1242,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
-                    return@launch
+                    return@withLock
                 }
 
                 // If already stopped and not in CONNECTING state, don't do anything
                 if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
                     Log.i(TAG, "Stream is already stopped, skipping stop sequence")
                     _isTryingConnectionLiveData.postValue(false)
-                    return@launch
+                    return@withLock
                 }
                 
                 // If in CONNECTING state but not streaming, force stop the connection attempt
@@ -1273,7 +1276,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
-                    return@launch
+                    return@withLock
                 }
 
                 Log.i(TAG, "Stopping stream...")
@@ -1369,8 +1372,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rotationIgnoredDuringReconnection = null
                 }
             }
-            } // Release mutex lock
-            Log.d(TAG, "stopStream() - Released lock")
+                } finally {
+                    Log.d(TAG, "stopStream() - Released lock")
+                }
+            } // End withLock
         }
     }
 
