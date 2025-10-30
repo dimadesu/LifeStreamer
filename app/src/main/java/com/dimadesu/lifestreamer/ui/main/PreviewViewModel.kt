@@ -293,10 +293,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             serviceReadyFlow.collect { isReady ->
                 if (isReady && serviceStreamer != null) {
                     Log.i(TAG, "Service ready and serviceStreamer available - initializing sources")
-                    // Initialize sources asynchronously to avoid blocking
-                    launch {
-                        initializeStreamerSources()
-                    }
+                    // TEST: Removed launch{} wrapper to see if synchronous init causes issues
+                    initializeStreamerSources()
                 } else {
                     Log.i(TAG, "Service ready: $isReady, serviceStreamer: ${serviceStreamer != null}")
                 }
