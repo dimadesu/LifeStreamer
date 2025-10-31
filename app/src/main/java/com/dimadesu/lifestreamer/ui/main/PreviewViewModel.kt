@@ -1459,6 +1459,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
                 
+                // For camera sources: stop and restart preview to clear camera session state
+                // This prevents race condition where stream output isn't properly re-added
+                val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+                if (videoSource is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource) {
+                    try {
+                        if (videoSource.isPreviewingFlow.value) {
+                            Log.d(TAG, "Stopping camera preview to reset camera session state...")
+                            videoSource.stopPreview()
+                            kotlinx.coroutines.delay(100) // Brief delay to ensure preview stops
+                            Log.d(TAG, "Camera preview stopped - will restart after reconnection")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to stop camera preview: ${e.message}")
+                    }
+                }
+                
                 // Close the endpoint connection before reconnecting
                 // This ensures clean state for reconnection attempt
                 try {
