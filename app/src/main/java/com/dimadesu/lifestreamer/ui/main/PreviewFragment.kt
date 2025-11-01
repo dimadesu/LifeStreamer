@@ -519,6 +519,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // Set camera settings button when camera is started
         preview.listener = object : PreviewView.Listener {
             override fun onPreviewStarted() {
+                Log.i(TAG, "CAMERA LIFECYCLE: Preview started - camera session NOW ACTIVE and capturing frames")
                 Log.i(TAG, "Preview started")
             }
 
@@ -591,10 +592,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
     }
 
-    // Helper: tries to start preview when the view is attached and sized.
-    // If `posted` is true, the helper logs slightly different messages to
-    // make the log traces easier to read. Behavior mirrors the previous loops
-    // (same delays and attempt counts).
+    /**
+     * Helper: tries to start preview when the view is attached and sized.
+     * If `posted` is true, the helper logs slightly different messages to
+     * make the log traces easier to read. Behavior mirrors the previous loops
+     * (same delays and attempt counts).
+     * 
+     * CAMERA LIFECYCLE: This is where the actual camera session is created.
+     * When preview.startPreview() succeeds, the Camera2 API opens the camera device
+     * and creates a CameraCaptureSession with the preview surface as output target.
+     */
     private suspend fun startPreviewWhenReady(preview: PreviewView, streamer: SingleStreamer, posted: Boolean) {
         val maxAttempts = if (posted) 6 else 10
         var attempt = 1
@@ -627,8 +634,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     // This is important after returning from background when the surface was recreated
                     // The camera session needs to be updated with the new surface reference
                     try {
+                        Log.i(TAG, "CAMERA LIFECYCLE: Calling startPreview() - this will CREATE camera session if not exists")
                         preview.startPreview()
                         Log.d(TAG, "Preview started (${if (posted) "posted " else ""}attempt=$attempt)")
+                        Log.i(TAG, "CAMERA LIFECYCLE: startPreview() successful - camera session created and active")
                         started = true
                         break
                     } catch (e: IllegalArgumentException) {

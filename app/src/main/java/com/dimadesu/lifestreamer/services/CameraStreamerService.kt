@@ -157,6 +157,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // camera service only requests CAMERA|MICROPHONE types.
 
         // onCreate: perform lightweight initialization and promote service to foreground early
+        Log.i(TAG, "CAMERA LIFECYCLE: Service onCreate() - initializing service (camera session NOT created yet)")
 
         // Initialize power manager and other services
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -223,6 +224,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.w(TAG, "Failed to register notification action receiver: ${t.message}")
         }
         Log.i(TAG, "CameraStreamerService created and configured for background camera access")
+        Log.i(TAG, "CAMERA LIFECYCLE: Service onCreate() complete - camera session will be created later when preview starts")
 
         // Prepare cached PendingIntents for notification actions so updates don't
         // cancel/recreate them which sometimes causes the UI to render a disabled state.

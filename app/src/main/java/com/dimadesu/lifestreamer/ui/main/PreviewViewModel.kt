@@ -684,6 +684,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Initialize streamer sources after service is ready.
      * Only initializes if streamer is not already streaming to avoid configuration conflicts.
+     * 
+     * CAMERA LIFECYCLE: This registers the CameraSourceFactory but does NOT create the camera session.
+     * The actual camera session is created later when startPreview() is called on the PreviewView.
      */
     private suspend fun initializeStreamerSources() {
         val currentStreamer = serviceStreamer ?: return
@@ -717,7 +720,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 ) == PackageManager.PERMISSION_GRANTED
             ) {
                 Log.i(TAG, "Camera permission granted, setting video source")
+                Log.i(TAG, "CAMERA LIFECYCLE: Registering CameraSourceFactory (camera session NOT yet created)")
                 currentStreamer.setVideoSource(CameraSourceFactory())
+                Log.i(TAG, "CAMERA LIFECYCLE: CameraSourceFactory registered - camera will open when preview starts")
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }

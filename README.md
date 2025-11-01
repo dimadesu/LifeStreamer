@@ -135,6 +135,11 @@ Applies to [LifeStreamer v0.4.1](https://github.com/dimadesu/LifeStreamer/releas
 
   Should be pretty stable. Still testing. It affected many user flows.
 
+## Documentation
+
+- [Camera Session Lifecycle](docs/CAMERA_SESSION_LIFECYCLE.md) - Explains when and how camera session is created
+- [SRT Background Streaming Issues](docs/SRT_BACKGROUND_STREAMING_ISSUES.md) - Known issues with background streaming
+
 ## Recommended solutions to most issues
 
 **There are bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
