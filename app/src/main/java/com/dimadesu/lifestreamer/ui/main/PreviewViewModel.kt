@@ -1511,8 +1511,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 
                 // Clean up current connection
-                Log.d(TAG, "Stopping failed stream before reconnection...")
-                currentStreamer.stopStream()
+                // Only call stopStream() if stream was actually started
+                // If open() failed, the stream is not running and stopStream() will hang
+                val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
+                if (isCurrentlyStreaming) {
+                    Log.d(TAG, "Stopping failed stream before reconnection...")
+                    currentStreamer.stopStream()
+                    Log.d(TAG, "Stream stopped")
+                } else {
+                    Log.d(TAG, "Stream was never started - skipping stopStream()")
+                }
                 
                 // Remove any bitrate regulator
                 try {
