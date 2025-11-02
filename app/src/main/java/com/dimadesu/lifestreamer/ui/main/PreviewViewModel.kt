@@ -351,7 +351,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             // Add timeout to prevent hanging, but use NonCancellable for camera configuration
             // to prevent "Broken pipe" errors if coroutine is cancelled during camera setup
-            withTimeout(10000) { // 10 second timeout
+            withTimeout(5000) { // 5 second timeout
                 // withContext(NonCancellable) {
                     currentStreamer.open(descriptor)
                 // }

@@ -994,7 +994,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 // Use NonCancellable for camera configuration to prevent "Broken pipe" errors
                 // if coroutine is cancelled during camera setup
-                withTimeout(10000) { // 10s open timeout
+                withTimeout(5000) { // 5s open timeout
                     // withContext(NonCancellable) {
                         currentStreamer.open(descriptor)
                     // }
