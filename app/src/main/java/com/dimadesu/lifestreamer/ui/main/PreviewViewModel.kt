@@ -2053,6 +2053,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Switch to camera sources - restore last used camera if available
                     val cameraId = lastUsedCameraId
                     currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
+                    
+                    // Add delay between video and audio source changes to allow camera to fully initialize
+                    // This prevents race conditions and crashes when transitioning from bitmap to camera
+                    kotlinx.coroutines.delay(200)
+                    
                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
                     if (cameraId != null) {
                         Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) and microphone audio")
