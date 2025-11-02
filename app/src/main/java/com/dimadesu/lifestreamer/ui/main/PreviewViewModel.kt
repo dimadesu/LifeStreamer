@@ -352,9 +352,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Add timeout to prevent hanging, but use NonCancellable for camera configuration
             // to prevent "Broken pipe" errors if coroutine is cancelled during camera setup
             withTimeout(10000) { // 10 second timeout
-                withContext(NonCancellable) {
+                // withContext(NonCancellable) {
                     currentStreamer.open(descriptor)
-                }
+                // }
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
             
@@ -396,9 +396,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             
             // Protect startStream() from cancellation to prevent camera configuration errors
-            withContext(NonCancellable) {
+            // withContext(NonCancellable) {
                 currentStreamer.startStream()
-            }
+            // }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             true
         } catch (e: TimeoutCancellationException) {

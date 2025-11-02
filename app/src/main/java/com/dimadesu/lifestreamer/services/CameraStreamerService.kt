@@ -995,9 +995,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // Use NonCancellable for camera configuration to prevent "Broken pipe" errors
                 // if coroutine is cancelled during camera setup
                 withTimeout(10000) { // 10s open timeout
-                    withContext(NonCancellable) {
+                    // withContext(NonCancellable) {
                         currentStreamer.open(descriptor)
-                    }
+                    // }
                 }
                 
                 // Wait for encoders to be initialized after open
@@ -1038,9 +1038,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 // Protect startStream() from cancellation to prevent camera configuration errors
-                withContext(NonCancellable) {
+                // withContext(NonCancellable) {
                     currentStreamer.startStream()
-                }
+                // }
                 // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
                 // derive it from isStreamingFlow.value to ensure accuracy
                 Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
