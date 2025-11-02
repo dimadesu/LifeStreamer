@@ -2,8 +2,6 @@ package com.dimadesu.lifestreamer.services
 
 import android.app.Notification
 import android.content.Context
-import android.content.IntentFilter
-import android.content.BroadcastReceiver
 import android.content.Intent
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -210,18 +208,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
         }
 
-        // Register a small receiver for notification actions handled via intents to the service
-        val filter = IntentFilter().apply {
-            addAction(ACTION_STOP_STREAM)
-            addAction(ACTION_START_STREAM)
-            addAction(ACTION_OPEN_FROM_NOTIFICATION)
-            addAction(ACTION_TOGGLE_MUTE)
-        }
-        try {
-            registerReceiver(notificationActionReceiver, filter)
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to register notification action receiver: ${t.message}")
-        }
         Log.i(TAG, "CameraStreamerService created and configured for background camera access")
 
         // Prepare cached PendingIntents for notification actions so updates don't
@@ -314,15 +300,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     private fun initNotificationPendingIntents() {
-        // Use stable request codes and UPDATE_CURRENT to keep PendingIntents valid
-        val startIntent = Intent(ACTION_START_STREAM).apply { setPackage(packageName) }
-        startPendingIntent = PendingIntent.getBroadcast(this@CameraStreamerService, 0, startIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // Use service intents instead of broadcasts - Samsung blocks broadcast receivers
+        val startIntent = Intent(this@CameraStreamerService, CameraStreamerService::class.java).apply {
+            action = ACTION_START_STREAM
+        }
+        startPendingIntent = PendingIntent.getService(this@CameraStreamerService, 0, startIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        val stopIntent = Intent(ACTION_STOP_STREAM).apply { setPackage(packageName) }
-        stopPendingIntent = PendingIntent.getBroadcast(this@CameraStreamerService, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val stopIntent = Intent(this@CameraStreamerService, CameraStreamerService::class.java).apply {
+            action = ACTION_STOP_STREAM
+        }
+        stopPendingIntent = PendingIntent.getService(this@CameraStreamerService, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        val muteIntent = Intent(ACTION_TOGGLE_MUTE).apply { setPackage(packageName) }
-        mutePendingIntent = PendingIntent.getBroadcast(this@CameraStreamerService, 2, muteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val muteIntent = Intent(this@CameraStreamerService, CameraStreamerService::class.java).apply {
+            action = ACTION_TOGGLE_MUTE
+        }
+        mutePendingIntent = PendingIntent.getService(this@CameraStreamerService, 2, muteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val exitActivityIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
             setAction(ACTION_EXIT_APP)
@@ -343,9 +335,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onDestroy() {
-        // Stop periodic updater and unregister receiver
+        // Stop periodic updater
         stopStatusUpdater()
-        try { unregisterReceiver(notificationActionReceiver) } catch (_: Exception) {}
 
         // Clean up local rotation provider if we registered one
         try {
@@ -390,11 +381,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // stop streaming but keep service alive
                     serviceScope.launch(Dispatchers.Default) {
                         try {
+                            // Signal that user manually stopped from notification
+                            // This allows ViewModel to cancel reconnection attempts
+                            _userStoppedFromNotification.emit(Unit)
+                            
                             streamer?.stopStream()
                             
                             // Close the endpoint to allow fresh connection on next start
                             try {
-                                streamer?.close()
+                                withTimeout(5000) {
+                                    streamer?.close()
+                                }
                                 Log.i(TAG, "Endpoint closed after stop from notification")
                             } catch (e: Exception) {
                                 Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
@@ -420,99 +417,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
         }
         return super.onStartCommand(intent, flags, startId)
-    }
-
-    private val notificationActionReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            val action = intent?.action ?: return
-            when (action) {
-                ACTION_STOP_STREAM -> {
-                    Log.i(TAG, "Notification receiver: STOP_STREAM")
-                    serviceScope.launch(Dispatchers.Default) {
-                        try {
-                            // Signal that user manually stopped from notification
-                            // This allows ViewModel to cancel reconnection attempts
-                            _userStoppedFromNotification.emit(Unit)
-                            
-                            streamer?.stopStream()
-                            
-                            // Close the endpoint to allow fresh connection on next start
-                            try {
-                                streamer?.close()
-                                Log.i(TAG, "Endpoint closed after stop from notification")
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
-                            }
-                            
-                            // Refresh notification to show Start action on main thread
-                            val notification = onCloseNotification() ?: onCreateNotification()
-                            withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Stop from notification receiver failed: ${e.message}")
-                        }
-                    }
-                }
-                ACTION_START_STREAM -> {
-                    Log.i(TAG, "Notification receiver: START_STREAM")
-                    serviceScope.launch(Dispatchers.Default) {
-                        try {
-                            val isStreaming = streamer?.isStreamingFlow?.value ?: false
-                            if (!isStreaming) {
-                                // Check if we're using RTMP source - can't start from notification
-                                if (isUsingRtmpSource()) {
-                                    Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
-                                    showCannotStartRtmpNotification()
-                                    return@launch
-                                }
-                                
-                                // Start using configured endpoint from DataStore
-                                startStreamFromConfiguredEndpoint()
-                                
-                                // Only update notification to "live" if stream actually started
-                                // Check isStreamingFlow after a short delay to let it update
-                                delay(100)
-                                val didStart = streamer?.isStreamingFlow?.value ?: false
-                                if (didStart) {
-                                    Log.i(TAG, "Stream started successfully from notification - showing live notification")
-                                    val notification = onOpenNotification() ?: onCreateNotification()
-                                    withContext(Dispatchers.Main) { customNotificationUtils.notify(notification) }
-                                } else {
-                                    Log.i(TAG, "Stream did not start from notification - error notification already shown")
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Start from notification receiver failed: ${e.message}")
-                        }
-                    }
-                }
-                ACTION_TOGGLE_MUTE -> {
-                    Log.i(TAG, "Notification receiver: TOGGLE_MUTE")
-                    serviceScope.launch(Dispatchers.Default) {
-                        try {
-                            // Delegate mute toggle to centralized service API to avoid races
-                            val current = isCurrentlyMuted()
-                            setMuted(!current)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Toggle mute from receiver failed: ${e.message}")
-                        }
-                    }
-                }
-                // EXIT handled by Activity via Activity PendingIntent; do not handle here.
-                ACTION_OPEN_FROM_NOTIFICATION -> {
-                    Log.i(TAG, "Notification receiver: OPEN_FROM_NOTIFICATION")
-                    // Launch MainActivity (bring to front if exists)
-                    try {
-                        val activityOpenIntent = Intent(this@CameraStreamerService, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                            setAction(ACTION_OPEN_FROM_NOTIFICATION)
-                        }
-                        startActivity(activityOpenIntent)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to open MainActivity from notification: ${e.message}")
-                    }
-                }
-            }
-        }
     }
 
     override fun onStreamingStop() {
