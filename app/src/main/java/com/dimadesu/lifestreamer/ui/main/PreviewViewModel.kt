@@ -1287,7 +1287,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     viewModelScope.launch {
                         try {
                             Log.d(TAG, "Closing endpoint in background...")
-                            currentStreamer.close()
+                            withTimeout(3000) {
+                                currentStreamer.close()
+                            }
                             Log.i(TAG, "Reconnection cancelled - endpoint closed")
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
@@ -1329,7 +1331,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     viewModelScope.launch {
                         try {
                             Log.d(TAG, "Closing endpoint in background (may take a few seconds for SRT timeout)...")
-                            currentStreamer.close()
+                            withTimeout(3000) {
+                                currentStreamer.close()
+                            }
                             Log.i(TAG, "Connection attempt aborted - endpoint closed")
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
@@ -1379,7 +1383,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Close the endpoint connection to allow fresh connection on next start
                 // Without this, the endpoint stays open and cannot be reopened on next start
                 try {
-                    currentStreamer.close()
+                    withTimeout(3000) {
+                        currentStreamer.close()
+                    }
                     Log.i(TAG, "Endpoint connection closed - ready for next start")
                 } catch (e: Exception) {
                     Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
@@ -1533,7 +1539,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Close the endpoint connection before reconnecting
                 // This ensures clean state for reconnection attempt
                 try {
-                    currentStreamer.close()
+                    withTimeout(3000) {
+                        currentStreamer.close()
+                    }
                     Log.i(TAG, "Endpoint closed before reconnection - clean slate established")
                 } catch (e: Exception) {
                     Log.e(TAG, "CRITICAL: Failed to close endpoint before reconnection!", e)

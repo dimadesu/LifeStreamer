@@ -389,7 +389,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             
                             // Close the endpoint to allow fresh connection on next start
                             try {
-                                streamer?.close()
+                                withTimeout(3000) {
+                                    streamer?.close()
+                                }
                                 Log.i(TAG, "Endpoint closed after stop from notification")
                             } catch (e: Exception) {
                                 Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
