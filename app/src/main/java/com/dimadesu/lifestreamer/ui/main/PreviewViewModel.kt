@@ -2056,7 +2056,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Add delay between video and audio source changes to allow camera to fully initialize
                     // This prevents race conditions and crashes when transitioning from bitmap to camera
-                    kotlinx.coroutines.delay(200)
+                    kotlinx.coroutines.delay(SOURCE_TRANSITION_DELAY_MS)
                     
                     currentStreamer.setAudioSource(MicrophoneSourceFactory())
                     if (cameraId != null) {
@@ -2439,5 +2439,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     companion object {
         private const val TAG = "PreviewViewModel"
+        
+        // Delay between video and audio source changes to prevent race conditions
+        private const val SOURCE_TRANSITION_DELAY_MS = 200L
     }
 }

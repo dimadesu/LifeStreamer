@@ -28,6 +28,9 @@ import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
+    
+    // Delay between video and audio source changes to prevent race conditions
+    private const val SOURCE_TRANSITION_DELAY_MS = 200L
 
     suspend fun createExoPlayer(application: Application, url: String): ExoPlayer =
         withContext(Dispatchers.Main) {
@@ -112,7 +115,7 @@ internal object RtmpSourceSwitchHelper {
             
             // Add delay between video and audio source changes to allow video source to fully initialize
             // This prevents race conditions and crashes during source transitions
-            delay(200)
+            delay(SOURCE_TRANSITION_DELAY_MS)
             
             // Audio follows video: For RTMP/Bitmap, prefer MediaProjection, fallback to mic
             val projection = mediaProjection ?: mediaProjectionHelper?.getMediaProjection()
@@ -228,7 +231,7 @@ internal object RtmpSourceSwitchHelper {
                             
                             // Add delay between video and audio source changes to allow video source to fully initialize
                             // This prevents race conditions and crashes during source transitions
-                            delay(200)
+                            delay(SOURCE_TRANSITION_DELAY_MS)
                             
                             // Switch audio source after video is initialized
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
