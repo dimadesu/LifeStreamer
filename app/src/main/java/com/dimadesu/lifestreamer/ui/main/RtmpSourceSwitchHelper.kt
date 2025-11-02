@@ -110,6 +110,10 @@ internal object RtmpSourceSwitchHelper {
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
             
+            // Add delay between video and audio source changes to allow video source to fully initialize
+            // This prevents race conditions and crashes during source transitions
+            delay(200)
+            
             // Audio follows video: For RTMP/Bitmap, prefer MediaProjection, fallback to mic
             val projection = mediaProjection ?: mediaProjectionHelper?.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -222,7 +226,11 @@ internal object RtmpSourceSwitchHelper {
                             // Switch video source
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
-                            // Switch audio source immediately after video
+                            // Add delay between video and audio source changes to allow video source to fully initialize
+                            // This prevents race conditions and crashes during source transitions
+                            delay(200)
+                            
+                            // Switch audio source after video is initialized
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
