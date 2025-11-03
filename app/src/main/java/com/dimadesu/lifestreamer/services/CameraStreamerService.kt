@@ -389,7 +389,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             
                             // Close the endpoint to allow fresh connection on next start
                             try {
-                                streamer?.close()
+                                withTimeout(3000) {
+                                    streamer?.close()
+                                }
                                 Log.i(TAG, "Endpoint closed after stop from notification")
                             } catch (e: Exception) {
                                 Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
@@ -994,10 +996,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 // Use NonCancellable for camera configuration to prevent "Broken pipe" errors
                 // if coroutine is cancelled during camera setup
-                withTimeout(10000) { // 10s open timeout
-                    withContext(NonCancellable) {
+                withTimeout(5000) { // 5s open timeout
+                    // withContext(NonCancellable) {
                         currentStreamer.open(descriptor)
-                    }
+                    // }
                 }
                 
                 // Wait for encoders to be initialized after open
@@ -1038,9 +1040,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 // Protect startStream() from cancellation to prevent camera configuration errors
-                withContext(NonCancellable) {
+                // withContext(NonCancellable) {
                     currentStreamer.startStream()
-                }
+                // }
                 // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
                 // derive it from isStreamingFlow.value to ensure accuracy
                 Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
