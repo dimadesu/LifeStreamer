@@ -25,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
+import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: MainActivityBinding
@@ -90,18 +91,30 @@ class MainActivity : AppCompatActivity() {
         inflater.inflate(R.menu.actions, popup.menu)
         popup.show()
         popup.setOnMenuItemClickListener {
-            if (it.itemId == R.id.action_settings) {
-                goToSettingsActivity()
-                true
-            } else {
-                Log.e(TAG, "Unknown menu item ${it.itemId}")
-                false
+            when (it.itemId) {
+                R.id.action_settings -> {
+                    goToSettingsActivity()
+                    true
+                }
+                R.id.action_rtmp_help -> {
+                    goToRtmpHelpActivity()
+                    true
+                }
+                else -> {
+                    Log.e(TAG, "Unknown menu item ${it.itemId}")
+                    false
+                }
             }
         }
     }
 
     private fun goToSettingsActivity() {
         val intent = Intent(this, SettingsActivity::class.java)
+        startActivity(intent)
+    }
+
+    private fun goToRtmpHelpActivity() {
+        val intent = Intent(this, RtmpHelpActivity::class.java)
         startActivity(intent)
     }
 

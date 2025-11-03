@@ -41,6 +41,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".ui.settings.SettingsActivity" />
+        <activity android:name=".ui.help.RtmpHelpActivity" />
 
         <!-- Camera streaming service for background streaming capability -->
         <service
