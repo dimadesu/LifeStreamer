@@ -2284,7 +2284,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             try {
                 val afModes = it.focus.availableAutoModes
                 val index = afModes.indexOf(it.focus.autoMode)
-                it.focus.autoMode = afModes[(index + 1) % afModes.size]
+                val newMode = afModes[(index + 1) % afModes.size]
+                it.focus.autoMode = newMode
+                
+                // Show toast with auto focus mode name
+                val modeName = getAutoFocusModeName(newMode)
+                _toastMessageLiveData.postValue("Focus: $modeName")
+                
                 if (it.focus.autoMode == CaptureResult.CONTROL_AF_MODE_OFF) {
                     showLensDistanceSlider.postValue(true)
                 } else {
@@ -2294,6 +2300,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.w(TAG, "toggleAutoFocusMode failed (camera session may be closed): ${t.message}")
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
+    }
+
+    private fun getAutoFocusModeName(mode: Int): String {
+        return when (mode) {
+            CaptureResult.CONTROL_AF_MODE_OFF -> "Manual"
+            CaptureResult.CONTROL_AF_MODE_AUTO -> "Auto"
+            CaptureResult.CONTROL_AF_MODE_MACRO -> "Macro"
+            CaptureResult.CONTROL_AF_MODE_CONTINUOUS_VIDEO -> "Continuous Video"
+            CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE -> "Continuous Picture"
+            CaptureResult.CONTROL_AF_MODE_EDOF -> "EDOF"
+            else -> "Unknown"
+        }
     }
 
     val showLensDistanceSlider = MutableLiveData(false)
