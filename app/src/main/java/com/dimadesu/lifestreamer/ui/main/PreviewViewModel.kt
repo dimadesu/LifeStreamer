@@ -2174,6 +2174,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         cameraSettings?.let {
             try {
                 it.flash.enable = !it.flash.enable
+                
+                // Show toast with flash state
+                val message = if (it.flash.enable) "Torch: On" else "Torch: Off"
+                _toastMessageLiveData.postValue(message)
             } catch (t: Throwable) {
                 Log.w(TAG, "toggleFlash failed (camera session may be closed): ${t.message}")
             }
