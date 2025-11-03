@@ -198,6 +198,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Streamer errors (nullable to support single-event pattern - cleared after observation)
     private val _streamerErrorLiveData: MutableLiveData<String?> = MutableLiveData()
     val streamerErrorLiveData: LiveData<String?> = _streamerErrorLiveData
+
+    // Toast messages (nullable to support single-event pattern - cleared after observation)
+    private val _toastMessageLiveData: MutableLiveData<String?> = MutableLiveData()
+    val toastMessageLiveData: LiveData<String?> = _toastMessageLiveData
     private val _endpointErrorLiveData: MutableLiveData<String?> = MutableLiveData()
     val endpointErrorLiveData: LiveData<String?> = _endpointErrorLiveData
     
@@ -208,6 +212,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun clearEndpointError() {
         _endpointErrorLiveData.value = null
+    }
+
+    fun clearToastMessage() {
+        _toastMessageLiveData.value = null
     }
 
     // RTMP status for UI display
@@ -1699,6 +1707,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (svc != null) {
                 try {
                     svc.setMuted(isMuted)
+                    // Show toast message
+                    val message = if (isMuted) {
+                        application.getString(R.string.service_notification_action_mute)
+                    } else {
+                        application.getString(R.string.service_notification_action_unmute)
+                    }
+                    _toastMessageLiveData.postValue(message)
                     return@launch
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to set mute via service: ${t.message}")
@@ -1710,6 +1725,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamer?.audioInput?.isMuted = isMuted
                 // Ensure UI reflects the change immediately even if service wasn't bound
                 _isMutedLiveData.postValue(isMuted)
+                // Show toast message
+                val message = if (isMuted) {
+                    application.getString(R.string.service_notification_action_mute)
+                } else {
+                    application.getString(R.string.service_notification_action_unmute)
+                }
+                _toastMessageLiveData.postValue(message)
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to set mute directly on streamer: ${t.message}")
             }

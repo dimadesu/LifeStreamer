@@ -137,6 +137,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
+        previewViewModel.toastMessageLiveData.observe(viewLifecycleOwner) { message ->
+            message?.let {
+                Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
+                previewViewModel.clearToastMessage() // Clear after showing to prevent re-show on rotation
+            }
+        }
+
         // Reconnection status is now displayed via data binding in the layout XML
         // No need for manual observer - the TextView will automatically show/hide
 
