@@ -175,8 +175,9 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:rotation="-90"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="@+id/settingsLayout">
+            app:layout_constraintBottom_toBottomOf="@+id/settingsLayout"
+            app:layout_constraintEnd_toEndOf="@+id/settingsLayout"
+            app:layout_constraintTop_toTopOf="@+id/settingsLayout">
 
             <com.google.android.material.slider.Slider
                 android:layout_width="match_parent"
