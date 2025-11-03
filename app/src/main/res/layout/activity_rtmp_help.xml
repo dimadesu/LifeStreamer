@@ -15,7 +15,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="How to Use RTMP as Video Source"
-      android:textSize="24sp"
+      android:textSize="28sp"
       android:textStyle="bold"
       android:paddingBottom="16dp" />
 
@@ -23,7 +23,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="What is RTMP Source?"
-      android:textSize="18sp"
+      android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
       android:paddingBottom="8dp" />
@@ -32,7 +32,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="RTMP (Real-Time Messaging Protocol) source allows you to use an incoming RTMP stream as your video source instead of the device camera. This enables advanced streaming setups where you can receive video from external sources like OBS, streaming encoders, or other devices."
-      android:textSize="14sp"
+      android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
 
@@ -40,7 +40,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="Getting Started"
-      android:textSize="18sp"
+      android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
       android:paddingBottom="8dp" />
@@ -49,7 +49,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="1. Configure your external streaming software (like OBS) to output RTMP to your device's IP address.\n\n2. In LifeStreamer, tap the camera switch button to toggle to RTMP source mode.\n\n3. Start your external streaming software to begin sending the RTMP stream.\n\n4. Once connected, you can stream the incoming RTMP video to your destination just like you would with the camera source."
-      android:textSize="14sp"
+      android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
 
@@ -57,7 +57,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="Common Use Cases"
-      android:textSize="18sp"
+      android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
       android:paddingBottom="8dp" />
@@ -66,7 +66,7 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="• Relay streams from desktop software like OBS to streaming platforms\n\n• Use your phone as a streaming relay for multiple destinations\n\n• Add mobile connectivity to stationary streaming setups\n\n• Create multi-camera setups by switching between sources"
-      android:textSize="14sp"
+      android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
 
@@ -74,10 +74,9 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="Note: When using RTMP source, some camera-specific features like zoom, exposure, and focus controls will not be available as they only apply to the device camera."
-      android:textSize="12sp"
+      android:textSize="14sp"
       android:textStyle="italic"
       android:lineSpacingMultiplier="1.2"
       android:paddingTop="16dp" />
-
   </LinearLayout>
 </ScrollView>
