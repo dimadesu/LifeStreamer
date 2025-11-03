@@ -2186,11 +2186,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             try {
                 val awbModes = settings.whiteBalance.availableAutoModes
                 val index = awbModes.indexOf(settings.whiteBalance.autoMode)
-                settings.whiteBalance.autoMode = awbModes[(index + 1) % awbModes.size]
+                val newMode = awbModes[(index + 1) % awbModes.size]
+                settings.whiteBalance.autoMode = newMode
+                
+                // Show toast with white balance mode name
+                val modeName = getWhiteBalanceModeName(newMode)
+                _toastMessageLiveData.postValue("White Balance: $modeName")
             } catch (t: Throwable) {
                 Log.w(TAG, "toggleAutoWhiteBalanceMode failed (camera session may be closed): ${t.message}")
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
+    }
+
+    private fun getWhiteBalanceModeName(mode: Int): String {
+        return when (mode) {
+            CaptureResult.CONTROL_AWB_MODE_OFF -> "Off"
+            CaptureResult.CONTROL_AWB_MODE_AUTO -> "Auto"
+            CaptureResult.CONTROL_AWB_MODE_INCANDESCENT -> "Incandescent"
+            CaptureResult.CONTROL_AWB_MODE_FLUORESCENT -> "Fluorescent"
+            CaptureResult.CONTROL_AWB_MODE_WARM_FLUORESCENT -> "Warm Fluorescent"
+            CaptureResult.CONTROL_AWB_MODE_DAYLIGHT -> "Daylight"
+            CaptureResult.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT -> "Cloudy"
+            CaptureResult.CONTROL_AWB_MODE_TWILIGHT -> "Twilight"
+            CaptureResult.CONTROL_AWB_MODE_SHADE -> "Shade"
+            else -> "Unknown"
+        }
     }
 
     val showExposureSlider = MutableLiveData(false)
