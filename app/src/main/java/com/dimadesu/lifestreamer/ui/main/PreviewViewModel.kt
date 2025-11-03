@@ -198,6 +198,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Streamer errors (nullable to support single-event pattern - cleared after observation)
     private val _streamerErrorLiveData: MutableLiveData<String?> = MutableLiveData()
     val streamerErrorLiveData: LiveData<String?> = _streamerErrorLiveData
+
+    // Toast messages (nullable to support single-event pattern - cleared after observation)
+    private val _toastMessageLiveData: MutableLiveData<String?> = MutableLiveData()
+    val toastMessageLiveData: LiveData<String?> = _toastMessageLiveData
     private val _endpointErrorLiveData: MutableLiveData<String?> = MutableLiveData()
     val endpointErrorLiveData: LiveData<String?> = _endpointErrorLiveData
     
@@ -208,6 +212,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun clearEndpointError() {
         _endpointErrorLiveData.value = null
+    }
+
+    fun clearToastMessage() {
+        _toastMessageLiveData.value = null
     }
 
     // RTMP status for UI display
@@ -1699,6 +1707,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (svc != null) {
                 try {
                     svc.setMuted(isMuted)
+                    // Show toast message
+                    val message = if (isMuted) {
+                        application.getString(R.string.service_notification_action_mute)
+                    } else {
+                        application.getString(R.string.service_notification_action_unmute)
+                    }
+                    _toastMessageLiveData.postValue(message)
                     return@launch
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to set mute via service: ${t.message}")
@@ -1710,6 +1725,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamer?.audioInput?.isMuted = isMuted
                 // Ensure UI reflects the change immediately even if service wasn't bound
                 _isMutedLiveData.postValue(isMuted)
+                // Show toast message
+                val message = if (isMuted) {
+                    application.getString(R.string.service_notification_action_mute)
+                } else {
+                    application.getString(R.string.service_notification_action_unmute)
+                }
+                _toastMessageLiveData.postValue(message)
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to set mute directly on streamer: ${t.message}")
             }
@@ -2152,6 +2174,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         cameraSettings?.let {
             try {
                 it.flash.enable = !it.flash.enable
+                
+                // Show toast with flash state
+                val message = if (it.flash.enable) "Torch: On" else "Torch: Off"
+                _toastMessageLiveData.postValue(message)
             } catch (t: Throwable) {
                 Log.w(TAG, "toggleFlash failed (camera session may be closed): ${t.message}")
             }
@@ -2164,11 +2190,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             try {
                 val awbModes = settings.whiteBalance.availableAutoModes
                 val index = awbModes.indexOf(settings.whiteBalance.autoMode)
-                settings.whiteBalance.autoMode = awbModes[(index + 1) % awbModes.size]
+                val newMode = awbModes[(index + 1) % awbModes.size]
+                settings.whiteBalance.autoMode = newMode
+                
+                // Show toast with white balance mode name
+                val modeName = getWhiteBalanceModeName(newMode)
+                _toastMessageLiveData.postValue("White Balance: $modeName")
             } catch (t: Throwable) {
                 Log.w(TAG, "toggleAutoWhiteBalanceMode failed (camera session may be closed): ${t.message}")
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
+    }
+
+    private fun getWhiteBalanceModeName(mode: Int): String {
+        return when (mode) {
+            CaptureResult.CONTROL_AWB_MODE_OFF -> "Off"
+            CaptureResult.CONTROL_AWB_MODE_AUTO -> "Auto"
+            CaptureResult.CONTROL_AWB_MODE_INCANDESCENT -> "Incandescent"
+            CaptureResult.CONTROL_AWB_MODE_FLUORESCENT -> "Fluorescent"
+            CaptureResult.CONTROL_AWB_MODE_WARM_FLUORESCENT -> "Warm Fluorescent"
+            CaptureResult.CONTROL_AWB_MODE_DAYLIGHT -> "Daylight"
+            CaptureResult.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT -> "Cloudy"
+            CaptureResult.CONTROL_AWB_MODE_TWILIGHT -> "Twilight"
+            CaptureResult.CONTROL_AWB_MODE_SHADE -> "Shade"
+            else -> "Unknown"
+        }
     }
 
     val showExposureSlider = MutableLiveData(false)
@@ -2238,7 +2284,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             try {
                 val afModes = it.focus.availableAutoModes
                 val index = afModes.indexOf(it.focus.autoMode)
-                it.focus.autoMode = afModes[(index + 1) % afModes.size]
+                val newMode = afModes[(index + 1) % afModes.size]
+                it.focus.autoMode = newMode
+                
+                // Show toast with auto focus mode name
+                val modeName = getAutoFocusModeName(newMode)
+                _toastMessageLiveData.postValue("Focus: $modeName")
+                
                 if (it.focus.autoMode == CaptureResult.CONTROL_AF_MODE_OFF) {
                     showLensDistanceSlider.postValue(true)
                 } else {
@@ -2248,6 +2300,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.w(TAG, "toggleAutoFocusMode failed (camera session may be closed): ${t.message}")
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
+    }
+
+    private fun getAutoFocusModeName(mode: Int): String {
+        return when (mode) {
+            CaptureResult.CONTROL_AF_MODE_OFF -> "Manual"
+            CaptureResult.CONTROL_AF_MODE_AUTO -> "Auto"
+            CaptureResult.CONTROL_AF_MODE_MACRO -> "Macro"
+            CaptureResult.CONTROL_AF_MODE_CONTINUOUS_VIDEO -> "Continuous Video"
+            CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE -> "Continuous Picture"
+            CaptureResult.CONTROL_AF_MODE_EDOF -> "EDOF"
+            else -> "Unknown"
+        }
     }
 
     val showLensDistanceSlider = MutableLiveData(false)
