@@ -115,9 +115,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             // Note: Button state will be updated by streamStatus observer
         }
 
+        // Commented out along with the switchCameraButton in XML
+        /*
         binding.switchCameraButton.setOnClickListener {
             showCameraSelectionDialog()
         }
+        */
 
         binding.switchSourceButton.setOnClickListener {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher)
