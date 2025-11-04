@@ -530,10 +530,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             serviceStreamer?.stopStream()
             Log.i(TAG, "stopServiceStreaming: Stream stopped successfully")
 
-            // Stop the foreground service since streaming has ended
-            val serviceIntent = Intent(application, CameraStreamerService::class.java)
-            application.stopService(serviceIntent)
-            Log.i(TAG, "stopServiceStreaming: Stopped CameraStreamerService foreground service")
+            // Don't stop the service - keep it alive like notification stop does
+            // This prevents race conditions where ViewModel tries to access destroyed service
+            // The service will stay alive in the background ready for next stream
+            // val serviceIntent = Intent(application, CameraStreamerService::class.java)
+            // application.stopService(serviceIntent)
+            // Log.i(TAG, "stopServiceStreaming: Stopped CameraStreamerService foreground service")
 
             true
         } catch (e: Exception) {
