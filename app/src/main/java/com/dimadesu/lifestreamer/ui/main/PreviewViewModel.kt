@@ -1150,6 +1150,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
+        // Clear manual stop flag when starting a new stream
+        userStoppedManually = false
+        Log.i(TAG, "startStreamWithMediaProjection() - Reset userStoppedManually=false")
+        
         _isTryingConnectionLiveData.postValue(true)
         _streamStatus.value = StreamStatus.STARTING
 
