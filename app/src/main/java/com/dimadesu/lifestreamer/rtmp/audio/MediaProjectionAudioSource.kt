@@ -19,7 +19,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSource
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class MediaProjectionAudioSource(
-    private val mediaProjection: MediaProjection
+    val mediaProjection: MediaProjection  // Make public for factory comparison
 ) : AudioRecordSource(), Releasable {
 
     // let AudioRecordSource.configure handle buffer sizing and processor setup
@@ -53,6 +53,8 @@ class MediaProjectionAudioSourceFactory(
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        return source is MediaProjectionAudioSource
+        // Check if it's the same type AND the same MediaProjection instance
+        // This is important because MediaProjection tokens expire and need to be replaced
+        return source is MediaProjectionAudioSource && source.mediaProjection === mediaProjection
     }
 }

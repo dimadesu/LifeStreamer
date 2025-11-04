@@ -134,4 +134,14 @@ class MediaProjectionService : Service() {
      * Get the MediaProjection instance created by this service.
      */
     fun getMediaProjection(): MediaProjection? = mediaProjection
+
+    /**
+     * Clear the MediaProjection instance (e.g., when stopping stream).
+     * This prevents using expired MediaProjection tokens.
+     */
+    fun clearMediaProjection() {
+        Log.i(TAG, "Clearing MediaProjection from service")
+        mediaProjection?.stop()
+        mediaProjection = null
+    }
 }

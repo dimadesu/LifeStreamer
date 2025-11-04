@@ -210,6 +210,17 @@ class MediaProjectionHelper(private val context: Context) {
     }
 
     /**
+     * Clear the MediaProjection without stopping the service.
+     * Use this when stopping stream to ensure we don't reuse expired tokens.
+     */
+    fun clearMediaProjection() {
+        Log.i(TAG, "Clearing MediaProjection from service")
+        if (isBound) {
+            mediaProjectionService?.clearMediaProjection()
+        }
+    }
+
+    /**
      * Release the MediaProjection resources.
      * Call this when you're done with audio capture.
      */
