@@ -69,6 +69,14 @@
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent">
 
+            <!-- Camera selection buttons container -->
+            <LinearLayout
+                android:id="@+id/cameraButtonsContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:visibility="gone" />
+
             <ImageButton
                 android:id="@+id/switchCameraButton"
                 android:layout_width="wrap_content"
