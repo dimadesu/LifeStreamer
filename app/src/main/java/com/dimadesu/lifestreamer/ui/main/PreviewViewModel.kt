@@ -291,6 +291,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
     val reconnectionStatusLiveData: LiveData<String?> = _reconnectionStatusLiveData
 
+    // Camera information for button creation
+    data class CameraInfo(
+        val id: String,
+        val displayName: String,
+        val facing: String
+    )
+    
+    private val _availableCamerasLiveData = MutableLiveData<List<CameraInfo>>(emptyList())
+    val availableCamerasLiveData: LiveData<List<CameraInfo>> = _availableCamerasLiveData
+
     init {
         // Bind to streaming service for background streaming capability
         bindToStreamerService()
@@ -1947,6 +1957,59 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling RTMP disconnection: ${e.message}", e)
                 isHandlingDisconnection = false // Reset flag on error
+            }
+        }
+    }
+
+    /**
+     * Load available cameras and update LiveData
+     */
+    fun loadAvailableCameras() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cameraManager = application.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                val cameraIds = cameraManager.cameraIdList
+                
+                val cameraList = cameraIds.mapNotNull { id ->
+                    try {
+                        val characteristics = cameraManager.getCameraCharacteristics(id)
+                        val facingConst = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)
+                        val facing = when (facingConst) {
+                            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT -> "Front"
+                            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK -> "Back"
+                            else -> "External"
+                        }
+                        
+                        // Get FOV info
+                        val focalArr = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                        val physicalSize = characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) as? android.util.SizeF
+                        val fovLabel = if (focalArr != null && focalArr.isNotEmpty()) {
+                            val firstFocal = focalArr.first()
+                            if (physicalSize != null) {
+                                val sensorDiag = kotlin.math.sqrt(physicalSize.width * physicalSize.width + physicalSize.height * physicalSize.height)
+                                val fovRad = 2.0 * kotlin.math.atan((sensorDiag / (2.0 * firstFocal)).toDouble())
+                                val fovDeg = (fovRad * 180.0 / kotlin.math.PI).toInt()
+                                "${fovDeg}°"
+                            } else {
+                                val formattedAll = focalArr.joinToString(",") { "%.1f".format(it) }
+                                "f=${formattedAll}mm"
+                            }
+                        } else {
+                            ""
+                        }
+                        
+                        val displayName = "$facing ${fovLabel}".trim()
+                        CameraInfo(id, displayName, facing)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to get camera characteristics for $id: ${e.message}")
+                        null
+                    }
+                }
+                
+                _availableCamerasLiveData.postValue(cameraList)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load cameras: ${e.message}")
+                _availableCamerasLiveData.postValue(emptyList())
             }
         }
     }

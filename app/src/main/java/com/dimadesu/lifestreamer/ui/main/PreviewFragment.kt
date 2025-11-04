@@ -59,6 +59,7 @@ import io.github.thibaultbee.streampack.ui.views.PreviewView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
+import androidx.core.view.children
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var binding: MainFragmentBinding
@@ -115,9 +116,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             // Note: Button state will be updated by streamStatus observer
         }
 
+        // Commented out along with the switchCameraButton in XML
+        /*
         binding.switchCameraButton.setOnClickListener {
             showCameraSelectionDialog()
         }
+        */
 
         binding.switchSourceButton.setOnClickListener {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher)
@@ -265,6 +269,85 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 inflateStreamerPreview(streamer)
             } else {
                 Log.e(TAG, "Can't start preview, streamer is not a IVideoStreamer")
+            }
+        }
+
+        // Observe available cameras and create buttons dynamically
+        previewViewModel.availableCamerasLiveData.observe(viewLifecycleOwner) { cameras ->
+            binding.cameraButtonsContainer.removeAllViews()
+            
+            if (cameras.isNotEmpty()) {
+                // Get current camera ID to highlight active button
+                val currentCameraId = (previewViewModel.streamer?.videoInput?.sourceFlow?.value as? ICameraSource)?.cameraId
+                
+                cameras.forEach { camera ->
+                    val button = android.widget.Button(requireContext()).apply {
+                        text = camera.displayName
+                        tag = camera.id // Store camera ID in tag for later identification
+                        layoutParams = android.widget.LinearLayout.LayoutParams(
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            marginEnd = 8 // 8dp spacing between buttons
+                        }
+                        
+                        // Highlight if this is the active camera
+                        isEnabled = (camera.id != currentCameraId)
+                        alpha = if (camera.id == currentCameraId) 0.5f else 1.0f
+                        
+                        setOnClickListener {
+                            lifecycleScope.launch {
+                                try {
+                                    (previewViewModel.streamer as? IWithVideoSource)?.setCameraId(camera.id)
+                                    Log.i(TAG, "Switched to camera: ${camera.displayName}")
+                                    
+                                    // Update button states
+                                    binding.cameraButtonsContainer.children.forEach { view ->
+                                        if (view is android.widget.Button) {
+                                            val isActive = view.tag == camera.id
+                                            view.isEnabled = !isActive
+                                            view.alpha = if (isActive) 0.5f else 1.0f
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to switch camera: ${e.message}", e)
+                                    Toast.makeText(requireContext(), "Failed to switch camera", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                    binding.cameraButtonsContainer.addView(button)
+                }
+            }
+        }
+        
+        // Show/hide camera buttons based on current source
+        previewViewModel.isCameraSource.observe(viewLifecycleOwner) { isCameraSource ->
+            binding.cameraButtonsContainer.visibility = if (isCameraSource && 
+                binding.cameraButtonsContainer.childCount > 0) {
+                android.view.View.VISIBLE
+            } else {
+                android.view.View.GONE
+            }
+        }
+        
+        // Update button states when camera changes (including on startup)
+        previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
+            (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.let { sourceFlow ->
+                lifecycleScope.launch {
+                    sourceFlow.collect { source ->
+                        val currentCameraId = (source as? ICameraSource)?.cameraId
+                        
+                        // Update all camera button states
+                        binding.cameraButtonsContainer.children.forEach { view ->
+                            if (view is android.widget.Button) {
+                                val isActive = view.tag == currentCameraId
+                                view.isEnabled = !isActive
+                                view.alpha = if (isActive) 0.5f else 1.0f
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -801,6 +884,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 // when the service is ready and only if not already streaming
                 // previewViewModel.configureAudio()
                 previewViewModel.initializeVideoSource()
+                // Load available cameras for button creation
+                previewViewModel.loadAvailableCameras()
             }
 
             shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> {
@@ -854,6 +939,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         if (permissions[Manifest.permission.CAMERA] == true) {
             inflateStreamerPreview()
             previewViewModel.initializeVideoSource()
+            // Load available cameras for button creation
+            previewViewModel.loadAvailableCameras()
         } else if (permissions[Manifest.permission.RECORD_AUDIO] == true) {
             // Don't call configureAudio() here - it will be handled by service connection
             // when the service is ready and only if not already streaming
