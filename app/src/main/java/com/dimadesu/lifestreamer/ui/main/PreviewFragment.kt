@@ -330,6 +330,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 android.view.View.GONE
             }
         }
+        
+        // Update button states when camera changes (including on startup)
+        previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
+            (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.let { sourceFlow ->
+                lifecycleScope.launch {
+                    sourceFlow.collect { source ->
+                        val currentCameraId = (source as? ICameraSource)?.cameraId
+                        
+                        // Update all camera button states
+                        binding.cameraButtonsContainer.children.forEach { view ->
+                            if (view is android.widget.Button) {
+                                val isActive = view.tag == currentCameraId
+                                view.isEnabled = !isActive
+                                view.alpha = if (isActive) 0.5f else 1.0f
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Rebind preview when streaming stops to ensure preview is active
         previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { isStreaming ->
