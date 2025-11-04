@@ -1395,6 +1395,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                 }
                 
+                // Clear MediaProjection from service to prevent reusing expired tokens
+                mediaProjectionHelper.clearMediaProjection()
+                Log.i(TAG, "MediaProjection cleared from service")
+                
                 if (currentStreamer.isStreamingFlow.value == true) {
                     Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
                 }
