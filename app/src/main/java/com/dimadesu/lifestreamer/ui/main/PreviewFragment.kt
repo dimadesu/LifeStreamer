@@ -59,6 +59,7 @@ import io.github.thibaultbee.streampack.ui.views.PreviewView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.widget.Toast
+import androidx.core.view.children
 
 class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var binding: MainFragmentBinding
@@ -276,20 +277,38 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             binding.cameraButtonsContainer.removeAllViews()
             
             if (cameras.isNotEmpty()) {
+                // Get current camera ID to highlight active button
+                val currentCameraId = (previewViewModel.streamer?.videoInput?.sourceFlow?.value as? ICameraSource)?.cameraId
+                
                 cameras.forEach { camera ->
                     val button = android.widget.Button(requireContext()).apply {
                         text = camera.displayName
+                        tag = camera.id // Store camera ID in tag for later identification
                         layoutParams = android.widget.LinearLayout.LayoutParams(
                             android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
                             android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
                         ).apply {
                             marginEnd = 8 // 8dp spacing between buttons
                         }
+                        
+                        // Highlight if this is the active camera
+                        isEnabled = (camera.id != currentCameraId)
+                        alpha = if (camera.id == currentCameraId) 0.5f else 1.0f
+                        
                         setOnClickListener {
                             lifecycleScope.launch {
                                 try {
                                     (previewViewModel.streamer as? IWithVideoSource)?.setCameraId(camera.id)
                                     Log.i(TAG, "Switched to camera: ${camera.displayName}")
+                                    
+                                    // Update button states
+                                    binding.cameraButtonsContainer.children.forEach { view ->
+                                        if (view is android.widget.Button) {
+                                            val isActive = view.tag == camera.id
+                                            view.isEnabled = !isActive
+                                            view.alpha = if (isActive) 0.5f else 1.0f
+                                        }
+                                    }
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed to switch camera: ${e.message}", e)
                                     Toast.makeText(requireContext(), "Failed to switch camera", Toast.LENGTH_SHORT).show()
