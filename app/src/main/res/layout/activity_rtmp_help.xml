@@ -33,7 +33,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="RTMP as source feature allows to use RTMP stream as a video and audio source instead of the device camera and mic."
+      android:text="RTMP as source feature allows to use an RTMP stream as a video and audio source instead of the device camera and mic."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -50,7 +50,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="This app uses RTMP player. Set RTMP URL in Settings screen. RTMP player will later try to open it and play it. Technically, it can play any RTMP URL that it can reach on a local or public network."
+      android:text="This app uses an RTMP player. Set the RTMP URL in the Settings screen. The RTMP player will later try to open it and play it. Technically, it can play any RTMP URL that it can reach on a local or public network."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -67,7 +67,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="LifeStreamer app does not have a built-in RTMP server, but it can use any RTMP server it can reach. For most people it would make sense to run RTMP server app like MediaSrvr on the same device and stream something like action camera over Wi-Fi to the MedaSrvr RTMP server app and then play that stream with LifeStreamer."
+      android:text="The LifeStreamer app does not have a built-in RTMP server, but it can use any RTMP server it can reach. For most people, it would make sense to run an RTMP server app like MediaSrvr on the same device and stream something like an action camera over Wi-Fi to the MediaSrvr RTMP server app, and then play that stream with LifeStreamer."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -84,7 +84,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="In the bottom left corner of the Main screen there is a button to switch to/from RTMP source. Once pressed it will try to open the RTMP URL set in Settings. If successful, the app will switch preview and output to RTMP source. If not, it will fall back to placeholder image view.\n\nAudio will switch to RTMP source audio if you granted permission to record audio. If you didn't audio will use device mic."
+      android:text="In the bottom left corner of the Main screen, there is a button to switch to/from RTMP source. Once pressed, it will try to open the RTMP URL set in Settings. If successful, the app will switch preview and output to RTMP source. If not, it will fall back to a placeholder image view.\n\nAudio will switch to RTMP source audio if you granted permission to record audio. Otherwise, the app will use the device mic."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -101,7 +101,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="LifeStreamer app uses Media Projection API aka Android screen recorder to capture RTMP player audio.\n\nRTMP video is easy to capture from RTMP player without screen recorder.\n\nIf you want to capture RTMP audio, you need to allow the app to capture screen and audio when prompted by Android system dialog.\n\nLifeSteamer app only captures own audio. On newer phones Android might ask to record a single app or the whole phone. You can use either option. If you select the whole phone LifeStreamer will still capture only own audio. If you go with a single app option, please select to capture LifeStreamer app."
+      android:text="The LifeStreamer app uses the Media Projection API (aka Android screen recorder) to capture RTMP player audio.\n\nRTMP video is easy to capture from the RTMP player without a screen recorder.\n\nIf you want to capture RTMP audio, you need to allow the app to capture screen and audio when prompted by the Android system dialog.\n\nNote that the LifeStreamer app will always try to capture only its own audio with Media Projection.\n\nOn newer phones, Android might ask to record a single app or the whole phone. You can use either option.\n\nIf you select the whole phone, LifeStreamer will still capture only its own audio.\n\nIf you go with the option to capture a single app, please make sure you pick the LifeStreamer app as an to capture."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
