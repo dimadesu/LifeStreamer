@@ -1337,6 +1337,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         reconnectTimer.stop()
         Log.i(TAG, "stopStream() - Cancelled reconnection timer")
         
+        // If cleanup is already in progress, just update UI and return
+        // Don't try to stop again - it will just get blocked
+        if (isCleanupInProgress) {
+            Log.i(TAG, "stopStream() - Cleanup already in progress, just updating UI state")
+            isReconnecting = false
+            _reconnectionStatusLiveData.value = null
+            _streamStatus.value = StreamStatus.NOT_STREAMING
+            _isTryingConnectionLiveData.postValue(false)
+            return
+        }
+        
         viewModelScope.launch {
             // Track if we took an early exit path (these paths handle their own cleanup)
             var tookEarlyExit = false
