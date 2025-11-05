@@ -326,6 +326,57 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
+     * Remove bitrate regulator from streamer if streaming with SRT.
+     * Safe to call even if regulator is not attached.
+     */
+    private suspend fun removeBitrateRegulatorIfNeeded() {
+        val currentStreamer = serviceStreamer ?: return
+        val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
+        if (!isCurrentlyStreaming) return
+        
+        val isSrtStream = storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
+        if (!isSrtStream) return
+        
+        try {
+            Log.i(TAG, "Removing bitrate regulator before video source switch")
+            currentStreamer.removeBitrateRegulatorController()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+        }
+    }
+    
+    /**
+     * Re-add bitrate regulator to streamer if streaming with SRT.
+     * Waits briefly for encoder to initialize before attaching.
+     */
+    private suspend fun readdBitrateRegulatorIfNeeded() {
+        val currentStreamer = serviceStreamer ?: return
+        val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
+        if (!isCurrentlyStreaming) return
+        
+        val isSrtStream = storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
+        if (!isSrtStream) return
+        
+        try {
+            val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+            if (bitrateRegulatorConfig != null) {
+                val selectedMode = storageRepository.regulatorModeFlow.first()
+                // Small delay to let the new encoder initialize
+                delay(200)
+                currentStreamer.addBitrateRegulatorController(
+                    AdaptiveSrtBitrateRegulatorController.Factory(
+                        bitrateRegulatorConfig = bitrateRegulatorConfig,
+                        mode = selectedMode
+                    )
+                )
+                Log.i(TAG, "Re-added bitrate regulator after video source switch")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not re-add bitrate regulator: ${e.message}")
+        }
+    }
+
+    /**
      * Helper functions to interact with streamer directly (service compatibility layer)
      * 
      * @param shouldSuppressErrors If true, errors won't be posted to streamerErrorLiveData (for auto-retry)
@@ -1952,42 +2003,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Cancel existing retry job if any
                 rtmpRetryJob?.cancel()
                 
-                // If streaming with SRT, remove and re-add bitrate regulator after source switch
-                val shouldReapplyRegulator = isCurrentlyStreaming && 
-                    storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
-                
-                if (shouldReapplyRegulator) {
-                    try {
-                        Log.i(TAG, "Removing bitrate regulator before fallback bitmap switch")
-                        currentStreamer.removeBitrateRegulatorController()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-                    }
-                }
+                // Remove bitrate regulator if streaming with SRT
+                removeBitrateRegulatorIfNeeded()
                 
                 // Switch only VIDEO to bitmap - keep existing audio source to avoid glitches
                 currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
                 Log.i(TAG, "Switched to bitmap fallback (video only, keeping current audio source)")
                 
-                // Re-add bitrate regulator after source switch
-                if (shouldReapplyRegulator) {
-                    try {
-                        val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                        if (bitrateRegulatorConfig != null) {
-                            val selectedMode = storageRepository.regulatorModeFlow.first()
-                            delay(200)
-                            currentStreamer.addBitrateRegulatorController(
-                                AdaptiveSrtBitrateRegulatorController.Factory(
-                                    bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                    mode = selectedMode
-                                )
-                            )
-                            Log.i(TAG, "Re-added bitrate regulator after fallback bitmap switch")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Could not re-add bitrate regulator: ${e.message}")
-                    }
-                }
+                // Re-add bitrate regulator if streaming with SRT
+                readdBitrateRegulatorIfNeeded()
                 
                 // Small delay to let the video source release complete and surface processor cleanup
                 delay(100)
@@ -2152,20 +2176,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
                         }
 
-                        // If streaming with SRT, remove and re-add bitrate regulator after source switch
-                        // to ensure it's attached to the new encoder
-                        val shouldReapplyRegulator = isCurrentlyStreaming && 
-                            storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
+                        // Remove bitrate regulator if streaming with SRT
+                        removeBitrateRegulatorIfNeeded()
                         
-                        if (shouldReapplyRegulator) {
-                            try {
-                                Log.i(TAG, "Removing bitrate regulator before RTMP source switch")
-                                currentStreamer.removeBitrateRegulatorController()
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-                            }
-                        }
-
                         // Cancel any existing retry job first
                         rtmpRetryJob?.cancel()
                         rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
@@ -2180,26 +2193,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             onRtmpConnected = { player -> monitorRtmpConnection(player) }
                         )
                         
-                        // Re-add bitrate regulator after source switch
-                        if (shouldReapplyRegulator) {
-                            try {
-                                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                                if (bitrateRegulatorConfig != null) {
-                                    val selectedMode = storageRepository.regulatorModeFlow.first()
-                                    // Small delay to let the new encoder initialize
-                                    delay(200)
-                                    currentStreamer.addBitrateRegulatorController(
-                                        AdaptiveSrtBitrateRegulatorController.Factory(
-                                            bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                            mode = selectedMode
-                                        )
-                                    )
-                                    Log.i(TAG, "Re-added bitrate regulator after RTMP source switch")
-                                }
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Could not re-add bitrate regulator: ${e.message}")
-                            }
-                        }
+                        // Re-add bitrate regulator if streaming with SRT
+                        readdBitrateRegulatorIfNeeded()
                     }
                 }
                 else -> {
@@ -2242,19 +2237,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // This prevents resource conflicts when hot-swapping sources
                     kotlinx.coroutines.delay(300)
                     
-                    // If streaming with SRT, remove and re-add bitrate regulator after source switch
-                    // to ensure it's attached to the new encoder
-                    val shouldReapplyRegulator = isCurrentlyStreaming && 
-                        storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
-                    
-                    if (shouldReapplyRegulator) {
-                        try {
-                            Log.i(TAG, "Removing bitrate regulator before Camera source switch")
-                            currentStreamer.removeBitrateRegulatorController()
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-                        }
-                    }
+                    // Remove bitrate regulator if streaming with SRT
+                    removeBitrateRegulatorIfNeeded()
                     
                     // Switch to camera sources - restore last used camera if available
                     val cameraId = lastUsedCameraId
@@ -2266,26 +2250,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "Switched to camera video (default camera) and microphone audio")
                     }
                     
-                    // Re-add bitrate regulator after source switch
-                    if (shouldReapplyRegulator) {
-                        try {
-                            val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                            if (bitrateRegulatorConfig != null) {
-                                val selectedMode = storageRepository.regulatorModeFlow.first()
-                                // Small delay to let the new encoder initialize
-                                delay(200)
-                                currentStreamer.addBitrateRegulatorController(
-                                    AdaptiveSrtBitrateRegulatorController.Factory(
-                                        bitrateRegulatorConfig = bitrateRegulatorConfig,
-                                        mode = selectedMode
-                                    )
-                                )
-                                Log.i(TAG, "Re-added bitrate regulator after Camera source switch")
-                            }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Could not re-add bitrate regulator: ${e.message}")
-                        }
-                    }
+                    // Re-add bitrate regulator if streaming with SRT
+                    readdBitrateRegulatorIfNeeded()
                 }
             }
 //            when (videoSource) {
