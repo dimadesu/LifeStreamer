@@ -1354,20 +1354,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     isReconnecting = false
                     _reconnectionStatusLiveData.value = null
                     
-                    // THIRD: Update UI state so user gets instant feedback
+                    // Update UI state so user gets instant feedback
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                     _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
                     
-                    // FOURTH: Unlock stream rotation since we're truly stopped
+                    // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
-                    // Mark cleanup in progress before starting background close
+                    // Close endpoint asynchronously to avoid blocking
+                    // Set flag and launch cleanup in one atomic operation
                     isCleanupInProgress = true
                     Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for reconnection cancel cleanup")
-                    
-                    // FIFTH: Close endpoint asynchronously to avoid blocking
-                    // userStoppedManually is already true, so any error callbacks will be ignored
                     viewModelScope.launch {
                         try {
                             Log.d(TAG, "Closing endpoint in background...")
@@ -1378,7 +1376,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
                         } finally {
-                            // Always clear cleanup flag when background close completes
                             isCleanupInProgress = false
                             Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after reconnection cancel cleanup")
                         }
@@ -1405,21 +1402,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     reconnectTimer.stop()
                     isReconnecting = false
                     
-                    // THIRD: Update UI state so user gets instant feedback
+                    // Update UI state so user gets instant feedback
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                     _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
                     
-                    // FOURTH: Unlock stream rotation since we're truly stopped
+                    // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
-                    // Mark cleanup in progress before starting background close
+                    // Close endpoint asynchronously to avoid blocking UI
+                    // Set flag and launch cleanup in one atomic operation
                     isCleanupInProgress = true
                     Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for connection attempt cleanup")
-                    
-                    // FIFTH: Close endpoint asynchronously to avoid blocking UI
-                    // SRT connection timeout can take several seconds, so we do this in background
-                    // userStoppedManually is already true, so any error callbacks will be ignored
                     viewModelScope.launch {
                         try {
                             Log.d(TAG, "Closing endpoint in background (may take a few seconds for SRT timeout)...")
@@ -1430,7 +1424,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
                         } finally {
-                            // Always clear cleanup flag when background close completes
                             isCleanupInProgress = false
                             Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after connection attempt cleanup")
                         }
