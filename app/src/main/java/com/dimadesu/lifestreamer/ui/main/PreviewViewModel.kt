@@ -121,6 +121,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     var serviceStreamer: SingleStreamer? = null
         private set
+    
+    /**
+     * Service binder for accessing service methods
+     */
+    private var serviceBinder: CameraStreamerService.CameraStreamerServiceBinder? = null
+    
     // If rotation changes while streaming we queue it here and apply it when streaming stops
     private var pendingTargetRotation: Int? = null
     private var serviceConnection: ServiceConnection? = null
@@ -670,6 +676,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 if (binder is CameraStreamerService.CameraStreamerServiceBinder) {
+                    serviceBinder = binder
                     streamerService = binder.getService()
                     serviceStreamer = binder.streamer as SingleStreamer
                     // Collect bitrate flow from service binder if available
@@ -743,6 +750,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             override fun onServiceDisconnected(name: ComponentName?) {
                 Log.w(TAG, "CameraStreamerService disconnected: $name")
+                serviceBinder = null
                 serviceStreamer = null
                 streamerService = null
                 streamerFlow.value = null
@@ -1337,14 +1345,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         viewModelScope.launch {
             try {
-                // Cancel all timers and jobs
+                // Cancel all timers and jobs FIRST
                 reconnectTimer.stop()
                 rtmpRetryJob?.cancel()
                 rtmpRetryJob = null
                 bufferingCheckJob?.cancel()
                 bufferingCheckJob = null
                 
-                // Reset all flags FIRST
+                // Reset all flags - do this before anything else
                 userStoppedManually = true
                 isReconnecting = false
                 isCleanupInProgress = false
@@ -1356,57 +1364,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 lastDisconnectReason = null
                 rtmpBufferingStartTime = 0L
                 
-                // Update UI to clean state
+                // Update UI to clean state immediately
                 _streamStatus.value = StreamStatus.NOT_STREAMING
                 _isTryingConnectionLiveData.postValue(false)
                 _reconnectionStatusLiveData.value = null
                 _isReconnectingLiveData.value = false
                 
-                // Force close streamer and clear reference
-                withContext(Dispatchers.IO) {
-                    try {
-                        withTimeout(500) {
-                            serviceStreamer?.close()
-                        }
-                        Log.i(TAG, "Force reset - closed streamer")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Force reset - couldn't close streamer: ${e.message}")
-                    }
-                }
-                
                 // Unlock rotation
                 service?.unlockStreamRotation()
                 
-                // Stop and restart the service to fully reset state
-                Log.i(TAG, "Force reset - restarting service")
-                try {
-                    // Unbind from service
-                    streamerServiceConnection?.let { conn ->
-                        application.unbindService(conn)
-                        streamerServiceConnection = null
-                    }
-                    
-                    // Stop service completely
-                    val serviceIntent = Intent(application, CameraStreamerService::class.java)
-                    application.stopService(serviceIntent)
-                    
-                    // Clear references
-                    serviceStreamer = null
-                    streamerService = null
-                    _serviceReady.value = false
-                    
-                    // Wait a moment for service to fully stop
-                    delay(500)
-                    
-                    // Rebind to recreate everything fresh
-                    bindToStreamerService()
-                    
-                    Log.i(TAG, "Force reset complete - service restarted")
-                    _streamerErrorLiveData.postValue("Streaming state has been reset. Wait a moment then try streaming again.")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error restarting service: ${e.message}", e)
-                    _streamerErrorLiveData.postValue("Reset failed: ${e.message}")
-                }
+                // Ask the service to recreate the streamer
+                // This runs async in the service so it won't block
+                serviceBinder?.forceRecreateStreamer()
+                
+                Log.i(TAG, "Force reset complete - state cleared, streamer recreating")
+                _streamerErrorLiveData.postValue("Streaming state has been reset. You can try again now.")
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error during force reset: ${e.message}", e)

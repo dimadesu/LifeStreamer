@@ -1127,6 +1127,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}
             this@CameraStreamerService.setMuted(isMuted)
         }
+        // Force recreate the streamer when it gets stuck
+        fun forceRecreateStreamer() {
+            try { Log.w(TAG, "Binder.forceRecreateStreamer called") } catch (_: Throwable) {}
+            this@CameraStreamerService.forceRecreateStreamer()
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -1142,6 +1147,28 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             (streamer as? IWithAudioSource)?.audioInput?.isMuted ?: false
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    /**
+     * Force recreate the streamer when it gets stuck in a bad state.
+     * This releases the old streamer - a new one will be created on next use.
+     */
+    fun forceRecreateStreamer() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                Log.w(TAG, "Force releasing streamer to allow fresh recreation...")
+                
+                // Try to release the old streamer
+                try {
+                    streamer.release()
+                    Log.i(TAG, "Released stuck streamer - will be recreated on next stream start")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing streamer: ${e.message}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to force release streamer: ${e.message}", e)
+            }
         }
     }
 
