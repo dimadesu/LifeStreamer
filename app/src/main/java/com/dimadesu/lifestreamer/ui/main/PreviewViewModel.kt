@@ -1383,7 +1383,47 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
+
+            } catch (e: Throwable) {
+                Log.e(TAG, "stopStream failed", e)
+                // Force clear state
+                streamingMediaProjection?.stop()
+                streamingMediaProjection = null
+            } finally {
+                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
+                _streamStatus.value = StreamStatus.NOT_STREAMING
                 
+                // Mark that user stopped manually to prevent reconnection
+                userStoppedManually = true
+                Log.i(TAG, "stopStream() - Set userStoppedManually=true")
+                
+                // Cancel any pending reconnection attempts
+                reconnectTimer.stop()
+                isReconnecting = false
+                _reconnectionStatusLiveData.value = null
+                
+                _isTryingConnectionLiveData.postValue(false)
+                
+                // Apply any rotation that was ignored during reconnection
+                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
+                    viewModelScope.launch {
+                        try {
+                            serviceStreamer?.setTargetRotation(ignoredRotation)
+                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to apply ignored rotation: $t")
+                        }
+                    }
+                    rotationIgnoredDuringReconnection = null
+                }
+            }
+            } // Release mutex lock
+            Log.d(TAG, "stopStream() - Released lock")
+            
+            // Wait for stream to stop and close endpoint OUTSIDE the mutex
+            // This prevents blocking the mutex for up to 5 seconds
+            val currentStreamer = serviceStreamer
+            if (currentStreamer != null) {
                 // Wait for stream to actually stop before closing endpoint
                 // This prevents calling close() while stopStream() is still executing
                 var retries = 0
@@ -1424,42 +1464,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Explicitly unlock stream rotation in the service
                 // This allows rotation to follow sensor again when truly stopped
                 service?.unlockStreamRotation()
-
-            } catch (e: Throwable) {
-                Log.e(TAG, "stopStream failed", e)
-                // Force clear state
-                streamingMediaProjection?.stop()
-                streamingMediaProjection = null
-            } finally {
-                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
-                _streamStatus.value = StreamStatus.NOT_STREAMING
-                
-                // Mark that user stopped manually to prevent reconnection
-                userStoppedManually = true
-                Log.i(TAG, "stopStream() - Set userStoppedManually=true")
-                
-                // Cancel any pending reconnection attempts
-                reconnectTimer.stop()
-                isReconnecting = false
-                _reconnectionStatusLiveData.value = null
-                
-                _isTryingConnectionLiveData.postValue(false)
-                
-                // Apply any rotation that was ignored during reconnection
-                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
-                    viewModelScope.launch {
-                        try {
-                            serviceStreamer?.setTargetRotation(ignoredRotation)
-                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to apply ignored rotation: $t")
-                        }
-                    }
-                    rotationIgnoredDuringReconnection = null
-                }
             }
-            } // Release mutex lock
-            Log.d(TAG, "stopStream() - Released lock")
         }
     }
 
