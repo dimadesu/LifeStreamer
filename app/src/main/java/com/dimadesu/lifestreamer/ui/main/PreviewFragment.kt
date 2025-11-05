@@ -115,6 +115,20 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
             // Note: Button state will be updated by streamStatus observer
         }
+        
+        // Long-press to force reset streaming state (emergency recovery)
+        binding.liveButton.setOnLongClickListener {
+            android.app.AlertDialog.Builder(requireContext())
+                .setTitle("Force Reset Streaming State")
+                .setMessage("This will forcefully reset all streaming state without graceful cleanup. Use only if the app is stuck.\n\nContinue?")
+                .setPositiveButton("Reset") { _, _ ->
+                    Log.w(TAG, "User triggered force reset")
+                    previewViewModel.forceResetStreamingState()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            true // Consume the long-click event
+        }
 
         // Commented out along with the switchCameraButton in XML
         /*

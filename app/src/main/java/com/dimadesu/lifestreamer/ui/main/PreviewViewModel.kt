@@ -1327,6 +1327,66 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
+    /**
+     * Force reset all streaming state without attempting graceful cleanup.
+     * Use this as a last resort when the app gets stuck in a bad state.
+     * This is safer than killing the UI process.
+     */
+    fun forceResetStreamingState() {
+        Log.w(TAG, "forceResetStreamingState() - Forcing complete state reset")
+        
+        viewModelScope.launch {
+            try {
+                // Cancel all timers and jobs
+                reconnectTimer.stop()
+                rtmpRetryJob?.cancel()
+                rtmpRetryJob = null
+                bufferingCheckJob?.cancel()
+                bufferingCheckJob = null
+                
+                // Reset all flags
+                userStoppedManually = true
+                isReconnecting = false
+                isCleanupInProgress = false
+                isHandlingDisconnection = false
+                needsMediaProjectionAudioRestore = false
+                
+                // Clear all state
+                rotationIgnoredDuringReconnection = null
+                lastDisconnectReason = null
+                rtmpBufferingStartTime = 0L
+                
+                // Update UI to clean state
+                _streamStatus.value = StreamStatus.NOT_STREAMING
+                _isTryingConnectionLiveData.postValue(false)
+                _reconnectionStatusLiveData.value = null
+                _isReconnectingLiveData.value = false
+                
+                // Try to close the streamer without blocking
+                withContext(Dispatchers.IO) {
+                    try {
+                        withTimeout(500) {
+                            serviceStreamer?.close()
+                        }
+                        Log.i(TAG, "Force reset - closed streamer")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Force reset - couldn't close streamer: ${e.message}")
+                    }
+                }
+                
+                // Unlock rotation
+                service?.unlockStreamRotation()
+                
+                Log.i(TAG, "Force reset complete - state cleared")
+                _streamerErrorLiveData.postValue("Streaming state has been reset. You can try streaming again.")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during force reset: ${e.message}", e)
+                _streamerErrorLiveData.postValue("Reset failed: ${e.message}")
+            }
+        }
+    }
+    
     fun stopStream() {
         // CRITICAL: Set userStoppedManually IMMEDIATELY, BEFORE acquiring mutex
         // This ensures error handlers see the flag even if they fire before we get the lock
