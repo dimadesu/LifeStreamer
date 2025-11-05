@@ -1329,8 +1329,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "stopStream() - Set userStoppedManually=true before acquiring mutex")
         
         viewModelScope.launch {
+            // Track if we took an early exit path (these paths handle their own cleanup)
+            var tookEarlyExit = false
+            
             streamOperationMutex.withLock {
                 Log.d(TAG, "stopStream() - Acquired lock")
+                
                 try {
                     val currentStreamer = serviceStreamer
 
@@ -1381,6 +1385,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                     }
                     
+                    tookEarlyExit = true
                     return@launch
                 }
 
@@ -1388,6 +1393,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
                     Log.i(TAG, "Stream is already stopped, skipping stop sequence")
                     _isTryingConnectionLiveData.postValue(false)
+                    tookEarlyExit = true
                     return@launch
                 }
                 
@@ -1429,6 +1435,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                     }
                     
+                    tookEarlyExit = true
                     return@launch
                 }
 
@@ -1490,13 +1497,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rotationIgnoredDuringReconnection = null
                 }
                 
-                // Mark that cleanup will continue outside mutex
-                // This prevents race condition if user rapidly taps stop->start
-                isCleanupInProgress = true
-                Log.i(TAG, "stopStream() - Set isCleanupInProgress=true before releasing lock")
+                // Only set cleanup flag if we didn't take an early exit path
+                // (Early exit paths manage their own cleanup flags)
+                if (!tookEarlyExit) {
+                    // Mark that cleanup will continue outside mutex
+                    // This prevents race condition if user rapidly taps stop->start
+                    isCleanupInProgress = true
+                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true before releasing lock")
+                }
             }
             } // Release mutex lock
             Log.d(TAG, "stopStream() - Released lock")
+            
+            // Skip cleanup if we took an early exit (those paths handle their own cleanup)
+            if (tookEarlyExit) {
+                Log.d(TAG, "stopStream() - Skipping main cleanup path (early exit taken)")
+                return@launch
+            }
             
             // Move cleanup to IO dispatcher to avoid blocking main thread for up to 8+ seconds
             // Wait for stream to stop and close endpoint OUTSIDE the mutex
