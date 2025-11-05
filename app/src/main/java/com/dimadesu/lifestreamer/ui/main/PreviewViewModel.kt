@@ -1344,7 +1344,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 bufferingCheckJob?.cancel()
                 bufferingCheckJob = null
                 
-                // Reset all flags
+                // Reset all flags FIRST
                 userStoppedManually = true
                 isReconnecting = false
                 isCleanupInProgress = false
@@ -1362,7 +1362,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 _reconnectionStatusLiveData.value = null
                 _isReconnectingLiveData.value = false
                 
-                // Try to close the streamer without blocking
+                // Force close streamer and clear reference
                 withContext(Dispatchers.IO) {
                     try {
                         withTimeout(500) {
@@ -1377,8 +1377,36 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Unlock rotation
                 service?.unlockStreamRotation()
                 
-                Log.i(TAG, "Force reset complete - state cleared")
-                _streamerErrorLiveData.postValue("Streaming state has been reset. You can try streaming again.")
+                // Stop and restart the service to fully reset state
+                Log.i(TAG, "Force reset - restarting service")
+                try {
+                    // Unbind from service
+                    streamerServiceConnection?.let { conn ->
+                        application.unbindService(conn)
+                        streamerServiceConnection = null
+                    }
+                    
+                    // Stop service completely
+                    val serviceIntent = Intent(application, CameraStreamerService::class.java)
+                    application.stopService(serviceIntent)
+                    
+                    // Clear references
+                    serviceStreamer = null
+                    streamerService = null
+                    _serviceReady.value = false
+                    
+                    // Wait a moment for service to fully stop
+                    delay(500)
+                    
+                    // Rebind to recreate everything fresh
+                    bindToStreamerService()
+                    
+                    Log.i(TAG, "Force reset complete - service restarted")
+                    _streamerErrorLiveData.postValue("Streaming state has been reset. Wait a moment then try streaming again.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error restarting service: ${e.message}", e)
+                    _streamerErrorLiveData.postValue("Reset failed: ${e.message}")
+                }
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error during force reset: ${e.message}", e)
