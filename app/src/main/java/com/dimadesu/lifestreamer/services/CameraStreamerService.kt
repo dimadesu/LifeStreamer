@@ -118,6 +118,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
     // Coroutine scope for periodic notification updates
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    
+    // Track if cleanup (close) is still running after stop
+    // This prevents race conditions where start is called while previous stop is still cleaning up
+    // Shared between UI (via ViewModel) and notification stops
+    @Volatile
+    private var isCleanupInProgress = false
+    
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
@@ -362,6 +369,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification action: START_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
+                        // Check if previous stop cleanup is still in progress
+                        if (isCleanupInProgress) {
+                            Log.w(TAG, "Cannot start from notification - cleanup from previous stop still in progress")
+                            // Could show a notification here if desired
+                            return@launch
+                        }
+                        
                         try {
                             // Check if we're using RTMP source - can't start from notification
                             if (isUsingRtmpSource()) {
@@ -380,6 +394,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification action: STOP_STREAM")
                     // stop streaming but keep service alive
                     serviceScope.launch(Dispatchers.Default) {
+                        // Mark cleanup in progress to prevent start racing with close()
+                        isCleanupInProgress = true
+                        Log.i(TAG, "Notification STOP - Set isCleanupInProgress=true")
+                        
                         try {
                             // Signal that user manually stopped from notification
                             // This allows ViewModel to cancel reconnection attempts
@@ -398,6 +416,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Stop from notification failed: ${e.message}")
+                        } finally {
+                            // Clear cleanup flag - it's now safe to start again
+                            isCleanupInProgress = false
+                            Log.i(TAG, "Notification STOP - Cleared isCleanupInProgress, cleanup complete")
                         }
                     }
                 }
