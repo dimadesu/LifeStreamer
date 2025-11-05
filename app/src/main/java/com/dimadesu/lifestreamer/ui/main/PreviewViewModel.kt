@@ -1362,6 +1362,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // FOURTH: Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
+                    // Mark cleanup in progress before starting background close
+                    isCleanupInProgress = true
+                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for reconnection cancel cleanup")
+                    
                     // FIFTH: Close endpoint asynchronously to avoid blocking
                     // userStoppedManually is already true, so any error callbacks will be ignored
                     viewModelScope.launch {
@@ -1373,6 +1377,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.i(TAG, "Reconnection cancelled - endpoint closed")
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                        } finally {
+                            // Always clear cleanup flag when background close completes
+                            isCleanupInProgress = false
+                            Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after reconnection cancel cleanup")
                         }
                     }
                     
@@ -1405,6 +1413,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // FOURTH: Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
+                    // Mark cleanup in progress before starting background close
+                    isCleanupInProgress = true
+                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for connection attempt cleanup")
+                    
                     // FIFTH: Close endpoint asynchronously to avoid blocking UI
                     // SRT connection timeout can take several seconds, so we do this in background
                     // userStoppedManually is already true, so any error callbacks will be ignored
@@ -1417,6 +1429,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.i(TAG, "Connection attempt aborted - endpoint closed")
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
+                        } finally {
+                            // Always clear cleanup flag when background close completes
+                            isCleanupInProgress = false
+                            Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after connection attempt cleanup")
                         }
                     }
                     
