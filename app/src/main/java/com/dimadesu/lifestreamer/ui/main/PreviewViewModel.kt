@@ -1333,6 +1333,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         userStoppedManually = true
         Log.i(TAG, "stopStream() - Set userStoppedManually=true before acquiring mutex")
         
+        // Also immediately cancel any pending reconnection timer
+        reconnectTimer.stop()
+        Log.i(TAG, "stopStream() - Cancelled reconnection timer")
+        
         viewModelScope.launch {
             // Track if we took an early exit path (these paths handle their own cleanup)
             var tookEarlyExit = false
