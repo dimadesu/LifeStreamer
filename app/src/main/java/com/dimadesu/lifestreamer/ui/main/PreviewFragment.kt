@@ -120,10 +120,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.liveButton.setOnLongClickListener {
             android.app.AlertDialog.Builder(requireContext())
                 .setTitle("Force Reset Streaming State")
-                .setMessage("This will forcefully reset all streaming state without graceful cleanup. Use only if the app is stuck.\n\nContinue?")
+                .setMessage("This will forcefully reset all streaming state and restart the camera preview. Use only if the app is stuck.\n\nContinue?")
                 .setPositiveButton("Reset") { _, _ ->
                     Log.w(TAG, "User triggered force reset")
                     previewViewModel.forceResetStreamingState()
+                    // Also restart the preview after a short delay
+                    lifecycleScope.launch {
+                        delay(500) // Wait for state to clear
+                        restartPreview()
+                    }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -617,6 +622,51 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
     }
 
+    /**
+     * Force restart the preview by stopping and restarting it.
+     * Use this when the camera/encoder gets stuck.
+     */
+    fun restartPreview() {
+        Log.w(TAG, "Restarting preview to recover from stuck state")
+        lifecycleScope.launch {
+            try {
+                val preview = binding.preview
+                val streamer = previewViewModel.serviceStreamer
+                
+                if (streamer == null) {
+                    Log.w(TAG, "Cannot restart preview - streamer is null")
+                    return@launch
+                }
+                
+                // Stop preview by clearing the streamer reference
+                try {
+                    preview.streamer = null
+                    Log.d(TAG, "Cleared preview streamer")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error clearing preview streamer: ${e.message}")
+                }
+                
+                // Wait a moment
+                delay(300)
+                
+                // Restart preview
+                try {
+                    if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
+                        inflateStreamerPreview(streamer)
+                        Log.i(TAG, "Preview restarted successfully")
+                    } else {
+                        Log.w(TAG, "Cannot restart preview - camera permission not granted")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error restarting preview: ${e.message}", e)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to restart preview: ${e.message}", e)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.CAMERA)
     private fun inflateStreamerPreview(streamer: SingleStreamer) {
         val preview = binding.preview
