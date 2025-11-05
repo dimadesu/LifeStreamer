@@ -1952,9 +1952,42 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Cancel existing retry job if any
                 rtmpRetryJob?.cancel()
                 
+                // If streaming with SRT, remove and re-add bitrate regulator after source switch
+                val shouldReapplyRegulator = isCurrentlyStreaming && 
+                    storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
+                
+                if (shouldReapplyRegulator) {
+                    try {
+                        Log.i(TAG, "Removing bitrate regulator before fallback bitmap switch")
+                        currentStreamer.removeBitrateRegulatorController()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                    }
+                }
+                
                 // Switch only VIDEO to bitmap - keep existing audio source to avoid glitches
                 currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
                 Log.i(TAG, "Switched to bitmap fallback (video only, keeping current audio source)")
+                
+                // Re-add bitrate regulator after source switch
+                if (shouldReapplyRegulator) {
+                    try {
+                        val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                        if (bitrateRegulatorConfig != null) {
+                            val selectedMode = storageRepository.regulatorModeFlow.first()
+                            delay(200)
+                            currentStreamer.addBitrateRegulatorController(
+                                AdaptiveSrtBitrateRegulatorController.Factory(
+                                    bitrateRegulatorConfig = bitrateRegulatorConfig,
+                                    mode = selectedMode
+                                )
+                            )
+                            Log.i(TAG, "Re-added bitrate regulator after fallback bitmap switch")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not re-add bitrate regulator: ${e.message}")
+                    }
+                }
                 
                 // Small delay to let the video source release complete and surface processor cleanup
                 delay(100)
