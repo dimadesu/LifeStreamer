@@ -287,6 +287,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
     private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
     
+    // Track if cleanup (polling + close) is still running after mutex release
+    // This prevents race conditions where user starts stream while previous stop is still cleaning up
+    @Volatile
+    private var isCleanupInProgress = false
+    
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
     val reconnectionStatusLiveData: LiveData<String?> = _reconnectionStatusLiveData
@@ -1035,6 +1040,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             streamOperationMutex.withLock {
                 Log.d(TAG, "startStream() - Acquired lock")
+                
+                // Check if previous stop cleanup is still in progress
+                if (isCleanupInProgress) {
+                    Log.w(TAG, "Cannot start stream - cleanup from previous stop still in progress")
+                    _streamerErrorLiveData.postValue("Please wait - stopping previous stream...")
+                    return@launch
+                }
+                
                 // Clear manual stop flag when starting a new stream
                 userStoppedManually = false
                 Log.i(TAG, "startStream() - Reset userStoppedManually=false")
@@ -1383,47 +1396,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
                 }
-                
-                // Wait for stream to actually stop before closing endpoint
-                // This prevents calling close() while stopStream() is still executing
-                var retries = 0
-                while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
-                    kotlinx.coroutines.delay(100)
-                    retries++
-                }
-                
-                if (retries >= 50) {
-                    Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
-                }
-                
-                // Close the endpoint connection to allow fresh connection on next start
-                // Without this, the endpoint stays open and cannot be reopened on next start
-                try {
-                    withTimeout(3000) {
-                        currentStreamer.close()
-                    }
-                    Log.i(TAG, "Endpoint connection closed - ready for next start")
-                } catch (e: Exception) {
-                    Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
-                }
-                
-                // Clear MediaProjection from service to prevent reusing expired tokens
-                mediaProjectionHelper.clearMediaProjection()
-                Log.i(TAG, "MediaProjection cleared from service")
-                
-                if (currentStreamer.isStreamingFlow.value == true) {
-                    Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
-                }
-                
-                // Don't reset audio source here - it will be properly set when starting next stream
-                // Resetting after stop/close can leave the source in a broken state
-                Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
-
-                Log.i(TAG, "Stream stop completed successfully")
-                
-                // Explicitly unlock stream rotation in the service
-                // This allows rotation to follow sensor again when truly stopped
-                service?.unlockStreamRotation()
 
             } catch (e: Throwable) {
                 Log.e(TAG, "stopStream failed", e)
@@ -1457,9 +1429,69 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                     rotationIgnoredDuringReconnection = null
                 }
+                
+                // Mark that cleanup will continue outside mutex
+                // This prevents race condition if user rapidly taps stop->start
+                isCleanupInProgress = true
+                Log.i(TAG, "stopStream() - Set isCleanupInProgress=true before releasing lock")
             }
             } // Release mutex lock
             Log.d(TAG, "stopStream() - Released lock")
+            
+            // Move cleanup to IO dispatcher to avoid blocking main thread for up to 8+ seconds
+            // Wait for stream to stop and close endpoint OUTSIDE the mutex
+            // Protected by isCleanupInProgress flag to prevent start() racing with cleanup
+            withContext(Dispatchers.IO) {
+                val currentStreamer = serviceStreamer
+                if (currentStreamer != null) {
+                    try {
+                    // Wait for stream to actually stop before closing endpoint
+                    // This prevents calling close() while stopStream() is still executing
+                    var retries = 0
+                    while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
+                        kotlinx.coroutines.delay(100)
+                        retries++
+                    }
+                    
+                    if (retries >= 50) {
+                        Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
+                    }
+                    
+                    // Close the endpoint connection to allow fresh connection on next start
+                    // Without this, the endpoint stays open and cannot be reopened on next start
+                    try {
+                        withTimeout(3000) {
+                            currentStreamer.close()
+                        }
+                        Log.i(TAG, "Endpoint connection closed - ready for next start")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
+                    }
+                    
+                    // Clear MediaProjection from service to prevent reusing expired tokens
+                    mediaProjectionHelper.clearMediaProjection()
+                    Log.i(TAG, "MediaProjection cleared from service")
+                    
+                    if (currentStreamer.isStreamingFlow.value == true) {
+                        Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
+                    }
+                    
+                    // Don't reset audio source here - it will be properly set when starting next stream
+                    // Resetting after stop/close can leave the source in a broken state
+                    Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
+
+                    Log.i(TAG, "Stream stop completed successfully")
+                    
+                    // Explicitly unlock stream rotation in the service
+                    // This allows rotation to follow sensor again when truly stopped
+                    service?.unlockStreamRotation()
+                    } finally {
+                        // Clear cleanup flag - it's now safe to start a new stream
+                        isCleanupInProgress = false
+                        Log.i(TAG, "stopStream() - Cleared isCleanupInProgress, cleanup complete")
+                    }
+                }
+            }
         }
     }
 
