@@ -1386,22 +1386,38 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
-                    // Close endpoint asynchronously to avoid blocking
-                    // Set flag and launch cleanup in one atomic operation
-                    isCleanupInProgress = true
-                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for reconnection cancel cleanup")
-                    viewModelScope.launch {
-                        try {
-                            Log.d(TAG, "Closing endpoint in background...")
-                            withTimeout(3000) {
-                                currentStreamer.close()
+                    // If we were actually streaming, do slow cleanup in background with flag
+                    // If just reconnecting/connecting, close quickly without the flag
+                    if (currentStreamingState == true) {
+                        // Was actually streaming, need slow cleanup
+                        isCleanupInProgress = true
+                        Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
+                        viewModelScope.launch {
+                            try {
+                                Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
+                                withTimeout(8000) {
+                                    currentStreamer.close()
+                                }
+                                Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                            } finally {
+                                isCleanupInProgress = false
+                                Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after reconnection cancel cleanup")
                             }
-                            Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                        }
+                    } else {
+                        // Was just connecting/reconnecting, close quickly
+                        try {
+                            Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
+                            withContext(Dispatchers.IO) {
+                                withTimeout(1000) {
+                                    currentStreamer.close()
+                                }
+                            }
+                            Log.i(TAG, "Reconnection cancelled - endpoint closed quickly")
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
-                        } finally {
-                            isCleanupInProgress = false
-                            Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after reconnection cancel cleanup")
                         }
                     }
                     
@@ -1436,23 +1452,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
-                    // Close endpoint asynchronously to avoid blocking UI
-                    // Set flag and launch cleanup in one atomic operation
-                    isCleanupInProgress = true
-                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for connection attempt cleanup")
-                    viewModelScope.launch {
-                        try {
-                            Log.d(TAG, "Closing endpoint in background (may take a few seconds for SRT timeout)...")
-                            withTimeout(3000) {
+                    // Close endpoint synchronously - it should be fast since we never actually streamed
+                    // No need for isCleanupInProgress flag since this is quick
+                    try {
+                        Log.d(TAG, "Closing endpoint (connection attempt never succeeded)...")
+                        withContext(Dispatchers.IO) {
+                            withTimeout(1000) {
                                 currentStreamer.close()
                             }
-                            Log.i(TAG, "Connection attempt aborted - endpoint closed")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
-                        } finally {
-                            isCleanupInProgress = false
-                            Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after connection attempt cleanup")
                         }
+                        Log.i(TAG, "Connection attempt aborted - endpoint closed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
                     }
                     
                     tookEarlyExit = true
