@@ -1095,6 +1095,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Check if previous stop cleanup is still in progress
                 if (isCleanupInProgress) {
                     Log.w(TAG, "Cannot start stream - cleanup from previous stop still in progress")
+                    
+                    // Cancel any pending reconnection timers since we can't start anyway
+                    reconnectTimer.stop()
+                    isReconnecting = false
+                    
                     _streamerErrorLiveData.postValue("Please wait - stopping previous stream...")
                     return@launch
                 }
@@ -1731,6 +1736,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
                     isReconnecting = false
                     _reconnectionStatusLiveData.value = null
+                    return@launch
+                }
+                
+                // Check if cleanup is still in progress from a previous stop
+                if (isCleanupInProgress) {
+                    Log.w(TAG, "Cleanup still in progress, delaying reconnection attempt")
+                    // Reschedule after a short delay to let cleanup finish
+                    reconnectTimer.startSingleShot(timeoutSeconds = 2) {
+                        if (!userStoppedManually) {
+                            attemptReconnection()
+                        }
+                    }
                     return@launch
                 }
                 
