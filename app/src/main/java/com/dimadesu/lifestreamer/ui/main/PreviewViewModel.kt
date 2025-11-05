@@ -1095,6 +1095,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Check if previous stop cleanup is still in progress
                 if (isCleanupInProgress) {
                     Log.w(TAG, "Cannot start stream - cleanup from previous stop still in progress")
+                    
+                    // Cancel any pending reconnection timers since we can't start anyway
+                    reconnectTimer.stop()
+                    isReconnecting = false
+                    
                     _streamerErrorLiveData.postValue("Please wait - stopping previous stream...")
                     return@launch
                 }
@@ -1328,9 +1333,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         userStoppedManually = true
         Log.i(TAG, "stopStream() - Set userStoppedManually=true before acquiring mutex")
         
+        // Also immediately cancel any pending reconnection timer
+        reconnectTimer.stop()
+        Log.i(TAG, "stopStream() - Cancelled reconnection timer")
+        
+        // If cleanup is already in progress, just update UI and return
+        // Don't try to stop again - it will just get blocked
+        if (isCleanupInProgress) {
+            Log.i(TAG, "stopStream() - Cleanup already in progress, just updating UI state")
+            isReconnecting = false
+            _reconnectionStatusLiveData.value = null
+            _streamStatus.value = StreamStatus.NOT_STREAMING
+            _isTryingConnectionLiveData.postValue(false)
+            return
+        }
+        
         viewModelScope.launch {
+            // Track if we took an early exit path (these paths handle their own cleanup)
+            var tookEarlyExit = false
+            
             streamOperationMutex.withLock {
                 Log.d(TAG, "stopStream() - Acquired lock")
+                
                 try {
                     val currentStreamer = serviceStreamer
 
@@ -1354,28 +1378,50 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     isReconnecting = false
                     _reconnectionStatusLiveData.value = null
                     
-                    // THIRD: Update UI state so user gets instant feedback
+                    // Update UI state so user gets instant feedback
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                     _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
                     
-                    // FOURTH: Unlock stream rotation since we're truly stopped
+                    // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
-                    // FIFTH: Close endpoint asynchronously to avoid blocking
-                    // userStoppedManually is already true, so any error callbacks will be ignored
-                    viewModelScope.launch {
-                        try {
-                            Log.d(TAG, "Closing endpoint in background...")
-                            withTimeout(3000) {
-                                currentStreamer.close()
+                    // If we were actually streaming, do slow cleanup in background with flag
+                    // If just reconnecting/connecting, close quickly without the flag
+                    if (currentStreamingState == true) {
+                        // Was actually streaming, need slow cleanup
+                        isCleanupInProgress = true
+                        Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
+                        viewModelScope.launch {
+                            try {
+                                Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
+                                withTimeout(3000) {
+                                    currentStreamer.close()
+                                }
+                                Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                            } finally {
+                                isCleanupInProgress = false
+                                Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after reconnection cancel cleanup")
                             }
-                            Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                        }
+                    } else {
+                        // Was just connecting/reconnecting, close quickly
+                        try {
+                            Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
+                            withContext(Dispatchers.IO) {
+                                withTimeout(1000) {
+                                    currentStreamer.close()
+                                }
+                            }
+                            Log.i(TAG, "Reconnection cancelled - endpoint closed quickly")
                         } catch (e: Exception) {
                             Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
                         }
                     }
                     
+                    tookEarlyExit = true
                     return@launch
                 }
 
@@ -1383,6 +1429,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
                     Log.i(TAG, "Stream is already stopped, skipping stop sequence")
                     _isTryingConnectionLiveData.postValue(false)
+                    tookEarlyExit = true
                     return@launch
                 }
                 
@@ -1397,29 +1444,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     reconnectTimer.stop()
                     isReconnecting = false
                     
-                    // THIRD: Update UI state so user gets instant feedback
+                    // Update UI state so user gets instant feedback
                     _streamStatus.value = StreamStatus.NOT_STREAMING
                     _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
                     
-                    // FOURTH: Unlock stream rotation since we're truly stopped
+                    // Unlock stream rotation since we're truly stopped
                     service?.unlockStreamRotation()
                     
-                    // FIFTH: Close endpoint asynchronously to avoid blocking UI
-                    // SRT connection timeout can take several seconds, so we do this in background
-                    // userStoppedManually is already true, so any error callbacks will be ignored
-                    viewModelScope.launch {
-                        try {
-                            Log.d(TAG, "Closing endpoint in background (may take a few seconds for SRT timeout)...")
-                            withTimeout(3000) {
+                    // Close endpoint synchronously - it should be fast since we never actually streamed
+                    // No need for isCleanupInProgress flag since this is quick
+                    try {
+                        Log.d(TAG, "Closing endpoint (connection attempt never succeeded)...")
+                        withContext(Dispatchers.IO) {
+                            withTimeout(1000) {
                                 currentStreamer.close()
                             }
-                            Log.i(TAG, "Connection attempt aborted - endpoint closed")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
                         }
+                        Log.i(TAG, "Connection attempt aborted - endpoint closed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
                     }
                     
+                    tookEarlyExit = true
                     return@launch
                 }
 
@@ -1481,66 +1528,79 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rotationIgnoredDuringReconnection = null
                 }
                 
-                // Mark that cleanup will continue outside mutex
-                // This prevents race condition if user rapidly taps stop->start
-                isCleanupInProgress = true
-                Log.i(TAG, "stopStream() - Set isCleanupInProgress=true before releasing lock")
+                // Only set cleanup flag if we didn't take an early exit path
+                // (Early exit paths manage their own cleanup flags)
+                if (!tookEarlyExit) {
+                    // Mark that cleanup will continue outside mutex
+                    // This prevents race condition if user rapidly taps stop->start
+                    isCleanupInProgress = true
+                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true before releasing lock")
+                }
             }
             } // Release mutex lock
             Log.d(TAG, "stopStream() - Released lock")
+            
+            // Skip cleanup if we took an early exit (those paths handle their own cleanup)
+            if (tookEarlyExit) {
+                Log.d(TAG, "stopStream() - Skipping main cleanup path (early exit taken)")
+                return@launch
+            }
             
             // Move cleanup to IO dispatcher to avoid blocking main thread for up to 8+ seconds
             // Wait for stream to stop and close endpoint OUTSIDE the mutex
             // Protected by isCleanupInProgress flag to prevent start() racing with cleanup
             withContext(Dispatchers.IO) {
-                val currentStreamer = serviceStreamer
-                if (currentStreamer != null) {
-                    try {
-                    // Wait for stream to actually stop before closing endpoint
-                    // This prevents calling close() while stopStream() is still executing
-                    var retries = 0
-                    while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
-                        kotlinx.coroutines.delay(100)
-                        retries++
-                    }
-                    
-                    if (retries >= 50) {
-                        Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
-                    }
-                    
-                    // Close the endpoint connection to allow fresh connection on next start
-                    // Without this, the endpoint stays open and cannot be reopened on next start
-                    try {
-                        withTimeout(3000) {
-                            currentStreamer.close()
+                try {
+                    val currentStreamer = serviceStreamer
+                    if (currentStreamer != null) {
+                        // Wait for stream to actually stop before closing endpoint
+                        // This prevents calling close() while stopStream() is still executing
+                        var retries = 0
+                        while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
+                            kotlinx.coroutines.delay(100)
+                            retries++
                         }
-                        Log.i(TAG, "Endpoint connection closed - ready for next start")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
-                    }
-                    
-                    // Clear MediaProjection from service to prevent reusing expired tokens
-                    mediaProjectionHelper.clearMediaProjection()
-                    Log.i(TAG, "MediaProjection cleared from service")
-                    
-                    if (currentStreamer.isStreamingFlow.value == true) {
-                        Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
-                    }
-                    
-                    // Don't reset audio source here - it will be properly set when starting next stream
-                    // Resetting after stop/close can leave the source in a broken state
-                    Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
+                        
+                        if (retries >= 50) {
+                            Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
+                        }
+                        
+                        // Close the endpoint connection to allow fresh connection on next start
+                        // Without this, the endpoint stays open and cannot be reopened on next start
+                        try {
+                            withTimeout(3000) {
+                                currentStreamer.close()
+                            }
+                            Log.i(TAG, "Endpoint connection closed - ready for next start")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
+                        }
+                        
+                        // Clear MediaProjection from service to prevent reusing expired tokens
+                        mediaProjectionHelper.clearMediaProjection()
+                        Log.i(TAG, "MediaProjection cleared from service")
+                        
+                        if (currentStreamer.isStreamingFlow.value == true) {
+                            Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
+                        }
+                        
+                        // Don't reset audio source here - it will be properly set when starting next stream
+                        // Resetting after stop/close can leave the source in a broken state
+                        Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
 
-                    Log.i(TAG, "Stream stop completed successfully")
-                    
-                    // Explicitly unlock stream rotation in the service
-                    // This allows rotation to follow sensor again when truly stopped
-                    service?.unlockStreamRotation()
-                    } finally {
-                        // Clear cleanup flag - it's now safe to start a new stream
-                        isCleanupInProgress = false
-                        Log.i(TAG, "stopStream() - Cleared isCleanupInProgress, cleanup complete")
+                        Log.i(TAG, "Stream stop completed successfully")
+                        
+                        // Explicitly unlock stream rotation in the service
+                        // This allows rotation to follow sensor again when truly stopped
+                        service?.unlockStreamRotation()
+                    } else {
+                        Log.w(TAG, "serviceStreamer is null during cleanup - skipping streamer cleanup")
                     }
+                } finally {
+                    // ALWAYS clear cleanup flag - even if serviceStreamer was null or cleanup failed
+                    // This prevents the flag from getting stuck and blocking future stream starts
+                    isCleanupInProgress = false
+                    Log.i(TAG, "stopStream() - Cleared isCleanupInProgress, cleanup complete")
                 }
             }
         }
@@ -1702,6 +1762,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
                     isReconnecting = false
                     _reconnectionStatusLiveData.value = null
+                    return@launch
+                }
+                
+                // Check if cleanup is still in progress from a previous stop
+                if (isCleanupInProgress) {
+                    Log.w(TAG, "Cleanup still in progress, delaying reconnection attempt")
+                    // Reschedule after a short delay to let cleanup finish
+                    reconnectTimer.startSingleShot(timeoutSeconds = 2) {
+                        if (!userStoppedManually) {
+                            attemptReconnection()
+                        }
+                    }
                     return@launch
                 }
                 
