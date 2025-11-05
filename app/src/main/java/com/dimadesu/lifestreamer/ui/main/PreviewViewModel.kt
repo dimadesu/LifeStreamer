@@ -1395,7 +1395,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         viewModelScope.launch {
                             try {
                                 Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
-                                withTimeout(8000) {
+                                withTimeout(3000) {
                                     currentStreamer.close()
                                 }
                                 Log.i(TAG, "Reconnection cancelled - endpoint closed")
