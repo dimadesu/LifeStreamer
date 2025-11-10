@@ -119,14 +119,14 @@
 
     <string name="endpoint_type">Type</string>
     <string name="endpoint_type_key">endpoint_type_key_v2</string>
-    <string name="to_ts_file">Write to a TS file</string>
-    <string name="to_flv_file">Write to a FLV file</string>
-    <string name="to_srt">Stream to a remote SRT device</string>
-    <string name="to_rtmp">Stream to a remote RTMP device</string>
-    <string name="to_mp4_file">Write to a MP4 file</string>
-    <string name="to_webm_file">Write to a WebM file</string>
-    <string name="to_ogg_file">Write to an OGG file</string>
-    <string name="to_3gp_file">Write to a 3GP file</string>
+    <string name="to_ts_file">Record TS file</string>
+    <string name="to_flv_file">Record FLV file</string>
+    <string name="to_srt">Stream SRT</string>
+    <string name="to_rtmp">Stream RTMP</string>
+    <string name="to_mp4_file">Record MP4 file</string>
+    <string name="to_webm_file">Record WebM file</string>
+    <string name="to_ogg_file">Record OGG file</string>
+    <string name="to_3gp_file">Record 3GP file</string>
 
     <string name="srt_server">SRT Server</string>
     <string name="srt_server_key">srt_server_key</string>
