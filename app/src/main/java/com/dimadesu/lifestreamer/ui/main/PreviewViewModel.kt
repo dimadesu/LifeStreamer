@@ -1676,7 +1676,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
         _streamStatus.value = StreamStatus.CONNECTING
-        _reconnectionStatusLiveData.postValue("Connection lost. Reconnecting in 5 seconds...")
+        _reconnectionStatusLiveData.postValue("Could not connect. Reconnecting in 5 seconds")
         
         // Update service notification to show "Connecting..." status
         service?.updateStreamStatus(StreamStatus.CONNECTING)
@@ -1826,7 +1826,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
                 if (!sourcesValid) {
                     Log.e(TAG, "Reconnection failed: $sourceError")
-                    _reconnectionStatusLiveData.postValue("Reconnection failed - sources not configured")
+                    _reconnectionStatusLiveData.postValue("Reconnection failed. Sources not configured")
                     isReconnecting = false
                     _streamStatus.value = StreamStatus.ERROR
                     return@launch
@@ -1890,7 +1890,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                     
                     Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
-                    _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
+                    _reconnectionStatusLiveData.postValue("Reconnection failed. Retrying in 5 seconds")
                     
                     // Keep isReconnecting = true for retry attempt
                     // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
@@ -1910,7 +1910,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
-                _reconnectionStatusLiveData.postValue("Reconnection failed - retrying in 5 seconds...")
+                _reconnectionStatusLiveData.postValue("Reconnection failed. Retrying in 5 seconds")
                 
                 // Keep isReconnecting = true for retry attempt
                 // Schedule another reconnection attempt directly

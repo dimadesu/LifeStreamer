@@ -197,7 +197,7 @@ internal object RtmpSourceSwitchHelper {
                             switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
                         }
                         if (isActive) {
-                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 seconds")
                         }
                         delay(5000)
                         continue
@@ -303,7 +303,7 @@ internal object RtmpSourceSwitchHelper {
                             }
                             // Wait and retry
                             if (isActive) {
-                                postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                                postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 seconds")
                             }
                             delay(5000)
                             continue
@@ -317,7 +317,7 @@ internal object RtmpSourceSwitchHelper {
                         }
                         // Wait and retry
                         if (isActive) {
-                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                            postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 seconds")
                         }
                         delay(5000)
                         continue
@@ -326,7 +326,7 @@ internal object RtmpSourceSwitchHelper {
                     Log.e(TAG, "switchToRtmpSource unexpected error: ${e.message}", e)
                     // Wait and retry
                     if (isActive) {
-                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 sec")
+                        postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 seconds")
                     }
                     delay(5000)
                     continue
