@@ -383,6 +383,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private suspend fun startServiceStreaming(descriptor: MediaDescriptor, shouldSuppressErrors: Boolean = false): Boolean {
         return try {
+            // Check if user stopped before we even start
+            if (userStoppedManually) {
+                Log.i(TAG, "startServiceStreaming: User stopped manually, aborting")
+                return false
+            }
+            
             Log.i(TAG, "startServiceStreaming: Opening streamer with descriptor: $descriptor")
 
             val currentStreamer = serviceStreamer
@@ -415,12 +421,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             Log.i(TAG, "startServiceStreaming: serviceStreamer available, calling open()...")
 
-            // Add timeout to prevent hanging, but use NonCancellable for camera configuration
-            // to prevent "Broken pipe" errors if coroutine is cancelled during camera setup
+            // Add timeout to prevent hanging
+            // Run on IO dispatcher to prevent blocking UI thread
             withTimeout(5000) { // 5 second timeout
-                // withContext(NonCancellable) {
+                withContext(kotlinx.coroutines.Dispatchers.IO) {
                     currentStreamer.open(descriptor)
-                // }
+                }
             }
             Log.i(TAG, "startServiceStreaming: open() completed, calling startStream()...")
             
@@ -461,10 +467,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
             
+            // Check if user stopped before calling the blocking startStream()
+            if (userStoppedManually) {
+                Log.i(TAG, "startServiceStreaming: User stopped manually before startStream(), aborting")
+                return false
+            }
+
             // Protect startStream() from cancellation to prevent camera configuration errors
-            // withContext(NonCancellable) {
+            // Run on IO dispatcher to prevent blocking UI thread during RTMP connectStream()
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
                 currentStreamer.startStream()
-            // }
+            }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             true
         } catch (e: TimeoutCancellationException) {
@@ -882,7 +895,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=$userStoppedManually, isReconnecting=$isReconnecting")
                         
                         if (isStreaming) {
-                            _streamStatus.value = StreamStatus.STREAMING
+                            // Don't change to STREAMING during reconnection - keep CONNECTING status
+                            // This ensures stop button works during reconnection attempts
+                            if (!isReconnecting) {
+                                _streamStatus.value = StreamStatus.STREAMING
+                            } else {
+                                Log.d(TAG, "Stream started during reconnection - keeping CONNECTING status for stop button")
+                            }
                         } else {
                             // Stream stopped - check if this was unexpected (should trigger reconnection)
                             val wasStreaming = previousStatus == StreamStatus.STREAMING || 
@@ -897,8 +916,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             } else {
                                 // Normal stop or already handling reconnection
                                 if (isReconnecting) {
-                                    Log.d(TAG, "Stream stopped during reconnection - keeping CONNECTING status")
-                                    // Don't change status, let reconnection logic handle it
+                                    Log.d(TAG, "Stream stopped during reconnection - restoring CONNECTING status for stop button")
+                                    _streamStatus.value = StreamStatus.CONNECTING
                                 } else {
                                     Log.d(TAG, "Normal stream stop - setting NOT_STREAMING")
                                     _streamStatus.value = StreamStatus.NOT_STREAMING
@@ -1089,8 +1108,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     fun startStream() {
         viewModelScope.launch {
-            streamOperationMutex.withLock {
-                Log.d(TAG, "startStream() - Acquired lock")
+            // Pre-flight checks with mutex held briefly
+            val canStart = streamOperationMutex.withLock {
+                Log.d(TAG, "startStream() - Acquired lock for pre-flight checks")
                 
                 // Check if previous stop cleanup is still in progress
                 if (isCleanupInProgress) {
@@ -1101,12 +1121,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     isReconnecting = false
                     
                     _streamerErrorLiveData.postValue("Please wait - stopping previous stream...")
-                    return@launch
+                    return@withLock false
                 }
                 
-                // Clear manual stop flag when starting a new stream
-                userStoppedManually = false
-                Log.i(TAG, "startStream() - Reset userStoppedManually=false")
+                // Only reset userStoppedManually for user-initiated starts, not reconnection attempts
+                // This prevents a race condition where stop button is pressed but reconnection is already scheduled
+                if (!isReconnecting) {
+                    userStoppedManually = false
+                    Log.i(TAG, "startStream() - Reset userStoppedManually=false (user-initiated start)")
+                } else {
+                    Log.d(TAG, "startStream() - Keeping userStoppedManually=$userStoppedManually (reconnection attempt)")
+                }
+                return@withLock true
+            }
+            
+            if (!canStart) {
+                Log.d(TAG, "startStream() - Pre-flight check failed, aborting")
+                return@launch
+            }
             
             _streamStatus.value = StreamStatus.STARTING
             Log.i(TAG, "startStream() called")
@@ -1217,8 +1249,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
                 }
             }
-            } // Release mutex lock
-            Log.d(TAG, "startStream() - Released lock")
         }
     }
 
@@ -1788,6 +1818,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 Log.i(TAG, "Executing reconnection attempt...")
                 _reconnectionStatusLiveData.postValue("Reconnecting...")
+                
+                // Set status to CONNECTING so UI shows stop button and it actually works
+                _streamStatus.value = StreamStatus.CONNECTING
 
                 // Validate that both sources exist before attempting reconnection
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
