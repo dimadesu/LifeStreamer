@@ -2199,6 +2199,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     lastUsedCameraId = videoSource.cameraId
                     Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
 
+                    // Hide camera-specific sliders when switching away from camera
+                    showZoomSlider.value = false
+                    showExposureSlider.value = false
+                    showLensDistanceSlider.value = false
+
                     // Only request MediaProjection when switching to RTMP while streaming.
                     // Requesting projection while not streaming leads to poor UX (unexpected
                     // permission prompts). If not streaming, skip the request — audio can be
