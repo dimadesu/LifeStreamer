@@ -291,7 +291,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var isReconnecting: Boolean
         get() = _isReconnectingLiveData.value ?: false
         set(value) { _isReconnectingLiveData.value = value }
-    private var userStoppedManually = false
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
     private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
@@ -393,7 +392,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun startServiceStreaming(descriptor: MediaDescriptor, shouldSuppressErrors: Boolean = false): Boolean {
         return try {
             // Check if user stopped before we even start
-            if (userStoppedManually) {
+            if (service?.userStoppedManually?.value == true) {
                 Log.i(TAG, "startServiceStreaming: User stopped manually, aborting")
                 return false
             }
@@ -477,7 +476,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             
             // Check if user stopped before calling the blocking startStream()
-            if (userStoppedManually) {
+            if (service?.userStoppedManually?.value == true) {
                 Log.i(TAG, "startServiceStreaming: User stopped manually before startStream(), aborting")
                 return false
             }
@@ -539,7 +538,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
                 
                 // Check if user stopped manually - if so, don't trigger reconnection
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.d(TAG, "User stopped stream, skipping error handling")
                     return false
                 }
@@ -582,7 +581,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val errorMessage = "Stream start failed: ${e.message}"
             
             // Check if user stopped manually - if so, don't trigger reconnection
-            if (userStoppedManually) {
+            if (service?.userStoppedManually?.value == true) {
                 Log.d(TAG, "User stopped stream, skipping error handling")
                 return false
             }
@@ -891,7 +890,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.w(TAG, "Connection lost detected: $errorMessage, status=${streamStatus.value}, isReconnecting=$isReconnecting")
                     
                     // Check if user stopped manually - if so, don't trigger reconnection
-                    if (userStoppedManually) {
+                    if (service?.userStoppedManually?.value == true) {
                         Log.d(TAG, "User stopped stream, skipping connection error handling")
                         return@collect
                     }
@@ -920,7 +919,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
                         val previousStatus = streamStatus.value
-                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=$userStoppedManually, isReconnecting=$isReconnecting")
+                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=${service?.userStoppedManually?.value}, isReconnecting=$isReconnecting")
                         
                         if (isStreaming) {
                             // Don't change to STREAMING during reconnection - keep CONNECTING status
@@ -935,9 +934,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             val wasStreaming = previousStatus == StreamStatus.STREAMING || 
                                               previousStatus == StreamStatus.CONNECTING
                             
-                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=$userStoppedManually, isReconnecting=$isReconnecting")
+                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=${service?.userStoppedManually?.value}, isReconnecting=$isReconnecting")
                             
-                            if (wasStreaming && !userStoppedManually && !isReconnecting) {
+                            if (wasStreaming && service?.userStoppedManually?.value != true && !isReconnecting) {
                                 // Unexpected disconnection - trigger reconnection
                                 Log.w(TAG, "Unexpected stream stop detected - triggering reconnection")
                                 handleDisconnection("Stream stopped unexpectedly", isInitialConnection = false)
@@ -1035,7 +1034,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             service?.userStoppedFromNotification?.collect {
                 Log.i(TAG, "User stopped from notification - cancelling reconnection")
                 // Mark as manual stop to prevent reconnection
-                userStoppedManually = true
+                service?.markUserStoppedManually()
                 // Cancel any pending reconnection
                 reconnectTimer.stop()
                 isReconnecting = false
@@ -1061,7 +1060,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (!isReconnecting) {
                             Log.i(TAG, "Triggering reconnection due to service critical error (notification start failure)")
                             // Reset userStoppedManually since this is a new start attempt from notification
-                            userStoppedManually = false
+                            service?.clearUserStoppedManually()
                             handleDisconnection(errorMessage, isInitialConnection = true)
                         } else {
                             Log.d(TAG, "Skipping reconnection trigger - already reconnecting")
@@ -1262,11 +1261,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.i(TAG, "Exception and no reconnection, setting status to ERROR")
                 }
             } finally {
-                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${streamStatus.value}, userStoppedManually=$userStoppedManually")
+                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${streamStatus.value}, userStoppedManually=${service?.userStoppedManually?.value}")
                 _isTryingConnectionLiveData.postValue(false)
                 // Don't override status if auto-retry was triggered or if we're reconnecting
                 // Also set to NOT_STREAMING if user manually stopped (handles race condition)
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.i(TAG, "startStream finally: User stopped manually, setting NOT_STREAMING")
                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                 } else if (!autoRetryTriggered && !isReconnecting && streamStatus.value != StreamStatus.STREAMING) {
@@ -1289,7 +1288,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         onError: (String) -> Unit = {}
     ) {
         // Clear manual stop flag when starting a new stream
-        userStoppedManually = false
+        service?.clearUserStoppedManually()
         Log.i(TAG, "startStreamWithMediaProjection() - Reset userStoppedManually=false")
         
         _isTryingConnectionLiveData.postValue(true)
@@ -1343,7 +1342,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     val errorMessage = "Connection failed - unable to establish stream"
                     
                     // Check if user stopped manually - if so, don't trigger reconnection
-                    if (userStoppedManually) {
+                    if (service?.userStoppedManually?.value == true) {
                         Log.d(TAG, "User stopped stream, skipping reconnection")
                         return@launch
                     }
@@ -1365,7 +1364,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
                 
                 // Check if user stopped manually - if so, don't trigger reconnection
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.d(TAG, "User stopped stream, skipping reconnection")
                     return@launch
                 }
@@ -1913,7 +1912,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } catch (e: Exception) {
                 // Check if user stopped before showing failure message
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.d(TAG, "User stopped during reconnection exception handling, skipping retry")
                     isReconnecting = false
                     _reconnectionStatusLiveData.value = null
