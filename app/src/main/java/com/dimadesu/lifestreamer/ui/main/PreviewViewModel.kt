@@ -1013,6 +1013,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 isReconnecting = false
                 _reconnectionStatusLiveData.postValue(null)
                 _streamStatus.value = StreamStatus.NOT_STREAMING
+                // Update service notification to reflect stopped state
+                service?.updateStreamStatus(StreamStatus.NOT_STREAMING)
             }
         }
         
