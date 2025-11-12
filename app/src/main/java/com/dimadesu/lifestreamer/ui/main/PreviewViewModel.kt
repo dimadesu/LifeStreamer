@@ -1392,8 +1392,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "stopStream() - Cleanup already in progress, just updating UI state")
             service?.cancelReconnection()
             service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-            service?.cancelReconnection()
-            service?.setStreamStatus(StreamStatus.NOT_STREAMING)
             return
         }
         
