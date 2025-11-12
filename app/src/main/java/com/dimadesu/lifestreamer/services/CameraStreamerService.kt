@@ -1295,6 +1295,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         Log.i(TAG, "Reconnection cancelled")
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = null
+        // Update status to NOT_STREAMING so notification observer triggers
+        _serviceStreamStatus.value = StreamStatus.NOT_STREAMING
     }
 
     // Helper to compute the localized mute/unmute label based on current audio state
