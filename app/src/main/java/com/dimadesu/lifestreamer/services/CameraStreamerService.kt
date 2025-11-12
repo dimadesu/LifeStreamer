@@ -1071,7 +1071,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
-                customNotificationUtils.notify(onCreateNotification())
+                // Don't call notify(onCreateNotification()) here - let the status observer handle it
+                // to avoid overwriting the CONNECTING notification
                 // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
                 return
@@ -1091,7 +1092,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
-                customNotificationUtils.notify(onCreateNotification())
+                // Don't call notify(onCreateNotification()) here - let the status observer handle it
+                // to avoid overwriting the CONNECTING notification
                 // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
                 return
