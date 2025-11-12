@@ -1405,178 +1405,178 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 try {
                     val currentStreamer = serviceStreamer
 
-                if (currentStreamer == null) {
-                    Log.w(TAG, "Service streamer not ready, cannot stop stream")
-                    return@launch
-                }
+                    if (currentStreamer == null) {
+                        Log.w(TAG, "Service streamer not ready, cannot stop stream")
+                        return@launch
+                    }
 
-                val currentStreamingState = currentStreamer.isStreamingFlow.value
-                val currentStatus = streamStatus.value
-                val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
-                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isCurrentlyReconnecting")
+                    val currentStreamingState = currentStreamer.isStreamingFlow.value
+                    val currentStatus = streamStatus.value
+                    val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
+                    Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isCurrentlyReconnecting")
 
-                // If reconnecting, always cancel reconnection regardless of streaming state
-                if (isCurrentlyReconnecting) {
-                    Log.i(TAG, "Cancelling active reconnection...")
-                    
-                    // userStoppedManually already marked via service before acquiring mutex
-                    
-                    // Cancel reconnection timer and clear service flags
-                    reconnectTimer.stop()
-                    service?.cancelReconnection()
-                    
-                    // Update UI state so user gets instant feedback
-                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-                    Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
-                    
-                    // Unlock stream rotation since we're truly stopped
-                    service?.unlockStreamRotation()
-                    
-                    // If we were actually streaming, do slow cleanup in background with flag
-                    // If just reconnecting/connecting, close quickly without the flag
-                    if (currentStreamingState == true) {
-                        // Was actually streaming, need slow cleanup
-                        service?.isCleanupInProgress = true
-                        Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
-                        viewModelScope.launch {
-                            try {
-                                Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
-                                withTimeout(3000) {
-                                    currentStreamer.close()
+                    // If reconnecting, always cancel reconnection regardless of streaming state
+                    if (isCurrentlyReconnecting) {
+                        Log.i(TAG, "Cancelling active reconnection...")
+                        
+                        // userStoppedManually already marked via service before acquiring mutex
+                        
+                        // Cancel reconnection timer and clear service flags
+                        reconnectTimer.stop()
+                        service?.cancelReconnection()
+                        
+                        // Update UI state so user gets instant feedback
+                        service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                        Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
+                        
+                        // Unlock stream rotation since we're truly stopped
+                        service?.unlockStreamRotation()
+                        
+                        // If we were actually streaming, do slow cleanup in background with flag
+                        // If just reconnecting/connecting, close quickly without the flag
+                        if (currentStreamingState == true) {
+                            // Was actually streaming, need slow cleanup
+                            service?.isCleanupInProgress = true
+                            Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
+                            viewModelScope.launch {
+                                try {
+                                    Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
+                                    withTimeout(3000) {
+                                        currentStreamer.close()
+                                    }
+                                    Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                                } finally {
+                                    service?.isCleanupInProgress = false
+                                    Log.i(TAG, "stopStream() - Cleared service.isCleanupInProgress after reconnection cancel cleanup")
                                 }
-                                Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                            }
+                        } else {
+                            // Was just connecting/reconnecting, close quickly
+                            try {
+                                Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
+                                withContext(Dispatchers.IO) {
+                                    withTimeout(1000) {
+                                        currentStreamer.close()
+                                    }
+                                }
+                                Log.i(TAG, "Reconnection cancelled - endpoint closed quickly")
                             } catch (e: Exception) {
                                 Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
-                            } finally {
-                                service?.isCleanupInProgress = false
-                                Log.i(TAG, "stopStream() - Cleared service.isCleanupInProgress after reconnection cancel cleanup")
                             }
                         }
-                    } else {
-                        // Was just connecting/reconnecting, close quickly
+                        
+                        tookEarlyExit = true
+                        return@launch
+                    }
+
+                    // If already stopped and not in CONNECTING state, don't do anything
+                    if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
+                        Log.i(TAG, "Stream is already stopped, skipping stop sequence")
+                        tookEarlyExit = true
+                        return@launch
+                    }
+                    
+                    // If in CONNECTING state but not streaming, force stop the connection attempt
+                    // This handles initial connection attempts that aren't part of reconnection
+                    if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
+                        Log.i(TAG, "Stopping connection attempt (userStoppedManually already set)")
+                        
+                        // userStoppedManually already set to true before acquiring mutex
+                        
+                        // Cancel any pending reconnection attempts
+                        reconnectTimer.stop()
+                        // isReconnecting managed by service
+                        
+                        // Update UI state so user gets instant feedback
+                        service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                        Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
+                        
+                        // Unlock stream rotation since we're truly stopped
+                        service?.unlockStreamRotation()
+                        
+                        // Close endpoint synchronously - it should be fast since we never actually streamed
+                        // No need for isCleanupInProgress flag since this is quick
                         try {
-                            Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
+                            Log.d(TAG, "Closing endpoint (connection attempt never succeeded)...")
                             withContext(Dispatchers.IO) {
                                 withTimeout(1000) {
                                     currentStreamer.close()
                                 }
                             }
-                            Log.i(TAG, "Reconnection cancelled - endpoint closed quickly")
+                            Log.i(TAG, "Connection attempt aborted - endpoint closed")
                         } catch (e: Exception) {
-                            Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                            Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
                         }
+                        
+                        tookEarlyExit = true
+                        return@launch
                     }
-                    
-                    tookEarlyExit = true
-                    return@launch
-                }
 
-                // If already stopped and not in CONNECTING state, don't do anything
-                if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
-                    Log.i(TAG, "Stream is already stopped, skipping stop sequence")
-                    tookEarlyExit = true
-                    return@launch
-                }
-                
-                // If in CONNECTING state but not streaming, force stop the connection attempt
-                // This handles initial connection attempts that aren't part of reconnection
-                if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
-                    Log.i(TAG, "Stopping connection attempt (userStoppedManually already set)")
-                    
-                    // userStoppedManually already set to true before acquiring mutex
-                    
-                    // Cancel any pending reconnection attempts
-                    reconnectTimer.stop()
-                    // isReconnecting managed by service
-                    
-                    // Update UI state so user gets instant feedback
-                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-                    Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
-                    
-                    // Unlock stream rotation since we're truly stopped
-                    service?.unlockStreamRotation()
-                    
-                    // Close endpoint synchronously - it should be fast since we never actually streamed
-                    // No need for isCleanupInProgress flag since this is quick
+                    Log.i(TAG, "Stopping stream...")
+
+                    // Release MediaProjection FIRST to interrupt any ongoing capture
+                    streamingMediaProjection?.let { mediaProjection ->
+                        mediaProjection.stop()
+                        Log.i(TAG, "MediaProjection stopped")
+                    }
+                    streamingMediaProjection = null
+
+                    // Stop streaming via helper method
                     try {
-                        Log.d(TAG, "Closing endpoint (connection attempt never succeeded)...")
-                        withContext(Dispatchers.IO) {
-                            withTimeout(1000) {
-                                currentStreamer.close()
+                        stopServiceStreaming()
+                        Log.i(TAG, "Stream stop command sent")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error stopping stream: ${e.message}", e)
+                    }
+
+                    // Remove bitrate regulator
+                    try {
+                        currentStreamer.removeBitrateRegulatorController()
+                        Log.i(TAG, "Bitrate regulator removed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                    }
+
+                } catch (e: Throwable) {
+                    Log.e(TAG, "stopStream failed", e)
+                    // Force clear state
+                    streamingMediaProjection?.stop()
+                    streamingMediaProjection = null
+                } finally {
+                    // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                    
+                    // User stopped flag already set via service before acquiring mutex
+                    
+                    // Cancel any pending reconnection attempts (already done via service.markUserStoppedManually)
+                    reconnectTimer.stop()
+                    
+                    // Apply any rotation that was ignored during reconnection
+                    rotationIgnoredDuringReconnection?.let { ignoredRotation ->
+                        viewModelScope.launch {
+                            try {
+                                serviceStreamer?.setTargetRotation(ignoredRotation)
+                                Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to apply ignored rotation: $t")
                             }
                         }
-                        Log.i(TAG, "Connection attempt aborted - endpoint closed")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
+                        rotationIgnoredDuringReconnection = null
                     }
                     
-                    tookEarlyExit = true
-                    return@launch
-                }
-
-                Log.i(TAG, "Stopping stream...")
-
-                // Release MediaProjection FIRST to interrupt any ongoing capture
-                streamingMediaProjection?.let { mediaProjection ->
-                    mediaProjection.stop()
-                    Log.i(TAG, "MediaProjection stopped")
-                }
-                streamingMediaProjection = null
-
-                // Stop streaming via helper method
-                try {
-                    stopServiceStreaming()
-                    Log.i(TAG, "Stream stop command sent")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping stream: ${e.message}", e)
-                }
-
-                // Remove bitrate regulator
-                try {
-                    currentStreamer.removeBitrateRegulatorController()
-                    Log.i(TAG, "Bitrate regulator removed")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-                }
-
-            } catch (e: Throwable) {
-                Log.e(TAG, "stopStream failed", e)
-                // Force clear state
-                streamingMediaProjection?.stop()
-                streamingMediaProjection = null
-            } finally {
-                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
-                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-                
-                // User stopped flag already set via service before acquiring mutex
-                
-                // Cancel any pending reconnection attempts (already done via service.markUserStoppedManually)
-                reconnectTimer.stop()
-                
-                // Apply any rotation that was ignored during reconnection
-                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
-                    viewModelScope.launch {
-                        try {
-                            serviceStreamer?.setTargetRotation(ignoredRotation)
-                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to apply ignored rotation: $t")
-                        }
+                    // Only set cleanup flag if we didn't take an early exit path
+                    // (Early exit paths manage their own cleanup flags)
+                    if (!tookEarlyExit) {
+                        // Mark that cleanup will continue outside mutex
+                        // This prevents race condition if user rapidly taps stop->start
+                        service?.isCleanupInProgress = true
+                        Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true before releasing lock")
                     }
-                    rotationIgnoredDuringReconnection = null
                 }
-                
-                // Only set cleanup flag if we didn't take an early exit path
-                // (Early exit paths manage their own cleanup flags)
-                if (!tookEarlyExit) {
-                    // Mark that cleanup will continue outside mutex
-                    // This prevents race condition if user rapidly taps stop->start
-                    service?.isCleanupInProgress = true
-                    Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true before releasing lock")
-                }
-            }
-        } // Release mutex lock
-        Log.d(TAG, "stopStream() - Released lock")
+            } // Release mutex lock
+            Log.d(TAG, "stopStream() - Released lock")
             
             // Skip cleanup if we took an early exit (those paths handle their own cleanup)
             if (tookEarlyExit) {
