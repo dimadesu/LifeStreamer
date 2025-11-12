@@ -667,12 +667,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // notification's content text; the small status label (statusLabel) is used by
         // the collapsed header where appropriate via NotificationUtils.
         val finalContentText = contentWithBitrate
+        
+        val isFg = status == StreamStatus.STREAMING || status == StreamStatus.CONNECTING
 
         val notification = customNotificationUtils.createServiceNotification(
             title = title,
             content = finalContentText,
             iconResourceId = notificationIconResourceId,
-            isForeground = status == StreamStatus.STREAMING,
+            // Keep foreground during STREAMING and CONNECTING (includes reconnection)
+            isForeground = isFg,
             showStart = showStart,
             showStop = showStop,
             startPending = startPendingIntent,
@@ -703,7 +706,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (streamingNow) return StreamStatus.STREAMING
                 
                 // If reconnecting, always show CONNECTING status
-                if (reconnecting) return StreamStatus.CONNECTING
+                if (reconnecting) {
+                    return StreamStatus.CONNECTING
+                }
                 
                 // If not streaming but service status is CONNECTING, STARTING, or ERROR,
                 // respect the service status (e.g., during reconnection attempts)
@@ -1270,8 +1275,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
         
         Log.i(TAG, "Beginning reconnection - reason: $reason")
+        // Set reconnecting flag FIRST so that when status change triggers observers,
+        // getEffectiveServiceStatus() will see reconnecting=true
         _isReconnecting.value = true
         _reconnectionStatusMessage.value = "Could not connect. Reconnecting in 5 seconds"
+        // Now set status - this triggers observers which will see reconnecting=true
         _serviceStreamStatus.value = StreamStatus.CONNECTING
         return true
     }
@@ -1297,9 +1305,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     fun cancelReconnection() {
         Log.i(TAG, "Reconnection cancelled")
+        // Set flag FIRST before status to avoid intermediate state
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = null
-        // Update status to NOT_STREAMING so notification observer triggers
+        // Now update status - this will trigger notification observer
         _serviceStreamStatus.value = StreamStatus.NOT_STREAMING
     }
     
@@ -1307,7 +1316,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Update the stream status. Called by ViewModel to keep Service and notification in sync.
      */
     fun setStreamStatus(status: StreamStatus) {
-        Log.d(TAG, "setStreamStatus: $status")
+        Log.d(TAG, "setStreamStatus: $status (isReconnecting=${_isReconnecting.value})")
         _serviceStreamStatus.value = status
     }
 
@@ -1363,6 +1372,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onCloseNotification(): Notification? {
+        // Don't show "Not streaming" if we're in reconnection mode
+        if (_isReconnecting.value) {
+            Log.d(TAG, "onCloseNotification: Suppressing notification during reconnection")
+            return null
+        }
+        
         return customNotificationUtils.createServiceNotification(
             title = getString(R.string.service_notification_title),
             content = getString(R.string.status_not_streaming),

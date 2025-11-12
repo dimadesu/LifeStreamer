@@ -943,12 +943,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             } else {
                                 // Normal stop or already handling reconnection
                                 if (service?.isReconnecting?.value == true) {
-                                    Log.d(TAG, "Stream stopped during reconnection - restoring CONNECTING status for stop button")
+                                    Log.d(TAG, "Stream stopped during reconnection - keeping CONNECTING status")
                                     service?.setStreamStatus(StreamStatus.CONNECTING)
-                                } else {
-                                    Log.d(TAG, "Normal stream stop - setting NOT_STREAMING")
+                                } else if (service?.userStoppedManually?.value == true) {
+                                    Log.d(TAG, "User stopped stream - setting NOT_STREAMING")
+                                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                                } else if (!wasStreaming) {
+                                    // Stream was never streaming, safe to set NOT_STREAMING
+                                    Log.d(TAG, "Stream never started - setting NOT_STREAMING")
                                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                                 }
+                                // If none of the above, don't change status (keep whatever it is)
                             }
                         }
                     }
