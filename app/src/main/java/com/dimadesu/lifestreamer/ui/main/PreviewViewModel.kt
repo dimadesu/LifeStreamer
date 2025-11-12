@@ -75,6 +75,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
@@ -251,14 +254,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isTryingConnectionLiveData: LiveData<Boolean> = _isTryingConnectionLiveData
 
     // Unified stream status for UI and notifications (shared enum)
-    private val _streamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
-    val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
+    // Stream status - observe from Service to keep UI and notification in sync
+    val streamStatus: StateFlow<StreamStatus> = serviceReadyFlow.flatMapLatest { ready ->
+        if (ready && service != null) {
+            service!!.serviceStreamStatus
+        } else {
+            flowOf(StreamStatus.NOT_STREAMING)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, StreamStatus.NOT_STREAMING)
 
     // LiveData for data binding to track streaming status changes
-    val streamStatusLiveData: LiveData<StreamStatus> = _streamStatus.asLiveData()
+    val streamStatusLiveData: LiveData<StreamStatus> = streamStatus.asLiveData()
 
     // Human-friendly status string for UI binding
-    val streamStatusTextLiveData: LiveData<String> = _streamStatus.map { status ->
+    val streamStatusTextLiveData: LiveData<String> = streamStatus.map { status ->
         when (status) {
             StreamStatus.NOT_STREAMING -> application.getString(R.string.status_not_streaming)
             StreamStatus.STARTING -> application.getString(R.string.status_starting)
@@ -725,7 +734,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             svcStatusFlow.collect { svcStatus ->
                                 try {
                                     // The service now publishes the shared StreamStatus enum; assign directly
-                                    _streamStatus.value = svcStatus
+                                    service?.setStreamStatus(svcStatus)
                                 } catch (t: Throwable) {
                                     Log.w(TAG, "Failed to map service status: ${t.message}")
                                 }
@@ -780,7 +789,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamerFlow.value = null
                 _serviceReady.value = false
                 // Ensure UI status is cleared when the service disconnects
-                _streamStatus.value = StreamStatus.NOT_STREAMING
+                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
             }
         }
 
@@ -879,7 +888,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { it.isClosedException }
                 .map { "Connection lost: ${it.message}" }.collect { errorMessage ->
-                    Log.w(TAG, "Connection lost detected: $errorMessage, status=${_streamStatus.value}, isReconnecting=$isReconnecting")
+                    Log.w(TAG, "Connection lost detected: $errorMessage, status=${streamStatus.value}, isReconnecting=$isReconnecting")
                     
                     // Check if user stopped manually - if so, don't trigger reconnection
                     if (userStoppedManually) {
@@ -910,14 +919,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        val previousStatus = _streamStatus.value
+                        val previousStatus = streamStatus.value
                         Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=$userStoppedManually, isReconnecting=$isReconnecting")
                         
                         if (isStreaming) {
                             // Don't change to STREAMING during reconnection - keep CONNECTING status
                             // This ensures stop button works during reconnection attempts
                             if (!isReconnecting) {
-                                _streamStatus.value = StreamStatus.STREAMING
+                                service?.setStreamStatus(StreamStatus.STREAMING)
                             } else {
                                 Log.d(TAG, "Stream started during reconnection - keeping CONNECTING status for stop button")
                             }
@@ -936,10 +945,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 // Normal stop or already handling reconnection
                                 if (isReconnecting) {
                                     Log.d(TAG, "Stream stopped during reconnection - restoring CONNECTING status for stop button")
-                                    _streamStatus.value = StreamStatus.CONNECTING
+                                    service?.setStreamStatus(StreamStatus.CONNECTING)
                                 } else {
                                     Log.d(TAG, "Normal stream stop - setting NOT_STREAMING")
-                                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                                 }
                             }
                         }
@@ -966,7 +975,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             rotationRepository.rotationFlow.collect { rotation ->
                 val current = serviceStreamer
                 val isCurrentlyStreaming = current?.isStreamingFlow?.value == true
-                val currentStatus = _streamStatus.value
+                val currentStatus = streamStatus.value
                 val isInStreamingProcess = currentStatus == StreamStatus.STARTING ||
                                            currentStatus == StreamStatus.CONNECTING ||
                                            currentStatus == StreamStatus.STREAMING
@@ -1031,7 +1040,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 reconnectTimer.stop()
                 isReconnecting = false
                 _reconnectionStatusLiveData.postValue(null)
-                _streamStatus.value = StreamStatus.NOT_STREAMING
+                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                 // Update service notification to reflect stopped state
                 service?.updateStreamStatus(StreamStatus.NOT_STREAMING)
             }
@@ -1158,7 +1167,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return@launch
             }
             
-            _streamStatus.value = StreamStatus.STARTING
+            service?.setStreamStatus(StreamStatus.STARTING)
             Log.i(TAG, "startStream() called")
             
             // Lock stream rotation BEFORE starting to ensure it matches UI orientation
@@ -1218,26 +1227,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
 
             _isTryingConnectionLiveData.postValue(true)
-            _streamStatus.value = StreamStatus.CONNECTING
+            service?.setStreamStatus(StreamStatus.CONNECTING)
             Log.i(TAG, "startStream: Set status to CONNECTING")
             var autoRetryTriggered = false
             try {
                 val success = doStartStream(shouldAutoRetry = true)
                 if (!success) {
-                    Log.e(TAG, "Initial connection failed - isReconnecting=$isReconnecting, status=${_streamStatus.value}")
+                    Log.e(TAG, "Initial connection failed - isReconnecting=$isReconnecting, status=${streamStatus.value}")
                     // handleDisconnection was already called in doStartStream
                     // Check if reconnection is active before clearing status
                     if (isReconnecting) {
                         autoRetryTriggered = true
-                        Log.i(TAG, "Auto-retry triggered, keeping status=${_streamStatus.value}")
+                        Log.i(TAG, "Auto-retry triggered, keeping status=${streamStatus.value}")
                     } else {
-                        _streamStatus.value = StreamStatus.ERROR
+                        service?.setStreamStatus(StreamStatus.ERROR)
                         Log.i(TAG, "No auto-retry, setting status to ERROR")
                     }
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
-                _streamStatus.value = StreamStatus.STREAMING
+                service?.setStreamStatus(StreamStatus.STREAMING)
             } catch (e: Throwable) {
                 Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=$isReconnecting", e)
                 // Don't show error dialog if reconnection will handle it
@@ -1247,24 +1256,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Check if reconnection was triggered by the exception
                 if (isReconnecting) {
                     autoRetryTriggered = true
-                    Log.i(TAG, "Exception but reconnecting, keeping status=${_streamStatus.value}")
+                    Log.i(TAG, "Exception but reconnecting, keeping status=${streamStatus.value}")
                 } else {
-                    _streamStatus.value = StreamStatus.ERROR
+                    service?.setStreamStatus(StreamStatus.ERROR)
                     Log.i(TAG, "Exception and no reconnection, setting status to ERROR")
                 }
             } finally {
-                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${_streamStatus.value}, userStoppedManually=$userStoppedManually")
+                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${streamStatus.value}, userStoppedManually=$userStoppedManually")
                 _isTryingConnectionLiveData.postValue(false)
                 // Don't override status if auto-retry was triggered or if we're reconnecting
                 // Also set to NOT_STREAMING if user manually stopped (handles race condition)
                 if (userStoppedManually) {
                     Log.i(TAG, "startStream finally: User stopped manually, setting NOT_STREAMING")
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                } else if (!autoRetryTriggered && !isReconnecting && _streamStatus.value != StreamStatus.STREAMING) {
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                } else if (!autoRetryTriggered && !isReconnecting && streamStatus.value != StreamStatus.STREAMING) {
                     Log.w(TAG, "startStream finally: Overriding status to NOT_STREAMING")
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                 } else {
-                    Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
+                    Log.i(TAG, "startStream finally: NOT overriding status, keeping ${streamStatus.value}")
                 }
             }
         }
@@ -1284,7 +1293,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "startStreamWithMediaProjection() - Reset userStoppedManually=false")
         
         _isTryingConnectionLiveData.postValue(true)
-        _streamStatus.value = StreamStatus.STARTING
+        service?.setStreamStatus(StreamStatus.STARTING)
 
         mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mediaProjection ->
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")
@@ -1298,14 +1307,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         setAudioSourceBasedOnVideoSource()
 
                         // Start the actual stream
-                        _streamStatus.value = StreamStatus.CONNECTING
+                        service?.setStreamStatus(StreamStatus.CONNECTING)
                         startStreamInternal(onSuccess, onError)
                     } catch (e: Exception) {
                         _isTryingConnectionLiveData.postValue(false)
                         val error = "Failed to configure MediaProjection audio: ${e.message}"
                         Log.e(TAG, error, e)
                         _streamerErrorLiveData.postValue(error)
-                        _streamStatus.value = StreamStatus.ERROR
+                        service?.setStreamStatus(StreamStatus.ERROR)
                         onError(error)  // Also call callback for custom handling if needed
                     }
                 }
@@ -1314,7 +1323,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val error = "MediaProjection permission required for streaming"
                 Log.e(TAG, error)
                 _streamerErrorLiveData.postValue(error)
-                _streamStatus.value = StreamStatus.ERROR
+                service?.setStreamStatus(StreamStatus.ERROR)
                 onError(error)  // Also call callback for custom handling if needed
             }
         }
@@ -1349,7 +1358,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 Log.i(TAG, "startServiceStreaming() completed successfully")
                 Log.i(TAG, "Stream setup completed successfully, calling onSuccess()")
-                _streamStatus.value = StreamStatus.STREAMING
+                service?.setStreamStatus(StreamStatus.STREAMING)
                 onSuccess()
             } catch (e: Throwable) {
                 val error = "Stream start failed: ${e.message ?: "Unknown error"}"
@@ -1391,7 +1400,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (cleanupInProgress) {
             Log.i(TAG, "stopStream() - Cleanup already in progress, just updating UI state")
             service?.cancelReconnection()
-            _streamStatus.value = StreamStatus.NOT_STREAMING
+            service?.setStreamStatus(StreamStatus.NOT_STREAMING)
             _isTryingConnectionLiveData.postValue(false)
             return
         }
@@ -1412,7 +1421,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
 
                 val currentStreamingState = currentStreamer.isStreamingFlow.value
-                val currentStatus = _streamStatus.value
+                val currentStatus = streamStatus.value
                 val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
                 Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isCurrentlyReconnecting")
 
@@ -1427,7 +1436,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     service?.cancelReconnection()
                     
                     // Update UI state so user gets instant feedback
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                     _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
                     
@@ -1493,7 +1502,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     isReconnecting = false
                     
                     // Update UI state so user gets instant feedback
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                     _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
                     
@@ -1550,7 +1559,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamingMediaProjection = null
             } finally {
                 // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
-                _streamStatus.value = StreamStatus.NOT_STREAMING
+                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                 
                 // User stopped flag already set via service before acquiring mutex
                 
@@ -1660,7 +1669,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
         val userStopped = service?.userStoppedManually?.value ?: false
         val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
-        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isCurrentlyReconnecting, userStopped=$userStopped")
+        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${streamStatus.value}, isReconnecting=$isCurrentlyReconnecting, userStopped=$userStopped")
         
         // Use service's centralized method to attempt beginning reconnection
         // This handles all the checks (userStoppedManually, isReconnecting, cleanup in progress)
@@ -1689,7 +1698,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
         // Status and message already set by service.beginReconnection()
         // Just update our local _streamStatus to match
-        _streamStatus.value = StreamStatus.CONNECTING
+        service?.setStreamStatus(StreamStatus.CONNECTING)
 
         // Stop current stream cleanly before reconnecting
         viewModelScope.launch {
@@ -1785,7 +1794,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             } catch (e: Exception) {
                 Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
                 service?.cancelReconnection()
-                _streamStatus.value = StreamStatus.ERROR
+                service?.setStreamStatus(StreamStatus.ERROR)
                 _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
             }
         }
@@ -1823,7 +1832,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
                     service?.cancelReconnection()
-                    _streamStatus.value = StreamStatus.ERROR
+                    service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
                 }
 
@@ -1831,7 +1840,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 service?.setReconnectionMessage("Reconnecting...")
                 
                 // Set status to CONNECTING so UI shows stop button and it actually works
-                _streamStatus.value = StreamStatus.CONNECTING
+                service?.setStreamStatus(StreamStatus.CONNECTING)
 
                 // Validate that both sources exist before attempting reconnection
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
@@ -1839,7 +1848,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.e(TAG, "Reconnection failed: $sourceError")
                     service?.setReconnectionMessage("Reconnection failed. Sources not configured")
                     service?.cancelReconnection()
-                    _streamStatus.value = StreamStatus.ERROR
+                    service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
                 }
                 
@@ -1858,7 +1867,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (success) {
                     Log.i(TAG, "Reconnection successful!")
                     service?.completeReconnection()
-                    _streamStatus.value = StreamStatus.STREAMING
+                    service?.setStreamStatus(StreamStatus.STREAMING)
                     
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null

@@ -1298,6 +1298,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Update status to NOT_STREAMING so notification observer triggers
         _serviceStreamStatus.value = StreamStatus.NOT_STREAMING
     }
+    
+    /**
+     * Update the stream status. Called by ViewModel to keep Service and notification in sync.
+     */
+    fun setStreamStatus(status: StreamStatus) {
+        Log.d(TAG, "setStreamStatus: $status")
+        _serviceStreamStatus.value = status
+    }
 
     // Helper to compute the localized mute/unmute label based on current audio state
     private fun currentMuteLabel(): String {
