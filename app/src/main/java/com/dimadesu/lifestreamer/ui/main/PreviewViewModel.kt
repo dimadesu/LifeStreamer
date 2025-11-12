@@ -250,8 +250,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 kotlinx.coroutines.flow.flowOf(false)
             }
         }.asLiveData()
-    private val _isTryingConnectionLiveData = MutableLiveData<Boolean>()
-    val isTryingConnectionLiveData: LiveData<Boolean> = _isTryingConnectionLiveData
 
     // Unified stream status for UI and notifications (shared enum)
     // Stream status - observe from Service to keep UI and notification in sync
@@ -1225,7 +1223,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
 
-            _isTryingConnectionLiveData.postValue(true)
             service?.setStreamStatus(StreamStatus.CONNECTING)
             Log.i(TAG, "startStream: Set status to CONNECTING")
             var autoRetryTriggered = false
@@ -1262,7 +1259,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } finally {
                 Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=${service?.isReconnecting?.value}, status=${streamStatus.value}, userStoppedManually=${service?.userStoppedManually?.value}")
-                _isTryingConnectionLiveData.postValue(false)
                 // Don't override status if auto-retry was triggered or if we're reconnecting
                 // Also set to NOT_STREAMING if user manually stopped (handles race condition)
                 if (service?.userStoppedManually?.value == true) {
@@ -1291,7 +1287,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         service?.clearUserStoppedManually()
         Log.i(TAG, "startStreamWithMediaProjection() - Reset userStoppedManually=false")
         
-        _isTryingConnectionLiveData.postValue(true)
         service?.setStreamStatus(StreamStatus.STARTING)
 
         mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mediaProjection ->
@@ -1309,7 +1304,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         service?.setStreamStatus(StreamStatus.CONNECTING)
                         startStreamInternal(onSuccess, onError)
                     } catch (e: Exception) {
-                        _isTryingConnectionLiveData.postValue(false)
                         val error = "Failed to configure MediaProjection audio: ${e.message}"
                         Log.e(TAG, error, e)
                         _streamerErrorLiveData.postValue(error)
@@ -1318,7 +1312,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                 }
             } else {
-                _isTryingConnectionLiveData.postValue(false)
                 val error = "MediaProjection permission required for streaming"
                 Log.e(TAG, error)
                 _streamerErrorLiveData.postValue(error)
@@ -1377,8 +1370,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.d(TAG, "Exception during reconnection, error dialog suppressed")
                 }
             } finally {
-                Log.i(TAG, "startStreamInternal finally block - setting isTryingConnection to false")
-                _isTryingConnectionLiveData.postValue(false)
+                Log.i(TAG, "startStreamInternal finally block")
             }
         }
     }
@@ -1400,7 +1392,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "stopStream() - Cleanup already in progress, just updating UI state")
             service?.cancelReconnection()
             service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-            _isTryingConnectionLiveData.postValue(false)
+            service?.cancelReconnection()
+            service?.setStreamStatus(StreamStatus.NOT_STREAMING)
             return
         }
         
@@ -1436,7 +1429,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Update UI state so user gets instant feedback
                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-                    _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
                     
                     // Unlock stream rotation since we're truly stopped
@@ -1484,7 +1476,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // If already stopped and not in CONNECTING state, don't do anything
                 if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
                     Log.i(TAG, "Stream is already stopped, skipping stop sequence")
-                    _isTryingConnectionLiveData.postValue(false)
                     tookEarlyExit = true
                     return@launch
                 }
@@ -1502,7 +1493,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Update UI state so user gets instant feedback
                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
-                    _isTryingConnectionLiveData.postValue(false)
                     Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
                     
                     // Unlock stream rotation since we're truly stopped
@@ -1564,8 +1554,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Cancel any pending reconnection attempts (already done via service.markUserStoppedManually)
                 reconnectTimer.stop()
-                
-                _isTryingConnectionLiveData.postValue(false)
                 
                 // Apply any rotation that was ignored during reconnection
                 rotationIgnoredDuringReconnection?.let { ignoredRotation ->
