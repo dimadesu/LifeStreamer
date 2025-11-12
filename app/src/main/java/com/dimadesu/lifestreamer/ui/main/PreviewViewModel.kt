@@ -300,11 +300,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
     private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
     
-    // Track if cleanup (polling + close) is still running after mutex release
-    // This prevents race conditions where user starts stream while previous stop is still cleaning up
-    @Volatile
-    private var isCleanupInProgress = false
-    
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
     val reconnectionStatusLiveData: LiveData<String?> = _reconnectionStatusLiveData
