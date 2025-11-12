@@ -694,12 +694,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         return try {
             val svcStatus = _serviceStreamStatus.value
             val streamerInstance = streamer
+            val reconnecting = _isReconnecting.value
             
             if (streamerInstance != null) {
                 val streamingNow = streamerInstance.isStreamingFlow.value
                 
                 // If we're actively streaming, return STREAMING
                 if (streamingNow) return StreamStatus.STREAMING
+                
+                // If reconnecting, always show CONNECTING status
+                if (reconnecting) return StreamStatus.CONNECTING
                 
                 // If not streaming but service status is CONNECTING, STARTING, or ERROR,
                 // respect the service status (e.g., during reconnection attempts)
