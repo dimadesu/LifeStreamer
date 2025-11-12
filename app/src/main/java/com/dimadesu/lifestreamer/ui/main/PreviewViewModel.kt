@@ -75,6 +75,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
@@ -247,18 +250,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 kotlinx.coroutines.flow.flowOf(false)
             }
         }.asLiveData()
-    private val _isTryingConnectionLiveData = MutableLiveData<Boolean>()
-    val isTryingConnectionLiveData: LiveData<Boolean> = _isTryingConnectionLiveData
 
     // Unified stream status for UI and notifications (shared enum)
-    private val _streamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
-    val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
+    // Stream status - observe from Service to keep UI and notification in sync
+    val streamStatus: StateFlow<StreamStatus> = serviceReadyFlow.flatMapLatest { ready ->
+        if (ready && service != null) {
+            service!!.serviceStreamStatus
+        } else {
+            flowOf(StreamStatus.NOT_STREAMING)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, StreamStatus.NOT_STREAMING)
 
     // LiveData for data binding to track streaming status changes
-    val streamStatusLiveData: LiveData<StreamStatus> = _streamStatus.asLiveData()
+    val streamStatusLiveData: LiveData<StreamStatus> = streamStatus.asLiveData()
 
     // Human-friendly status string for UI binding
-    val streamStatusTextLiveData: LiveData<String> = _streamStatus.map { status ->
+    val streamStatusTextLiveData: LiveData<String> = streamStatus.map { status ->
         when (status) {
             StreamStatus.NOT_STREAMING -> application.getString(R.string.status_not_streaming)
             StreamStatus.STARTING -> application.getString(R.string.status_starting)
@@ -277,20 +284,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     // Connection retry mechanism (inspired by Moblin)
     private val reconnectTimer = ReconnectTimer()
-    private val _isReconnectingLiveData = MutableLiveData<Boolean>(false)
-    val isReconnectingLiveData: LiveData<Boolean> = _isReconnectingLiveData
-    private var isReconnecting: Boolean
-        get() = _isReconnectingLiveData.value ?: false
-        set(value) { _isReconnectingLiveData.value = value }
-    private var userStoppedManually = false
+    
+    // Observe reconnection state from Service
+    val isReconnectingLiveData: LiveData<Boolean> = serviceReadyFlow.flatMapLatest { ready ->
+        if (ready && service != null) {
+            service!!.isReconnecting
+        } else {
+            flowOf(false)
+        }
+    }.asLiveData()
+    
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
     private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
-    
-    // Track if cleanup (polling + close) is still running after mutex release
-    // This prevents race conditions where user starts stream while previous stop is still cleaning up
-    @Volatile
-    private var isCleanupInProgress = false
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -384,7 +390,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun startServiceStreaming(descriptor: MediaDescriptor, shouldSuppressErrors: Boolean = false): Boolean {
         return try {
             // Check if user stopped before we even start
-            if (userStoppedManually) {
+            if (service?.userStoppedManually?.value == true) {
                 Log.i(TAG, "startServiceStreaming: User stopped manually, aborting")
                 return false
             }
@@ -468,7 +474,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             
             // Check if user stopped before calling the blocking startStream()
-            if (userStoppedManually) {
+            if (service?.userStoppedManually?.value == true) {
                 Log.i(TAG, "startServiceStreaming: User stopped manually before startStream(), aborting")
                 return false
             }
@@ -530,17 +536,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "doStartStream: Stream start failed - startServiceStreaming returned false")
                 
                 // Check if user stopped manually - if so, don't trigger reconnection
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.d(TAG, "User stopped stream, skipping error handling")
                     return false
                 }
                 
                 // Trigger auto-retry if requested and not already reconnecting
-                if (shouldAutoRetry && !isReconnecting) {
+                if (shouldAutoRetry && service?.isReconnecting?.value != true) {
                     val errorMessage = "Connection failed - unable to establish stream"
                     Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
                     handleDisconnection(errorMessage, isInitialConnection = true)
-                } else if (!shouldAutoRetry && !isReconnecting) {
+                } else if (!shouldAutoRetry && service?.isReconnecting?.value != true) {
                     // Only show error dialog if not auto-retrying AND not already reconnecting
                     _streamerErrorLiveData.postValue("Connection failed - unable to establish stream")
                 } else {
@@ -573,16 +579,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val errorMessage = "Stream start failed: ${e.message}"
             
             // Check if user stopped manually - if so, don't trigger reconnection
-            if (userStoppedManually) {
+            if (service?.userStoppedManually?.value == true) {
                 Log.d(TAG, "User stopped stream, skipping error handling")
                 return false
             }
             
             // Trigger auto-retry if requested and not already reconnecting
-            if (shouldAutoRetry && !isReconnecting) {
+            if (shouldAutoRetry && service?.isReconnecting?.value != true) {
                 Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
                 handleDisconnection(errorMessage, isInitialConnection = true)
-            } else if (!shouldAutoRetry && !isReconnecting) {
+            } else if (!shouldAutoRetry && service?.isReconnecting?.value != true) {
                 // Only show error dialog if not auto-retrying AND not already reconnecting
                 _streamerErrorLiveData.postValue(errorMessage)
             } else {
@@ -685,6 +691,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (binder is CameraStreamerService.CameraStreamerServiceBinder) {
                     streamerService = binder.getService()
                     serviceStreamer = binder.streamer as SingleStreamer
+                    
+                    // Observe centralized reconnection status message from service
+                    try {
+                        val svc = binder.getService()
+                        viewModelScope.launch {
+                            svc.reconnectionStatusMessage.collect { message ->
+                                _reconnectionStatusLiveData.postValue(message)
+                            }
+                        }
+                        Log.i(TAG, "Observing centralized reconnection state from service")
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to observe reconnection state from service: ${t.message}")
+                    }
+                    
                     // Collect bitrate flow from service binder if available
                     try {
                         val svc = binder.getService()
@@ -706,7 +726,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             svcStatusFlow.collect { svcStatus ->
                                 try {
                                     // The service now publishes the shared StreamStatus enum; assign directly
-                                    _streamStatus.value = svcStatus
+                                    service?.setStreamStatus(svcStatus)
                                 } catch (t: Throwable) {
                                     Log.w(TAG, "Failed to map service status: ${t.message}")
                                 }
@@ -761,7 +781,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 streamerFlow.value = null
                 _serviceReady.value = false
                 // Ensure UI status is cleared when the service disconnects
-                _streamStatus.value = StreamStatus.NOT_STREAMING
+                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
             }
         }
 
@@ -849,7 +869,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             currentStreamer.throwableFlow.filterNotNull().filter { !it.isClosedException }
                 .map { "${it.javaClass.simpleName}: ${it.message}" }.collect { errorMessage ->
                     // Don't show error dialog during reconnection attempts
-                    if (!isReconnecting) {
+                    if (service?.isReconnecting?.value != true) {
                         _streamerErrorLiveData.postValue(errorMessage)
                     } else {
                         Log.w(TAG, "Error during reconnection (dialog suppressed): $errorMessage")
@@ -860,16 +880,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             currentStreamer.throwableFlow.filterNotNull().filter { it.isClosedException }
                 .map { "Connection lost: ${it.message}" }.collect { errorMessage ->
-                    Log.w(TAG, "Connection lost detected: $errorMessage, status=${_streamStatus.value}, isReconnecting=$isReconnecting")
+                    Log.w(TAG, "Connection lost detected: $errorMessage, status=${streamStatus.value}, isReconnecting=${service?.isReconnecting?.value}")
                     
                     // Check if user stopped manually - if so, don't trigger reconnection
-                    if (userStoppedManually) {
+                    if (service?.userStoppedManually?.value == true) {
                         Log.d(TAG, "User stopped stream, skipping connection error handling")
                         return@collect
                     }
                     
                     // Suppress error if we're already in reconnection mode
-                    if (isReconnecting) {
+                    if (service?.isReconnecting?.value == true) {
                         Log.i(TAG, "Connection error during reconnection - dialog suppressed")
                     } else {
                         // Connection lost - trigger reconnection
@@ -891,14 +911,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        val previousStatus = _streamStatus.value
-                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=$userStoppedManually, isReconnecting=$isReconnecting")
+                        val previousStatus = streamStatus.value
+                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=${service?.userStoppedManually?.value}, isReconnecting=${service?.isReconnecting?.value}")
                         
                         if (isStreaming) {
                             // Don't change to STREAMING during reconnection - keep CONNECTING status
                             // This ensures stop button works during reconnection attempts
-                            if (!isReconnecting) {
-                                _streamStatus.value = StreamStatus.STREAMING
+                            if (service?.isReconnecting?.value != true) {
+                                service?.setStreamStatus(StreamStatus.STREAMING)
                             } else {
                                 Log.d(TAG, "Stream started during reconnection - keeping CONNECTING status for stop button")
                             }
@@ -907,21 +927,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             val wasStreaming = previousStatus == StreamStatus.STREAMING || 
                                               previousStatus == StreamStatus.CONNECTING
                             
-                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=$userStoppedManually, isReconnecting=$isReconnecting")
+                            Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=${service?.userStoppedManually?.value}, isReconnecting=${service?.isReconnecting?.value}")
                             
-                            if (wasStreaming && !userStoppedManually && !isReconnecting) {
+                            if (wasStreaming && service?.userStoppedManually?.value != true && service?.isReconnecting?.value != true) {
                                 // Unexpected disconnection - trigger reconnection
                                 Log.w(TAG, "Unexpected stream stop detected - triggering reconnection")
                                 handleDisconnection("Stream stopped unexpectedly", isInitialConnection = false)
                             } else {
                                 // Normal stop or already handling reconnection
-                                if (isReconnecting) {
-                                    Log.d(TAG, "Stream stopped during reconnection - restoring CONNECTING status for stop button")
-                                    _streamStatus.value = StreamStatus.CONNECTING
-                                } else {
-                                    Log.d(TAG, "Normal stream stop - setting NOT_STREAMING")
-                                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                                if (service?.isReconnecting?.value == true) {
+                                    Log.d(TAG, "Stream stopped during reconnection - keeping CONNECTING status")
+                                    service?.setStreamStatus(StreamStatus.CONNECTING)
+                                } else if (service?.userStoppedManually?.value == true) {
+                                    Log.d(TAG, "User stopped stream - setting NOT_STREAMING")
+                                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                                } else if (!wasStreaming) {
+                                    // Stream was never streaming, safe to set NOT_STREAMING
+                                    Log.d(TAG, "Stream never started - setting NOT_STREAMING")
+                                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                                 }
+                                // If none of the above, don't change status (keep whatever it is)
                             }
                         }
                     }
@@ -947,14 +972,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             rotationRepository.rotationFlow.collect { rotation ->
                 val current = serviceStreamer
                 val isCurrentlyStreaming = current?.isStreamingFlow?.value == true
-                val currentStatus = _streamStatus.value
+                val currentStatus = streamStatus.value
                 val isInStreamingProcess = currentStatus == StreamStatus.STARTING ||
                                            currentStatus == StreamStatus.CONNECTING ||
                                            currentStatus == StreamStatus.STREAMING
                 
                 // During reconnection, ignore rotation changes to maintain locked orientation
                 // But remember the latest rotation so we can apply it when reconnection ends
-                if (isReconnecting) {
+                if (service?.isReconnecting?.value == true) {
                     rotationIgnoredDuringReconnection = rotation
                     Log.i(TAG, "Rotation change to $rotation ignored during reconnection (will apply later)")
                     return@collect
@@ -980,7 +1005,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        if (!isStreaming && !isReconnecting) {
+                        if (!isStreaming && service?.isReconnecting?.value != true) {
                             pendingTargetRotation?.let { pending ->
                                 Log.i(TAG, "Applying pending rotation $pending after stream stopped")
                                 try {
@@ -990,7 +1015,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 pendingTargetRotation = null
                             }
-                        } else if (!isStreaming && isReconnecting) {
+                        } else if (!isStreaming && service?.isReconnecting?.value == true) {
                             Log.i(TAG, "Skipping pending rotation application during reconnection (pending: $pendingTargetRotation)")
                         }
                     }
@@ -1007,12 +1032,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             service?.userStoppedFromNotification?.collect {
                 Log.i(TAG, "User stopped from notification - cancelling reconnection")
                 // Mark as manual stop to prevent reconnection
-                userStoppedManually = true
+                service?.markUserStoppedManually()
                 // Cancel any pending reconnection
                 reconnectTimer.stop()
-                isReconnecting = false
+                // isReconnecting managed by service
                 _reconnectionStatusLiveData.postValue(null)
-                _streamStatus.value = StreamStatus.NOT_STREAMING
+                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                // Update service notification to reflect stopped state
+                service?.updateStreamStatus(StreamStatus.NOT_STREAMING)
             }
         }
         
@@ -1028,10 +1055,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Critical errors from notification starts should trigger reconnection
                         // regardless of userStoppedManually flag (it's a new start attempt)
                         // Only skip if already reconnecting
-                        if (!isReconnecting) {
+                        if (service?.isReconnecting?.value != true) {
                             Log.i(TAG, "Triggering reconnection due to service critical error (notification start failure)")
                             // Reset userStoppedManually since this is a new start attempt from notification
-                            userStoppedManually = false
+                            service?.clearUserStoppedManually()
                             handleDisconnection(errorMessage, isInitialConnection = true)
                         } else {
                             Log.d(TAG, "Skipping reconnection trigger - already reconnecting")
@@ -1112,25 +1139,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val canStart = streamOperationMutex.withLock {
                 Log.d(TAG, "startStream() - Acquired lock for pre-flight checks")
                 
-                // Check if previous stop cleanup is still in progress
-                if (isCleanupInProgress) {
-                    Log.w(TAG, "Cannot start stream - cleanup from previous stop still in progress")
-                    
-                    // Cancel any pending reconnection timers since we can't start anyway
-                    reconnectTimer.stop()
-                    isReconnecting = false
-                    
+                // Use service's centralized check instead of local flag
+                val serviceCanStart = service?.canStartStream() ?: false
+                if (!serviceCanStart) {
+                    Log.w(TAG, "Cannot start stream - service reports cannot start (cleanup in progress or blocked)")
                     _streamerErrorLiveData.postValue("Please wait - stopping previous stream...")
                     return@withLock false
                 }
                 
-                // Only reset userStoppedManually for user-initiated starts, not reconnection attempts
-                // This prevents a race condition where stop button is pressed but reconnection is already scheduled
-                if (!isReconnecting) {
-                    userStoppedManually = false
-                    Log.i(TAG, "startStream() - Reset userStoppedManually=false (user-initiated start)")
+                // Only clear userStoppedManually for user-initiated starts, not reconnection attempts
+                // Use service's centralized state
+                val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
+                if (!isCurrentlyReconnecting) {
+                    service?.clearUserStoppedManually()
+                    Log.i(TAG, "startStream() - Cleared userStoppedManually via service (user-initiated start)")
                 } else {
-                    Log.d(TAG, "startStream() - Keeping userStoppedManually=$userStoppedManually (reconnection attempt)")
+                    Log.d(TAG, "startStream() - Keeping userStoppedManually as-is (reconnection attempt)")
                 }
                 return@withLock true
             }
@@ -1140,7 +1164,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return@launch
             }
             
-            _streamStatus.value = StreamStatus.STARTING
+            service?.setStreamStatus(StreamStatus.STARTING)
             Log.i(TAG, "startStream() called")
             
             // Lock stream rotation BEFORE starting to ensure it matches UI orientation
@@ -1199,54 +1223,52 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
 
-            _isTryingConnectionLiveData.postValue(true)
-            _streamStatus.value = StreamStatus.CONNECTING
+            service?.setStreamStatus(StreamStatus.CONNECTING)
             Log.i(TAG, "startStream: Set status to CONNECTING")
             var autoRetryTriggered = false
             try {
                 val success = doStartStream(shouldAutoRetry = true)
                 if (!success) {
-                    Log.e(TAG, "Initial connection failed - isReconnecting=$isReconnecting, status=${_streamStatus.value}")
+                    Log.e(TAG, "Initial connection failed - isReconnecting=${service?.isReconnecting?.value}, status=${streamStatus.value}")
                     // handleDisconnection was already called in doStartStream
                     // Check if reconnection is active before clearing status
-                    if (isReconnecting) {
+                    if (service?.isReconnecting?.value == true) {
                         autoRetryTriggered = true
-                        Log.i(TAG, "Auto-retry triggered, keeping status=${_streamStatus.value}")
+                        Log.i(TAG, "Auto-retry triggered, keeping status=${streamStatus.value}")
                     } else {
-                        _streamStatus.value = StreamStatus.ERROR
+                        service?.setStreamStatus(StreamStatus.ERROR)
                         Log.i(TAG, "No auto-retry, setting status to ERROR")
                     }
                     return@launch
                 }
                 Log.i(TAG, "Stream started successfully")
-                _streamStatus.value = StreamStatus.STREAMING
+                service?.setStreamStatus(StreamStatus.STREAMING)
             } catch (e: Throwable) {
-                Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=$isReconnecting", e)
+                Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=${service?.isReconnecting?.value}", e)
                 // Don't show error dialog if reconnection will handle it
-                if (!isReconnecting) {
+                if (service?.isReconnecting?.value != true) {
                     _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
                 }
                 // Check if reconnection was triggered by the exception
-                if (isReconnecting) {
+                if (service?.isReconnecting?.value == true) {
                     autoRetryTriggered = true
-                    Log.i(TAG, "Exception but reconnecting, keeping status=${_streamStatus.value}")
+                    Log.i(TAG, "Exception but reconnecting, keeping status=${streamStatus.value}")
                 } else {
-                    _streamStatus.value = StreamStatus.ERROR
+                    service?.setStreamStatus(StreamStatus.ERROR)
                     Log.i(TAG, "Exception and no reconnection, setting status to ERROR")
                 }
             } finally {
-                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=$isReconnecting, status=${_streamStatus.value}, userStoppedManually=$userStoppedManually")
-                _isTryingConnectionLiveData.postValue(false)
+                Log.i(TAG, "startStream finally: autoRetryTriggered=$autoRetryTriggered, isReconnecting=${service?.isReconnecting?.value}, status=${streamStatus.value}, userStoppedManually=${service?.userStoppedManually?.value}")
                 // Don't override status if auto-retry was triggered or if we're reconnecting
                 // Also set to NOT_STREAMING if user manually stopped (handles race condition)
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.i(TAG, "startStream finally: User stopped manually, setting NOT_STREAMING")
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                } else if (!autoRetryTriggered && !isReconnecting && _streamStatus.value != StreamStatus.STREAMING) {
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                } else if (!autoRetryTriggered && service?.isReconnecting?.value != true && streamStatus.value != StreamStatus.STREAMING) {
                     Log.w(TAG, "startStream finally: Overriding status to NOT_STREAMING")
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                 } else {
-                    Log.i(TAG, "startStream finally: NOT overriding status, keeping ${_streamStatus.value}")
+                    Log.i(TAG, "startStream finally: NOT overriding status, keeping ${streamStatus.value}")
                 }
             }
         }
@@ -1262,11 +1284,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         onError: (String) -> Unit = {}
     ) {
         // Clear manual stop flag when starting a new stream
-        userStoppedManually = false
+        service?.clearUserStoppedManually()
         Log.i(TAG, "startStreamWithMediaProjection() - Reset userStoppedManually=false")
         
-        _isTryingConnectionLiveData.postValue(true)
-        _streamStatus.value = StreamStatus.STARTING
+        service?.setStreamStatus(StreamStatus.STARTING)
 
         mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mediaProjection ->
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")
@@ -1280,23 +1301,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         setAudioSourceBasedOnVideoSource()
 
                         // Start the actual stream
-                        _streamStatus.value = StreamStatus.CONNECTING
+                        service?.setStreamStatus(StreamStatus.CONNECTING)
                         startStreamInternal(onSuccess, onError)
                     } catch (e: Exception) {
-                        _isTryingConnectionLiveData.postValue(false)
                         val error = "Failed to configure MediaProjection audio: ${e.message}"
                         Log.e(TAG, error, e)
                         _streamerErrorLiveData.postValue(error)
-                        _streamStatus.value = StreamStatus.ERROR
+                        service?.setStreamStatus(StreamStatus.ERROR)
                         onError(error)  // Also call callback for custom handling if needed
                     }
                 }
             } else {
-                _isTryingConnectionLiveData.postValue(false)
                 val error = "MediaProjection permission required for streaming"
                 Log.e(TAG, error)
                 _streamerErrorLiveData.postValue(error)
-                _streamStatus.value = StreamStatus.ERROR
+                service?.setStreamStatus(StreamStatus.ERROR)
                 onError(error)  // Also call callback for custom handling if needed
             }
         }
@@ -1316,13 +1335,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     val errorMessage = "Connection failed - unable to establish stream"
                     
                     // Check if user stopped manually - if so, don't trigger reconnection
-                    if (userStoppedManually) {
+                    if (service?.userStoppedManually?.value == true) {
                         Log.d(TAG, "User stopped stream, skipping reconnection")
                         return@launch
                     }
                     
                     // Trigger auto-retry unless already reconnecting
-                    if (!isReconnecting) {
+                    if (service?.isReconnecting?.value != true) {
                         Log.i(TAG, "Connection failed, triggering auto-retry (error dialog suppressed)")
                         handleDisconnection(errorMessage, isInitialConnection = true)
                     }
@@ -1331,37 +1350,36 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 Log.i(TAG, "startServiceStreaming() completed successfully")
                 Log.i(TAG, "Stream setup completed successfully, calling onSuccess()")
-                _streamStatus.value = StreamStatus.STREAMING
+                service?.setStreamStatus(StreamStatus.STREAMING)
                 onSuccess()
             } catch (e: Throwable) {
                 val error = "Stream start failed: ${e.message ?: "Unknown error"}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
                 
                 // Check if user stopped manually - if so, don't trigger reconnection
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.d(TAG, "User stopped stream, skipping reconnection")
                     return@launch
                 }
                 
                 // Trigger auto-retry unless already reconnecting
-                if (!isReconnecting) {
+                if (service?.isReconnecting?.value != true) {
                     Log.i(TAG, "Connection failed with exception, triggering auto-retry (error dialog suppressed)")
                     handleDisconnection(error, isInitialConnection = true)
                 } else {
                     Log.d(TAG, "Exception during reconnection, error dialog suppressed")
                 }
             } finally {
-                Log.i(TAG, "startStreamInternal finally block - setting isTryingConnection to false")
-                _isTryingConnectionLiveData.postValue(false)
+                Log.i(TAG, "startStreamInternal finally block")
             }
         }
     }
 
     fun stopStream() {
-        // CRITICAL: Set userStoppedManually IMMEDIATELY, BEFORE acquiring mutex
+        // CRITICAL: Mark user stopped IMMEDIATELY via service, BEFORE acquiring mutex
         // This ensures error handlers see the flag even if they fire before we get the lock
-        userStoppedManually = true
-        Log.i(TAG, "stopStream() - Set userStoppedManually=true before acquiring mutex")
+        service?.markUserStoppedManually()
+        Log.i(TAG, "stopStream() - Marked userStoppedManually via service before acquiring mutex")
         
         // Also immediately cancel any pending reconnection timer
         reconnectTimer.stop()
@@ -1369,12 +1387,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // If cleanup is already in progress, just update UI and return
         // Don't try to stop again - it will just get blocked
-        if (isCleanupInProgress) {
+        val cleanupInProgress = service?.isCleanupInProgress ?: false
+        if (cleanupInProgress) {
             Log.i(TAG, "stopStream() - Cleanup already in progress, just updating UI state")
-            isReconnecting = false
-            _reconnectionStatusLiveData.value = null
-            _streamStatus.value = StreamStatus.NOT_STREAMING
-            _isTryingConnectionLiveData.postValue(false)
+            service?.cancelReconnection()
+            service?.setStreamStatus(StreamStatus.NOT_STREAMING)
             return
         }
         
@@ -1388,185 +1405,176 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 try {
                     val currentStreamer = serviceStreamer
 
-                if (currentStreamer == null) {
-                    Log.w(TAG, "Service streamer not ready, cannot stop stream")
-                    return@launch
-                }
+                    if (currentStreamer == null) {
+                        Log.w(TAG, "Service streamer not ready, cannot stop stream")
+                        return@launch
+                    }
 
-                val currentStreamingState = currentStreamer.isStreamingFlow.value
-                val currentStatus = _streamStatus.value
-                Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isReconnecting")
+                    val currentStreamingState = currentStreamer.isStreamingFlow.value
+                    val currentStatus = streamStatus.value
+                    val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
+                    Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isCurrentlyReconnecting")
 
-                // If reconnecting, always cancel reconnection regardless of streaming state
-                if (isReconnecting) {
-                    Log.i(TAG, "Cancelling active reconnection...")
-                    
-                    // userStoppedManually already set to true before acquiring mutex
-                    
-                    // Cancel reconnection timer and clear flags
-                    reconnectTimer.stop()
-                    isReconnecting = false
-                    _reconnectionStatusLiveData.value = null
-                    
-                    // Update UI state so user gets instant feedback
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                    _isTryingConnectionLiveData.postValue(false)
-                    Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
-                    
-                    // Unlock stream rotation since we're truly stopped
-                    service?.unlockStreamRotation()
-                    
-                    // If we were actually streaming, do slow cleanup in background with flag
-                    // If just reconnecting/connecting, close quickly without the flag
-                    if (currentStreamingState == true) {
-                        // Was actually streaming, need slow cleanup
-                        isCleanupInProgress = true
-                        Log.i(TAG, "stopStream() - Set isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
-                        viewModelScope.launch {
-                            try {
-                                Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
-                                withTimeout(3000) {
-                                    currentStreamer.close()
+                    // If reconnecting, always cancel reconnection regardless of streaming state
+                    if (isCurrentlyReconnecting) {
+                        Log.i(TAG, "Cancelling active reconnection...")
+                        
+                        // userStoppedManually already marked via service before acquiring mutex
+                        
+                        // Cancel reconnection timer and clear service flags
+                        reconnectTimer.stop()
+                        service?.cancelReconnection()
+                        
+                        // Update UI state so user gets instant feedback
+                        service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                        Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
+                        
+                        // Unlock stream rotation since we're truly stopped
+                        service?.unlockStreamRotation()
+                        
+                        // If we were actually streaming, do slow cleanup in background with flag
+                        // If just reconnecting/connecting, close quickly without the flag
+                        if (currentStreamingState == true) {
+                            // Was actually streaming, need slow cleanup
+                            service?.isCleanupInProgress = true
+                            Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
+                            viewModelScope.launch {
+                                try {
+                                    Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
+                                    withTimeout(3000) {
+                                        currentStreamer.close()
+                                    }
+                                    Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                                } finally {
+                                    service?.isCleanupInProgress = false
+                                    Log.i(TAG, "stopStream() - Cleared service.isCleanupInProgress after reconnection cancel cleanup")
                                 }
-                                Log.i(TAG, "Reconnection cancelled - endpoint closed")
+                            }
+                        } else {
+                            // Was just connecting/reconnecting, close quickly
+                            try {
+                                Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
+                                withContext(Dispatchers.IO) {
+                                    withTimeout(1000) {
+                                        currentStreamer.close()
+                                    }
+                                }
+                                Log.i(TAG, "Reconnection cancelled - endpoint closed quickly")
                             } catch (e: Exception) {
                                 Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
-                            } finally {
-                                isCleanupInProgress = false
-                                Log.i(TAG, "stopStream() - Cleared isCleanupInProgress after reconnection cancel cleanup")
                             }
                         }
-                    } else {
-                        // Was just connecting/reconnecting, close quickly
+                        
+                        tookEarlyExit = true
+                        return@launch
+                    }
+
+                    // If already stopped and not in CONNECTING state, don't do anything
+                    if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
+                        Log.i(TAG, "Stream is already stopped, skipping stop sequence")
+                        tookEarlyExit = true
+                        return@launch
+                    }
+                    
+                    // If in CONNECTING state but not streaming, force stop the connection attempt
+                    // This handles initial connection attempts that aren't part of reconnection
+                    if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
+                        Log.i(TAG, "Stopping connection attempt (userStoppedManually already set)")
+                        
+                        // userStoppedManually already set to true before acquiring mutex
+                        
+                        // Cancel any pending reconnection attempts
+                        reconnectTimer.stop()
+                        // isReconnecting managed by service
+                        
+                        // Update UI state so user gets instant feedback
+                        service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                        Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
+                        
+                        // Unlock stream rotation since we're truly stopped
+                        service?.unlockStreamRotation()
+                        
+                        // Close endpoint synchronously - it should be fast since we never actually streamed
+                        // No need for isCleanupInProgress flag since this is quick
                         try {
-                            Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
+                            Log.d(TAG, "Closing endpoint (connection attempt never succeeded)...")
                             withContext(Dispatchers.IO) {
                                 withTimeout(1000) {
                                     currentStreamer.close()
                                 }
                             }
-                            Log.i(TAG, "Reconnection cancelled - endpoint closed quickly")
+                            Log.i(TAG, "Connection attempt aborted - endpoint closed")
                         } catch (e: Exception) {
-                            Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
+                            Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
                         }
+                        
+                        tookEarlyExit = true
+                        return@launch
                     }
-                    
-                    tookEarlyExit = true
-                    return@launch
-                }
 
-                // If already stopped and not in CONNECTING state, don't do anything
-                if (currentStreamingState != true && currentStatus != StreamStatus.CONNECTING) {
-                    Log.i(TAG, "Stream is already stopped, skipping stop sequence")
-                    _isTryingConnectionLiveData.postValue(false)
-                    tookEarlyExit = true
-                    return@launch
-                }
-                
-                // If in CONNECTING state but not streaming, force stop the connection attempt
-                // This handles initial connection attempts that aren't part of reconnection
-                if (currentStatus == StreamStatus.CONNECTING && currentStreamingState != true) {
-                    Log.i(TAG, "Stopping connection attempt (userStoppedManually already set)")
-                    
-                    // userStoppedManually already set to true before acquiring mutex
-                    
-                    // Cancel any pending reconnection attempts
-                    reconnectTimer.stop()
-                    isReconnecting = false
-                    
-                    // Update UI state so user gets instant feedback
-                    _streamStatus.value = StreamStatus.NOT_STREAMING
-                    _isTryingConnectionLiveData.postValue(false)
-                    Log.i(TAG, "UI updated immediately - connection attempt cancelled by user")
-                    
-                    // Unlock stream rotation since we're truly stopped
-                    service?.unlockStreamRotation()
-                    
-                    // Close endpoint synchronously - it should be fast since we never actually streamed
-                    // No need for isCleanupInProgress flag since this is quick
+                    Log.i(TAG, "Stopping stream...")
+
+                    // Release MediaProjection FIRST to interrupt any ongoing capture
+                    streamingMediaProjection?.let { mediaProjection ->
+                        mediaProjection.stop()
+                        Log.i(TAG, "MediaProjection stopped")
+                    }
+                    streamingMediaProjection = null
+
+                    // Stop streaming via helper method
                     try {
-                        Log.d(TAG, "Closing endpoint (connection attempt never succeeded)...")
-                        withContext(Dispatchers.IO) {
-                            withTimeout(1000) {
-                                currentStreamer.close()
+                        stopServiceStreaming()
+                        Log.i(TAG, "Stream stop command sent")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error stopping stream: ${e.message}", e)
+                    }
+
+                    // Remove bitrate regulator
+                    try {
+                        currentStreamer.removeBitrateRegulatorController()
+                        Log.i(TAG, "Bitrate regulator removed")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
+                    }
+
+                } catch (e: Throwable) {
+                    Log.e(TAG, "stopStream failed", e)
+                    // Force clear state
+                    streamingMediaProjection?.stop()
+                    streamingMediaProjection = null
+                } finally {
+                    // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                    
+                    // User stopped flag already set via service before acquiring mutex
+                    
+                    // Cancel any pending reconnection attempts (already done via service.markUserStoppedManually)
+                    reconnectTimer.stop()
+                    
+                    // Apply any rotation that was ignored during reconnection
+                    rotationIgnoredDuringReconnection?.let { ignoredRotation ->
+                        viewModelScope.launch {
+                            try {
+                                serviceStreamer?.setTargetRotation(ignoredRotation)
+                                Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to apply ignored rotation: $t")
                             }
                         }
-                        Log.i(TAG, "Connection attempt aborted - endpoint closed")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing endpoint during connection abort: ${e.message}")
+                        rotationIgnoredDuringReconnection = null
                     }
                     
-                    tookEarlyExit = true
-                    return@launch
-                }
-
-                Log.i(TAG, "Stopping stream...")
-
-                // Release MediaProjection FIRST to interrupt any ongoing capture
-                streamingMediaProjection?.let { mediaProjection ->
-                    mediaProjection.stop()
-                    Log.i(TAG, "MediaProjection stopped")
-                }
-                streamingMediaProjection = null
-
-                // Stop streaming via helper method
-                try {
-                    stopServiceStreaming()
-                    Log.i(TAG, "Stream stop command sent")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping stream: ${e.message}", e)
-                }
-
-                // Remove bitrate regulator
-                try {
-                    currentStreamer.removeBitrateRegulatorController()
-                    Log.i(TAG, "Bitrate regulator removed")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-                }
-
-            } catch (e: Throwable) {
-                Log.e(TAG, "stopStream failed", e)
-                // Force clear state
-                streamingMediaProjection?.stop()
-                streamingMediaProjection = null
-            } finally {
-                // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
-                _streamStatus.value = StreamStatus.NOT_STREAMING
-                
-                // Mark that user stopped manually to prevent reconnection
-                userStoppedManually = true
-                Log.i(TAG, "stopStream() - Set userStoppedManually=true")
-                
-                // Cancel any pending reconnection attempts
-                reconnectTimer.stop()
-                isReconnecting = false
-                _reconnectionStatusLiveData.value = null
-                
-                _isTryingConnectionLiveData.postValue(false)
-                
-                // Apply any rotation that was ignored during reconnection
-                rotationIgnoredDuringReconnection?.let { ignoredRotation ->
-                    viewModelScope.launch {
-                        try {
-                            serviceStreamer?.setTargetRotation(ignoredRotation)
-                            Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to apply ignored rotation: $t")
-                        }
+                    // Only set cleanup flag if we didn't take an early exit path
+                    // (Early exit paths manage their own cleanup flags)
+                    if (!tookEarlyExit) {
+                        // Mark that cleanup will continue outside mutex
+                        // This prevents race condition if user rapidly taps stop->start
+                        service?.isCleanupInProgress = true
+                        Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true before releasing lock")
                     }
-                    rotationIgnoredDuringReconnection = null
                 }
-                
-                // Only set cleanup flag if we didn't take an early exit path
-                // (Early exit paths manage their own cleanup flags)
-                if (!tookEarlyExit) {
-                    // Mark that cleanup will continue outside mutex
-                    // This prevents race condition if user rapidly taps stop->start
-                    isCleanupInProgress = true
-                    Log.i(TAG, "stopStream() - Set isCleanupInProgress=true before releasing lock")
-                }
-            }
             } // Release mutex lock
             Log.d(TAG, "stopStream() - Released lock")
             
@@ -1629,8 +1637,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } finally {
                     // ALWAYS clear cleanup flag - even if serviceStreamer was null or cleanup failed
                     // This prevents the flag from getting stuck and blocking future stream starts
-                    isCleanupInProgress = false
-                    Log.i(TAG, "stopStream() - Cleared isCleanupInProgress, cleanup complete")
+                    service?.isCleanupInProgress = false
+                    Log.i(TAG, "stopStream() - Cleared service.isCleanupInProgress, cleanup complete")
                 }
             }
         }
@@ -1644,17 +1652,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * @param isInitialConnection If true, skips status check (for initial connection failures)
      */
     private fun handleDisconnection(reason: String, isInitialConnection: Boolean = false) {
-        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${_streamStatus.value}, isReconnecting=$isReconnecting, userStopped=$userStoppedManually")
+        val userStopped = service?.userStoppedManually?.value ?: false
+        val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
+        Log.i(TAG, "handleDisconnection called: reason='$reason', isInitialConnection=$isInitialConnection, currentStatus=${streamStatus.value}, isReconnecting=$isCurrentlyReconnecting, userStopped=$userStopped")
         
-        // Check if user manually stopped streaming - if so, don't start reconnection
-        if (userStoppedManually) {
-            Log.i(TAG, "User manually stopped stream, skipping reconnection attempt")
-            return
-        }
-        
-        // Guard against duplicate handling
-        if (isReconnecting) {
-            Log.d(TAG, "Already handling reconnection, skipping duplicate")
+        // Use service's centralized method to attempt beginning reconnection
+        // This handles all the checks (userStoppedManually, isReconnecting=${service?.isReconnecting?.value}, cleanup in progress)
+        val canReconnect = service?.beginReconnection(reason) ?: false
+        if (!canReconnect) {
+            Log.i(TAG, "Reconnection skipped by service (user stopped, already reconnecting, or cleanup in progress)")
             return
         }
 
@@ -1662,10 +1668,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val currentStreamer = serviceStreamer
         if (currentStreamer == null) {
             Log.w(TAG, "Cannot reconnect: streamer not available")
+            service?.cancelReconnection()
             return
         }
 
-        isReconnecting = true
         lastDisconnectReason = reason
         
         // Clear any pending rotation changes - we want to maintain current locked orientation
@@ -1675,11 +1681,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         
         Log.i(TAG, "Connection lost: $reason - will attempt reconnection in 5 seconds")
-        _streamStatus.value = StreamStatus.CONNECTING
-        _reconnectionStatusLiveData.postValue("Could not connect. Reconnecting in 5 seconds")
-        
-        // Update service notification to show "Connecting..." status
-        service?.updateStreamStatus(StreamStatus.CONNECTING)
+        // Status and message already set by service.beginReconnection()
+        // Just update our local _streamStatus to match
+        service?.setStreamStatus(StreamStatus.CONNECTING)
 
         // Stop current stream cleanly before reconnecting
         viewModelScope.launch {
@@ -1762,10 +1766,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 // Schedule reconnection after 5 seconds
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
-                    // Double-check if user manually stopped during the delay
-                    if (userStoppedManually) {
+                    // Double-check if user manually stopped during the delay (using service state)
+                    val userStopped = service?.userStoppedManually?.value ?: false
+                    if (userStopped) {
                         Log.d(TAG, "User stopped streaming during delay, cancelling reconnection")
-                        isReconnecting = false
+                        service?.cancelReconnection()
                         return@startSingleShot
                     }
                     Log.i(TAG, "Attempting to reconnect after disconnection...")
@@ -1773,9 +1778,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
-                isReconnecting = false
-                _streamStatus.value = StreamStatus.ERROR
-                _reconnectionStatusLiveData.postValue(null)
+                service?.cancelReconnection()
+                service?.setStreamStatus(StreamStatus.ERROR)
                 _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
             }
         }
@@ -1787,20 +1791,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun attemptReconnection() {
         viewModelScope.launch {
             try {
-                // Check if user manually stopped streaming FIRST before doing anything
-                if (userStoppedManually) {
+                // Check if user manually stopped streaming FIRST (using service state)
+                val userStopped = service?.userStoppedManually?.value ?: false
+                if (userStopped) {
                     Log.d(TAG, "User stopped streaming, cancelling reconnection attempt")
-                    isReconnecting = false
-                    _reconnectionStatusLiveData.value = null
+                    service?.cancelReconnection()
                     return@launch
                 }
                 
                 // Check if cleanup is still in progress from a previous stop
-                if (isCleanupInProgress) {
+                val cleanupInProgress = service?.isCleanupInProgress ?: false
+                if (cleanupInProgress) {
                     Log.w(TAG, "Cleanup still in progress, delaying reconnection attempt")
                     // Reschedule after a short delay to let cleanup finish
                     reconnectTimer.startSingleShot(timeoutSeconds = 2) {
-                        if (!userStoppedManually) {
+                        val stillUserStopped = service?.userStoppedManually?.value ?: false
+                        if (!stillUserStopped) {
                             attemptReconnection()
                         }
                     }
@@ -1810,25 +1816,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val currentStreamer = serviceStreamer
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
-                    isReconnecting = false
-                    _streamStatus.value = StreamStatus.ERROR
-                    _reconnectionStatusLiveData.postValue(null)
+                    service?.cancelReconnection()
+                    service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
                 }
 
                 Log.i(TAG, "Executing reconnection attempt...")
-                _reconnectionStatusLiveData.postValue("Reconnecting...")
+                service?.setReconnectionMessage("Reconnecting...")
                 
                 // Set status to CONNECTING so UI shows stop button and it actually works
-                _streamStatus.value = StreamStatus.CONNECTING
+                service?.setStreamStatus(StreamStatus.CONNECTING)
 
                 // Validate that both sources exist before attempting reconnection
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
                 if (!sourcesValid) {
                     Log.e(TAG, "Reconnection failed: $sourceError")
-                    _reconnectionStatusLiveData.postValue("Reconnection failed. Sources not configured")
-                    isReconnecting = false
-                    _streamStatus.value = StreamStatus.ERROR
+                    service?.setReconnectionMessage("Reconnection failed. Sources not configured")
+                    service?.cancelReconnection()
+                    service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
                 }
                 
@@ -1846,11 +1851,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 if (success) {
                     Log.i(TAG, "Reconnection successful!")
-                    _streamStatus.value = StreamStatus.STREAMING
-                    _reconnectionStatusLiveData.postValue("Reconnected successfully!")
-                    
-                    // Clear reconnection flag ONLY after stream is fully connected
-                    isReconnecting = false
+                    service?.completeReconnection()
+                    service?.setStreamStatus(StreamStatus.STREAMING)
                     
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null
@@ -1874,23 +1876,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
                         }
                     }
-                    
-                    // Clear success message after 3 seconds
-                    viewModelScope.launch {
-                        delay(3000)
-                        _reconnectionStatusLiveData.postValue(null)
-                    }
                 } else {
-                    // Check if user stopped before showing failure message
-                    if (userStoppedManually) {
+                    // Check if user stopped before showing failure message (using service state)
+                    val userStopped = service?.userStoppedManually?.value ?: false
+                    if (userStopped) {
                         Log.d(TAG, "User stopped during reconnection failure handling, skipping retry")
-                        isReconnecting = false
-                        _reconnectionStatusLiveData.value = null
+                        service?.cancelReconnection()
                         return@launch
                     }
                     
                     Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
-                    _reconnectionStatusLiveData.postValue("Reconnection failed. Retrying in 5 seconds")
+                    service?.setReconnectionMessage("Reconnection failed. Retrying in 5 seconds")
                     
                     // Keep isReconnecting = true for retry attempt
                     // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
@@ -1902,9 +1898,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } catch (e: Exception) {
                 // Check if user stopped before showing failure message
-                if (userStoppedManually) {
+                if (service?.userStoppedManually?.value == true) {
                     Log.d(TAG, "User stopped during reconnection exception handling, skipping retry")
-                    isReconnecting = false
+                    // isReconnecting managed by service
                     _reconnectionStatusLiveData.value = null
                     return@launch
                 }
@@ -2722,7 +2718,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // Cancel any pending reconnection attempts
         reconnectTimer.stop()
-        isReconnecting = false
+        // isReconnecting managed by service
         rotationIgnoredDuringReconnection = null
         Log.i(TAG, "Cancelled reconnect timer in onCleared()")
         

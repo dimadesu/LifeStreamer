@@ -123,7 +123,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // This prevents race conditions where start is called while previous stop is still cleaning up
     // Shared between UI (via ViewModel) and notification stops
     @Volatile
-    private var isCleanupInProgress = false
+    var isCleanupInProgress = false
     
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
@@ -141,6 +141,20 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
+    
+    // Centralized reconnection state - shared between ViewModel and notification handlers
+    private val _isReconnecting = MutableStateFlow(false)
+    val isReconnecting = _isReconnecting.asStateFlow()
+    
+    // User manually stopped flag - prevents reconnection attempts
+    // Shared between ViewModel and notification to stay in sync
+    private val _userStoppedManually = MutableStateFlow(false)
+    val userStoppedManually = _userStoppedManually.asStateFlow()
+    
+    // Reconnection status message for UI display
+    private val _reconnectionStatusMessage = MutableStateFlow<String?>(null)
+    val reconnectionStatusMessage = _reconnectionStatusMessage.asStateFlow()
+    
     // Signal when user manually stops from notification (for ViewModel to cancel reconnection)
     private val _userStoppedFromNotification = MutableSharedFlow<Unit>(replay = 0)
     val userStoppedFromNotification = _userStoppedFromNotification.asSharedFlow()
@@ -369,12 +383,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification action: START_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
-                        // Check if previous stop cleanup is still in progress
-                        if (isCleanupInProgress) {
-                            Log.w(TAG, "Cannot start from notification - cleanup from previous stop still in progress")
-                            // Could show a notification here if desired
+                        // Check if we can start (cleanup not in progress)
+                        if (!canStartStream()) {
+                            Log.w(TAG, "Cannot start from notification - cleanup in progress or blocked")
                             return@launch
                         }
+                        
+                        // Clear manual stop flag since user is explicitly starting
+                        clearUserStoppedManually()
                         
                         try {
                             // Check if we're using RTMP source - can't start from notification
@@ -394,13 +410,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Notification action: STOP_STREAM")
                     // stop streaming but keep service alive
                     serviceScope.launch(Dispatchers.Default) {
+                        // Mark that user manually stopped (prevents reconnection)
+                        markUserStoppedManually()
+                        
                         // Mark cleanup in progress to prevent start racing with close()
                         isCleanupInProgress = true
                         Log.i(TAG, "Notification STOP - Set isCleanupInProgress=true")
                         
                         try {
                             // Signal that user manually stopped from notification
-                            // This allows ViewModel to cancel reconnection attempts
+                            // This allows ViewModel to cancel reconnection timer immediately
                             _userStoppedFromNotification.emit(Unit)
                             
                             streamer?.stopStream()
@@ -648,12 +667,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // notification's content text; the small status label (statusLabel) is used by
         // the collapsed header where appropriate via NotificationUtils.
         val finalContentText = contentWithBitrate
+        
+        val isFg = status == StreamStatus.STREAMING || status == StreamStatus.CONNECTING
 
         val notification = customNotificationUtils.createServiceNotification(
             title = title,
             content = finalContentText,
             iconResourceId = notificationIconResourceId,
-            isForeground = status == StreamStatus.STREAMING,
+            // Keep foreground during STREAMING and CONNECTING (includes reconnection)
+            isForeground = isFg,
             showStart = showStart,
             showStop = showStop,
             startPending = startPendingIntent,
@@ -675,12 +697,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         return try {
             val svcStatus = _serviceStreamStatus.value
             val streamerInstance = streamer
+            val reconnecting = _isReconnecting.value
             
             if (streamerInstance != null) {
                 val streamingNow = streamerInstance.isStreamingFlow.value
                 
                 // If we're actively streaming, return STREAMING
                 if (streamingNow) return StreamStatus.STREAMING
+                
+                // If reconnecting, always show CONNECTING status
+                if (reconnecting) {
+                    return StreamStatus.CONNECTING
+                }
                 
                 // If not streaming but service status is CONNECTING, STARTING, or ERROR,
                 // respect the service status (e.g., during reconnection attempts)
@@ -1052,7 +1080,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to open endpoint descriptor: ${e.message}")
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
-                customNotificationUtils.notify(onCreateNotification())
+                // Don't call notify(onCreateNotification()) here - let the status observer handle it
+                // to avoid overwriting the CONNECTING notification
                 // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
                 return
@@ -1072,7 +1101,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
-                customNotificationUtils.notify(onCreateNotification())
+                // Don't call notify(onCreateNotification()) here - let the status observer handle it
+                // to avoid overwriting the CONNECTING notification
                 // Emit critical error for ViewModel to observe and trigger reconnection
                 serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
                 return
@@ -1188,6 +1218,113 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.w(TAG, "updateStreamStatus failed: ${e.message}")
         }
     }
+    
+    /**
+     * Mark that user has manually stopped the stream.
+     * This prevents automatic reconnection attempts.
+     * Called from both UI (via ViewModel) and notification handlers.
+     */
+    fun markUserStoppedManually() {
+        Log.i(TAG, "markUserStoppedManually() called")
+        _userStoppedManually.value = true
+        // Also cancel any ongoing reconnection
+        if (_isReconnecting.value) {
+            Log.i(TAG, "Cancelling reconnection due to manual stop")
+            _isReconnecting.value = false
+            _reconnectionStatusMessage.value = null
+        }
+    }
+    
+    /**
+     * Clear the manual stop flag when user initiates a new stream start.
+     * Called from both UI (via ViewModel) and notification handlers.
+     */
+    fun clearUserStoppedManually() {
+        Log.i(TAG, "clearUserStoppedManually() called")
+        _userStoppedManually.value = false
+    }
+    
+    /**
+     * Check if we can start streaming.
+     * Returns false if cleanup is in progress or user recently stopped manually.
+     */
+    fun canStartStream(): Boolean {
+        if (isCleanupInProgress) {
+            Log.w(TAG, "Cannot start - cleanup in progress")
+            return false
+        }
+        return true
+    }
+    
+    /**
+     * Begin a reconnection attempt.
+     * Returns true if reconnection should proceed, false if it should be skipped.
+     */
+    fun beginReconnection(reason: String): Boolean {
+        if (_userStoppedManually.value) {
+            Log.i(TAG, "Skipping reconnection - user stopped manually")
+            return false
+        }
+        if (_isReconnecting.value) {
+            Log.d(TAG, "Already reconnecting, skipping duplicate")
+            return false
+        }
+        if (isCleanupInProgress) {
+            Log.w(TAG, "Skipping reconnection - cleanup in progress")
+            return false
+        }
+        
+        Log.i(TAG, "Beginning reconnection - reason: $reason")
+        // Set reconnecting flag FIRST so that when status change triggers observers,
+        // getEffectiveServiceStatus() will see reconnecting=true
+        _isReconnecting.value = true
+        _reconnectionStatusMessage.value = "Could not connect. Reconnecting in 5 seconds"
+        // Now set status - this triggers observers which will see reconnecting=true
+        _serviceStreamStatus.value = StreamStatus.CONNECTING
+        return true
+    }
+    
+    /**
+     * Update reconnection status message for UI display.
+     */
+    fun setReconnectionMessage(message: String?) {
+        _reconnectionStatusMessage.value = message
+    }
+    
+    /**
+     * Mark reconnection as complete (successful).
+     */
+    fun completeReconnection() {
+        Log.i(TAG, "Reconnection completed successfully")
+        _isReconnecting.value = false
+        _reconnectionStatusMessage.value = "Reconnected successfully!"
+        
+        // Clear success message after 3 seconds
+        serviceScope.launch {
+            delay(3000)
+            _reconnectionStatusMessage.value = null
+        }
+    }
+    
+    /**
+     * Cancel reconnection attempt.
+     */
+    fun cancelReconnection() {
+        Log.i(TAG, "Reconnection cancelled")
+        // Set flag FIRST before status to avoid intermediate state
+        _isReconnecting.value = false
+        _reconnectionStatusMessage.value = null
+        // Now update status - this will trigger notification observer
+        _serviceStreamStatus.value = StreamStatus.NOT_STREAMING
+    }
+    
+    /**
+     * Update the stream status. Called by ViewModel to keep Service and notification in sync.
+     */
+    fun setStreamStatus(status: StreamStatus) {
+        Log.d(TAG, "setStreamStatus: $status (isReconnecting=${_isReconnecting.value})")
+        _serviceStreamStatus.value = status
+    }
 
     // Helper to compute the localized mute/unmute label based on current audio state
     private fun currentMuteLabel(): String {
@@ -1241,6 +1378,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     override fun onCloseNotification(): Notification? {
+        // Don't show "Not streaming" if we're in reconnection mode
+        if (_isReconnecting.value) {
+            Log.d(TAG, "onCloseNotification: Suppressing notification during reconnection")
+            return null
+        }
+        
         return customNotificationUtils.createServiceNotification(
             title = getString(R.string.service_notification_title),
             content = getString(R.string.status_not_streaming),
