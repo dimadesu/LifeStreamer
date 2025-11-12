@@ -1297,7 +1297,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     fun completeReconnection() {
         Log.i(TAG, "Reconnection completed successfully")
         _isReconnecting.value = false
-        _reconnectionStatusMessage.value = null
+        _reconnectionStatusMessage.value = "Reconnected successfully!"
+        
+        // Clear success message after 3 seconds
+        serviceScope.launch {
+            delay(3000)
+            _reconnectionStatusMessage.value = null
+        }
     }
     
     /**
