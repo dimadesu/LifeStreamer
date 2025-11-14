@@ -2484,10 +2484,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     
                                     override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
                                         Log.d(TAG, "UVC device opened")
+                                        // Open the camera after device is opened
+                                        openCamera()
                                     }
                                     
                                     override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
-                                        Log.d(TAG, "UVC camera opened and ready")
+                                        Log.i(TAG, "UVC camera opened and ready")
+                                        // Camera is now ready and streaming
+                                        startPreview()
                                     }
                                     
                                     override fun onCameraClose(device: android.hardware.usb.UsbDevice) {
@@ -2521,18 +2525,32 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             }
                         }
                         
-                        // Check if camera is connected
+                        // Get available UVC devices
                         val helper = uvcCameraHelper
-                        if (helper == null || !helper.isCameraOpened) {
-                            _streamerErrorLiveData.postValue("No UVC camera connected")
-                            Log.w(TAG, "UVC camera not connected")
+                        if (helper == null) {
+                            _streamerErrorLiveData.postValue("Failed to initialize UVC camera helper")
+                            Log.e(TAG, "Failed to initialize camera helper")
                             return@launch
                         }
                         
-                        // Switch to UVC source
+                        val deviceList = helper.deviceList
+                        if (deviceList.isNullOrEmpty()) {
+                            _streamerErrorLiveData.postValue("No UVC camera connected")
+                            Log.w(TAG, "No UVC devices found")
+                            return@launch
+                        }
+                        
+                        // Select the first available device
+                        val device = deviceList[0]
+                        Log.i(TAG, "Selecting UVC device: ${device.deviceName}")
+                        
+                        // Switch to UVC source first
                         delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        
+                        // Then select the device (this will trigger onDeviceOpen -> onCameraOpen)
+                        helper.selectDevice(device)
                         
                         Log.i(TAG, "Switched to UVC source")
                     }
