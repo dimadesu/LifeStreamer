@@ -39,6 +39,10 @@ public class VideoFormatDialogFragment extends DialogFragment {
 
     private FragmentVideoFormatBinding mBinding;
 
+    public VideoFormatDialogFragment() {
+        // Required empty public constructor for Fragment
+    }
+
     public VideoFormatDialogFragment(List<Format> formatList, Size size) {
         mFormatList = formatList;
         mSize = size.clone();
