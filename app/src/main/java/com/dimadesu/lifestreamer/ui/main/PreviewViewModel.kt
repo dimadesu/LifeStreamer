@@ -45,6 +45,7 @@ import com.dimadesu.lifestreamer.data.rotation.RotationRepository
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.ui.main.usecases.BuildStreamerUseCase
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
+import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.uvc.UvcVideoSource
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
@@ -2582,6 +2583,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (ready && serviceStreamer != null) {
                 serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
                     source is UvcVideoSource
+                } ?: kotlinx.coroutines.flow.flowOf(false)
+            } else {
+                kotlinx.coroutines.flow.flowOf(false)
+            }
+        }.asLiveData()
+
+    val isRtmpSource: LiveData<Boolean>
+        get() = serviceReadyFlow.flatMapLatest { ready ->
+            if (ready && serviceStreamer != null) {
+                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                    source is RTMPVideoSource
                 } ?: kotlinx.coroutines.flow.flowOf(false)
             } else {
                 kotlinx.coroutines.flow.flowOf(false)

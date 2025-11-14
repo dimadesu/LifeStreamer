@@ -111,7 +111,7 @@
                     android:id="@+id/switchSourceButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text='@{viewmodel.isCameraSource ? "RTMP SRC: OFF" : "RTMP SRC: ON"}' />
+                    android:text='@{viewmodel.isRtmpSource ? "RTMP SRC: ON" : "RTMP SRC: OFF"}' />
 
                 <Button
                     android:id="@+id/toggleUvcButton"
