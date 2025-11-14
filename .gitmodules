@@ -1,3 +1,6 @@
 [submodule "StreamPack"]
 	path = StreamPack
 	url = git@github.com:dimadesu/StreamPack.git
+[submodule "UVCAndroid"]
+	path = UVCAndroid
+	url = git@github.com:shiyinghan/UVCAndroid.git
