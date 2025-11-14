@@ -176,7 +176,7 @@ public class UvcTestActivity extends AppCompatActivity {
         int id = item.getItemId();
 
         if (id == R.id.action_device) {
-            Toast.makeText(this, "Device selection coming soon", Toast.LENGTH_SHORT).show();
+            showDeviceListDialog();
         } else if (id == R.id.action_video_format) {
             showVideoFormatDialog();
         } else if (id == R.id.action_safely_eject) {
@@ -258,6 +258,14 @@ public class UvcTestActivity extends AppCompatActivity {
         });
 
         mFormatDialog.show(getSupportFragmentManager(), "video_format");
+    }
+
+    private void showDeviceListDialog() {
+        DeviceListDialogFragment dialogFragment = new DeviceListDialogFragment(mCameraHelper, mUsbDevice);
+        dialogFragment.setOnDeviceItemSelectListener(usbDevice -> {
+            selectDevice(usbDevice);
+        });
+        dialogFragment.show(getSupportFragmentManager(), "device_list");
     }
 
     private void safelyEject() {
