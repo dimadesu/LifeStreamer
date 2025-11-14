@@ -62,52 +62,70 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintVertical_bias="0.25" />
 
+        <!-- Two column layout for buttons -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent">
 
-            <!-- Camera selection buttons container -->
+            <!-- First column: Camera buttons -->
             <LinearLayout
-                android:id="@+id/cameraButtonsContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Camera selection buttons container -->
+                <LinearLayout
+                    android:id="@+id/cameraButtonsContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone" />
+
+                <!--
+                <ImageButton
+                    android:id="@+id/switchCameraButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/switch_camera_source"
+                    android:onLongClick="@{() -> viewmodel.switchBackToFront()}"
+                    android:src="@drawable/ic_baseline_cameraswitch_24"
+                    app:goneUnless="@{viewmodel.isCameraSource}"
+                    app:tint="@android:color/white" />
+                -->
+
+            </LinearLayout>
+
+            <!-- Second column: RTMP and UVC buttons -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="gone" />
+                android:layout_marginStart="8dp">
 
-            <!--
-            <ImageButton
-                android:id="@+id/switchCameraButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="@string/switch_camera_source"
-                android:onLongClick="@{() -> viewmodel.switchBackToFront()}"
-                android:src="@drawable/ic_baseline_cameraswitch_24"
-                app:goneUnless="@{viewmodel.isCameraSource}"
-                app:tint="@android:color/white" />
-            -->
+                <Button
+                    android:id="@+id/switchSourceButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text='@{viewmodel.isCameraSource ? "RTMP SRC: OFF" : "RTMP SRC: ON"}' />
 
-            <Button
-                android:id="@+id/switchSourceButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text='@{viewmodel.isCameraSource ? "RTMP SRC: OFF" : "RTMP SRC: ON"}' />
+                <Button
+                    android:id="@+id/toggleUvcButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text='@{viewmodel.isUvcSource ? "UVC SRC: ON" : "UVC SRC: OFF"}' />
 
-            <Button
-                android:id="@+id/toggleUvcButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text='@{viewmodel.isUvcSource ? "UVC SRC: ON" : "UVC SRC: OFF"}'
-                android:layout_marginTop="8dp" />
+                <Button
+                    android:id="@+id/uvcTestButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="UVC TEST" />
 
-            <Button
-                android:id="@+id/uvcTestButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="UVC TEST"
-                android:layout_marginTop="8dp" />
+            </LinearLayout>
 
         </LinearLayout>
 
