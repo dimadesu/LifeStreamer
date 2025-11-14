@@ -83,6 +83,8 @@ public class UvcTestActivity extends AppCompatActivity {
     private boolean mIsRecording = false;
     private boolean mIsCameraConnected = false;
 
+    private VideoFormatDialogFragment mFormatDialog;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -175,6 +177,8 @@ public class UvcTestActivity extends AppCompatActivity {
 
         if (id == R.id.action_device) {
             Toast.makeText(this, "Device selection coming soon", Toast.LENGTH_SHORT).show();
+        } else if (id == R.id.action_video_format) {
+            showVideoFormatDialog();
         } else if (id == R.id.action_safely_eject) {
             safelyEject();
         } else if (id == R.id.action_rotate_90_CW) {
@@ -193,12 +197,14 @@ public class UvcTestActivity extends AppCompatActivity {
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
         if (mIsCameraConnected) {
+            menu.findItem(R.id.action_video_format).setVisible(true);
             menu.findItem(R.id.action_safely_eject).setVisible(true);
             menu.findItem(R.id.action_rotate_90_CW).setVisible(true);
             menu.findItem(R.id.action_rotate_90_CCW).setVisible(true);
             menu.findItem(R.id.action_flip_horizontally).setVisible(true);
             menu.findItem(R.id.action_flip_vertically).setVisible(true);
         } else {
+            menu.findItem(R.id.action_video_format).setVisible(false);
             menu.findItem(R.id.action_safely_eject).setVisible(false);
             menu.findItem(R.id.action_rotate_90_CW).setVisible(false);
             menu.findItem(R.id.action_rotate_90_CCW).setVisible(false);
@@ -232,6 +238,26 @@ public class UvcTestActivity extends AppCompatActivity {
                         REQUEST_STORAGE_AUDIO_PERMISSION);
             }
         });
+    }
+
+    private void showVideoFormatDialog() {
+        if (mFormatDialog != null && mFormatDialog.isAdded()) {
+            return;
+        }
+
+        mFormatDialog = new VideoFormatDialogFragment(mCameraHelper.getSupportedFormatList(), mCameraHelper.getPreviewSize());
+        mFormatDialog.setOnVideoFormatSelectListener(size -> {
+            if (mIsCameraConnected && !mCameraHelper.isRecording()) {
+                mCameraHelper.stopPreview();
+                mCameraHelper.setPreviewSize(size);
+                mCameraHelper.startPreview();
+                resizePreviewView(size);
+                // save selected preview size
+                setSavedPreviewSize(size);
+            }
+        });
+
+        mFormatDialog.show(getSupportFragmentManager(), "video_format");
     }
 
     private void safelyEject() {
