@@ -96,6 +96,13 @@
                 android:text='@{viewmodel.isCameraSource ? "RTMP SRC: OFF" : "RTMP SRC: ON"}' />
 
             <Button
+                android:id="@+id/toggleUvcButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text='@{viewmodel.isUvcSource ? "UVC SRC: ON" : "UVC SRC: OFF"}'
+                android:layout_marginTop="8dp" />
+
+            <Button
                 android:id="@+id/uvcTestButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
