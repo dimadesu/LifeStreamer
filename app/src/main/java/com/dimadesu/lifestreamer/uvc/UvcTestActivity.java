@@ -15,7 +15,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.google.gson.Gson;
 import com.herohan.uvcapp.ImageCapture;
 import com.herohan.uvcapp.VideoCapture;
-import com.hjq.permissions.XXPermissions;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import android.content.pm.PackageManager;
 import com.serenegiant.opengl.renderer.MirrorMode;
 import com.herohan.uvcapp.CameraHelper;
 import com.herohan.uvcapp.ICameraHelper;
@@ -53,6 +55,10 @@ public class UvcTestActivity extends AppCompatActivity {
 
     private static final int DEFAULT_WIDTH = 640;
     private static final int DEFAULT_HEIGHT = 480;
+
+    private static final int REQUEST_STORAGE_PERMISSION = 100;
+    private static final int REQUEST_STORAGE_AUDIO_PERMISSION = 101;
+    private static final int REQUEST_CAMERA_PERMISSION = 102;
 
     /**
      * Camera preview width
@@ -110,6 +116,29 @@ public class UvcTestActivity extends AppCompatActivity {
                 mUsbDevice = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
                 selectDevice(mUsbDevice);
             }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            switch (requestCode) {
+                case REQUEST_STORAGE_PERMISSION:
+                    takePicture();
+                    break;
+                case REQUEST_STORAGE_AUDIO_PERMISSION:
+                    toggleVideoRecord(true);
+                    break;
+                case REQUEST_CAMERA_PERMISSION:
+                    if (mUsbDevice != null) {
+                        selectDevice(mUsbDevice);
+                    }
+                    break;
+            }
+        } else {
+            Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -181,20 +210,27 @@ public class UvcTestActivity extends AppCompatActivity {
 
     private void setListeners() {
         mBinding.fabPicture.setOnClickListener(v -> {
-            XXPermissions.with(this)
-                    .permission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    .request((permissions, all) -> {
-                        takePicture();
-                    });
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED) {
+                takePicture();
+            } else {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        REQUEST_STORAGE_PERMISSION);
+            }
         });
 
         mBinding.fabVideo.setOnClickListener(v -> {
-            XXPermissions.with(this)
-                    .permission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    .permission(Manifest.permission.RECORD_AUDIO)
-                    .request((permissions, all) -> {
-                        toggleVideoRecord(!mIsRecording);
-                    });
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED
+                    && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED) {
+                toggleVideoRecord(!mIsRecording);
+            } else {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.RECORD_AUDIO},
+                        REQUEST_STORAGE_AUDIO_PERMISSION);
+            }
         });
     }
 
@@ -302,16 +338,19 @@ public class UvcTestActivity extends AppCompatActivity {
     protected void selectDevice(UsbDevice device) {
         if (DEBUG) Log.v(TAG, "selectDevice:device=" + device.getDeviceName());
 
-        XXPermissions.with(this)
-                .permission(Manifest.permission.CAMERA)
-                .request((permissions, all) -> {
-                    mIsCameraConnected = false;
-                    updateUIControls();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+            mIsCameraConnected = false;
+            updateUIControls();
 
-                    if (mCameraHelper != null) {
-                        mCameraHelper.selectDevice(device);
-                    }
-                });
+            if (mCameraHelper != null) {
+                mCameraHelper.selectDevice(device);
+            }
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CAMERA},
+                    REQUEST_CAMERA_PERMISSION);
+        }
     }
 
     private class MyCameraHelperCallback implements ICameraHelper.StateCallback {
