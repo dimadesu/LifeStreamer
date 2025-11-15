@@ -209,9 +209,9 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:rotation="-90"
-            app:layout_constraintBottom_toBottomOf="@+id/settingsLayout"
-            app:layout_constraintEnd_toEndOf="@+id/settingsLayout"
-            app:layout_constraintTop_toTopOf="@+id/settingsLayout">
+            app:layout_constraintBottom_toBottomOf="@+id/settingsScrollView"
+            app:layout_constraintEnd_toEndOf="@+id/settingsScrollView"
+            app:layout_constraintTop_toTopOf="@+id/settingsScrollView">
 
             <com.google.android.material.slider.Slider
                 android:layout_width="match_parent"
@@ -242,75 +242,84 @@
                 app:goneUnless="@{viewmodel.showLensDistanceSlider}" />
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/settingsLayout"
+        <ScrollView
+            android:id="@+id/settingsScrollView"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="0dp"
             android:layout_marginEnd="16dp"
-            android:orientation="vertical"
+            android:fillViewport="true"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/audioSourceLayout"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <ImageButton
+            <LinearLayout
+                android:id="@+id/settingsLayout"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="@string/turn_on_off_torch"
-                android:onClick="@{() -> viewmodel.toggleFlash()}"
-                android:src="@drawable/ic_baseline_flash_on_24"
-                app:goneUnless="@{viewmodel.isFlashAvailable}"
-                app:tint="@android:color/white" />
+                android:orientation="vertical"
+                android:gravity="bottom">
 
-            <ImageButton
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="@string/set_white_balance"
-                android:onClick="@{() -> viewmodel.toggleAutoWhiteBalanceMode()}"
-                android:src="@drawable/ic_baseline_wb_auto_24"
-                app:goneUnless="@{viewmodel.isAutoWhiteBalanceAvailable}"
-                app:tint="@android:color/white" />
+                <ImageButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/turn_on_off_torch"
+                    android:onClick="@{() -> viewmodel.toggleFlash()}"
+                    android:src="@drawable/ic_baseline_flash_on_24"
+                    app:goneUnless="@{viewmodel.isFlashAvailable}"
+                    app:tint="@android:color/white" />
 
-            <ImageButton
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="@string/set_exposure_compensation"
-                android:onClick="@{() -> viewmodel.toggleExposureSlider()}"
-                android:src="@drawable/ic_baseline_exposure_24"
-                app:goneUnless="@{viewmodel.isExposureCompensationAvailable()}"
-                app:tint="@android:color/white" />
+                <ImageButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/set_white_balance"
+                    android:onClick="@{() -> viewmodel.toggleAutoWhiteBalanceMode()}"
+                    android:src="@drawable/ic_baseline_wb_auto_24"
+                    app:goneUnless="@{viewmodel.isAutoWhiteBalanceAvailable}"
+                    app:tint="@android:color/white" />
 
-            <ImageButton
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="@string/set_zoom_ratio"
-                android:onClick="@{() -> viewmodel.toggleZoomSlider()}"
-                android:src="@drawable/ic_baseline_zoom_in_24"
-                app:goneUnless="@{viewmodel.isZoomAvailable()}"
-                app:tint="@android:color/white" />
+                <ImageButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/set_exposure_compensation"
+                    android:onClick="@{() -> viewmodel.toggleExposureSlider()}"
+                    android:src="@drawable/ic_baseline_exposure_24"
+                    app:goneUnless="@{viewmodel.isExposureCompensationAvailable()}"
+                    app:tint="@android:color/white" />
 
-            <ImageButton
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="@string/set_auto_focus_mode"
-                android:onClick="@{() -> viewmodel.toggleAutoFocusMode()}"
-                android:src="@drawable/ic_baseline_center_focus_strong_24"
-                app:goneUnless="@{viewmodel.isAutoFocusModeAvailable()}"
-                app:tint="@android:color/white" />
+                <ImageButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/set_zoom_ratio"
+                    android:onClick="@{() -> viewmodel.toggleZoomSlider()}"
+                    android:src="@drawable/ic_baseline_zoom_in_24"
+                    app:goneUnless="@{viewmodel.isZoomAvailable()}"
+                    app:tint="@android:color/white" />
 
-            <ToggleButton
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:padding="12dp"
-                android:contentDescription="@string/mute_unmute_microphone"
-                android:drawableTop="@drawable/ic_toggle_mic_button"
-                android:checked="@{viewmodel.isMutedLiveData}"
-                android:onCheckedChanged="@{(_, checked) -> viewmodel.setMute(checked)}"
-                android:textOff=""
-                android:textOn=""
-                app:tint="@android:color/white" />
+                <ImageButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/set_auto_focus_mode"
+                    android:onClick="@{() -> viewmodel.toggleAutoFocusMode()}"
+                    android:src="@drawable/ic_baseline_center_focus_strong_24"
+                    app:goneUnless="@{viewmodel.isAutoFocusModeAvailable()}"
+                    app:tint="@android:color/white" />
 
+                <ToggleButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:padding="12dp"
+                    android:contentDescription="@string/mute_unmute_microphone"
+                    android:drawableTop="@drawable/ic_toggle_mic_button"
+                    android:checked="@{viewmodel.isMutedLiveData}"
+                    android:onCheckedChanged="@{(_, checked) -> viewmodel.setMute(checked)}"
+                    android:textOff=""
+                    android:textOn=""
+                    app:tint="@android:color/white" />
 
-        </LinearLayout>
+            </LinearLayout>
+
+        </ScrollView>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </layout>
