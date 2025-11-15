@@ -303,8 +303,11 @@
                 app:tint="@android:color/white" />
 
             <ToggleButton
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:padding="12dp"
                 android:contentDescription="@string/mute_unmute_microphone"
                 android:drawableTop="@drawable/ic_toggle_mic_button"
                 android:checked="@{viewmodel.isMutedLiveData}"
