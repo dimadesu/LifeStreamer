@@ -209,8 +209,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     fun requiresMediaProjection(): Boolean {
         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
-        // If video source is not a camera source, it's likely RTMP and needs MediaProjection for audio
-        return currentVideoSource != null && currentVideoSource !is ICameraSource
+        // Only RTMP and Bitmap sources need MediaProjection for audio capture
+        // UVC and Camera sources use microphone directly
+        return currentVideoSource is RTMPVideoSource || currentVideoSource is IBitmapSource
     }
 
     // Streamer errors (nullable to support single-event pattern - cleared after observation)
