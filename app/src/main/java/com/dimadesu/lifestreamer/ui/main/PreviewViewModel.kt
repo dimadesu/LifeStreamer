@@ -168,6 +168,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var uvcCameraHelper: com.herohan.uvcapp.CameraHelper? = null
 
     /**
+     * User intent flags - track what the user toggled ON (not what fallback is active)
+     * These allow buttons to show correct state even when source falls back to bitmap
+     */
+    private val _userToggledRtmp = MutableLiveData<Boolean>(false)
+    private val _userToggledUvc = MutableLiveData<Boolean>(false)
+
+    /**
      * Camera settings.
      */
     val cameraSettings: CameraSettings?
@@ -2232,6 +2239,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 is ICameraSource -> {
                     Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
                     
+                    // Mark that user toggled RTMP ON
+                    _userToggledRtmp.postValue(true)
+                    _userToggledUvc.postValue(false)
+                    
                     // Remember current camera ID before switching away
                     lastUsedCameraId = videoSource.cameraId
                     Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
@@ -2313,6 +2324,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 else -> {
                     Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
+
+                    // Mark that user toggled RTMP OFF (back to camera)
+                    _userToggledRtmp.postValue(false)
 
                     // Clear RTMP status message FIRST before cancelling job
                     // (job might be in middle of delay showing error message)
@@ -2459,6 +2473,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     is UvcVideoSource -> {
                         Log.i(TAG, "Switching from UVC to Camera source")
                         
+                        // Mark that user toggled UVC OFF (back to camera)
+                        _userToggledUvc.postValue(false)
+                        
                         // Switch back to camera
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
@@ -2468,6 +2485,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
+                        
+                        // Mark that user toggled UVC ON
+                        _userToggledUvc.postValue(true)
+                        _userToggledRtmp.postValue(false)
                         
                         // Remember current camera
                         lastUsedCameraId = videoSource.cameraId
@@ -2558,6 +2579,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch back to camera instead of trying to reconnect UVC
                         Log.i(TAG, "Switching from ${videoSource?.javaClass?.simpleName} to Camera source")
                         
+                        // Clear UVC toggle flag (user wants camera now)
+                        _userToggledUvc.postValue(false)
+                        
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
@@ -2587,27 +2611,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }.asLiveData()
 
-    val isUvcSource: LiveData<Boolean>
-        get() = serviceReadyFlow.flatMapLatest { ready ->
-            if (ready && serviceStreamer != null) {
-                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
-                    source is UvcVideoSource
-                } ?: kotlinx.coroutines.flow.flowOf(false)
-            } else {
-                kotlinx.coroutines.flow.flowOf(false)
-            }
-        }.asLiveData()
+    /**
+     * Expose user toggle state for UVC button
+     */
+    val isUvcSource: LiveData<Boolean> = _userToggledUvc
 
-    val isRtmpSource: LiveData<Boolean>
-        get() = serviceReadyFlow.flatMapLatest { ready ->
-            if (ready && serviceStreamer != null) {
-                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
-                    source is RTMPVideoSource
-                } ?: kotlinx.coroutines.flow.flowOf(false)
-            } else {
-                kotlinx.coroutines.flow.flowOf(false)
-            }
-        }.asLiveData()
+    /**
+     * Expose user toggle state for RTMP button
+     */
+    val isRtmpSource: LiveData<Boolean> = _userToggledRtmp
 
     val isRtmpOrBitmapSource: LiveData<Boolean>
         get() = serviceReadyFlow.flatMapLatest { ready ->
