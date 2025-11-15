@@ -2486,10 +2486,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
                         
-                        // Mark that user toggled UVC ON
-                        _userToggledUvc.postValue(true)
-                        _userToggledRtmp.postValue(false)
-                        
                         // Remember current camera
                         lastUsedCameraId = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
@@ -2559,6 +2555,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.w(TAG, "No UVC devices found")
                             return@launch
                         }
+                        
+                        // Mark that user toggled UVC ON (only after confirming device is available)
+                        _userToggledUvc.postValue(true)
+                        _userToggledRtmp.postValue(false)
                         
                         // Select the first available device
                         val device = deviceList[0]
