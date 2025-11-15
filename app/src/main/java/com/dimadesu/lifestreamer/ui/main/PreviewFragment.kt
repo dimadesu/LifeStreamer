@@ -127,6 +127,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher)
         }
 
+        binding.toggleUvcButton.setOnClickListener {
+            previewViewModel.toggleUvcSource()
+        }
+
+        binding.uvcTestButton.setOnClickListener {
+            val intent = android.content.Intent(requireContext(), com.dimadesu.lifestreamer.uvc.UvcTestActivity::class.java)
+            startActivity(intent)
+        }
+
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
             error?.let {
                 showError("Oops", it)
