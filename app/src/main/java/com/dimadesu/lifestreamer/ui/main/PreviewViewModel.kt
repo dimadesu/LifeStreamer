@@ -2466,14 +2466,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         Log.i(TAG, "Switched to camera source")
                     }
-                    else -> {
-                        Log.i(TAG, "Switching to UVC source")
+                    is ICameraSource -> {
+                        Log.i(TAG, "Switching from Camera to UVC source")
                         
-                        // Remember current camera if switching from camera
-                        if (videoSource is ICameraSource) {
-                            lastUsedCameraId = videoSource.cameraId
-                            Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
-                        }
+                        // Remember current camera
+                        lastUsedCameraId = videoSource.cameraId
+                        Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
                         // Initialize UVC camera if needed
                         if (uvcCameraHelper == null) {
@@ -2554,6 +2552,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         helper.selectDevice(device)
                         
                         Log.i(TAG, "Switched to UVC source")
+                    }
+                    else -> {
+                        // We're on bitmap or other source (likely bitmap fallback from disconnected UVC)
+                        // Switch back to camera instead of trying to reconnect UVC
+                        Log.i(TAG, "Switching from ${videoSource?.javaClass?.simpleName} to Camera source")
+                        
+                        delay(300)
+                        currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
+                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        
+                        Log.i(TAG, "Switched to camera source")
                     }
                 }
             } catch (e: Exception) {
