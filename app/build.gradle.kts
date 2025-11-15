@@ -74,7 +74,6 @@ dependencies {
 
     implementation("com.herohan:UVCAndroid:1.0.11")
     implementation("com.google.code.gson:gson:2.11.0")
-    implementation("com.github.warkiz:IndicatorSeekBar:v2.1.1")
 
     // Needed because we copied PreviewView into the app module which depends on viewfinder types
     implementation("androidx.camera.viewfinder:viewfinder-core:1.4.0-alpha13")
