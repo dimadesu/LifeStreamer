@@ -2477,10 +2477,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Mark that user toggled UVC OFF (back to camera)
                         _userToggledUvc.postValue(false)
                         
+                        // Remove bitrate regulator if streaming with SRT
+                        removeBitrateRegulatorIfNeeded()
+                        
                         // Switch back to camera
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        
+                        // Re-add bitrate regulator if streaming with SRT
+                        readdBitrateRegulatorIfNeeded()
                         
                         Log.i(TAG, "Switched to camera source")
                     }
@@ -2565,10 +2571,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         val device = deviceList[0]
                         Log.i(TAG, "Selecting UVC device: ${device.deviceName}")
                         
+                        // Remove bitrate regulator if streaming with SRT
+                        removeBitrateRegulatorIfNeeded()
+                        
                         // Switch to UVC source first
                         delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        
+                        // Re-add bitrate regulator if streaming with SRT
+                        readdBitrateRegulatorIfNeeded()
                         
                         // Then select the device (this will trigger onDeviceOpen -> onCameraOpen)
                         helper.selectDevice(device)
@@ -2583,9 +2595,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Clear UVC toggle flag (user wants camera now)
                         _userToggledUvc.postValue(false)
                         
+                        // Remove bitrate regulator if streaming with SRT
+                        removeBitrateRegulatorIfNeeded()
+                        
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
                         currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        
+                        // Re-add bitrate regulator if streaming with SRT
+                        readdBitrateRegulatorIfNeeded()
                         
                         Log.i(TAG, "Switched to camera source")
                     }
