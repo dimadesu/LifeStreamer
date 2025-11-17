@@ -36,6 +36,7 @@ import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.databinding.Bindable
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.asLiveData
 import androidx.lifecycle.viewModelScope
@@ -2270,7 +2271,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 viewModelScope.launch {
                                     streamingMediaProjection = projection
                                     if (projection == null) {
-                                        _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
+                                        // Permission denied - turn off RTMP toggle
+                                        _userToggledRtmp.postValue(false)
+                                        _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
                                         return@launch
                                     }
 
@@ -2639,6 +2642,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Expose user toggle state for RTMP button
      */
     val isRtmpSource: LiveData<Boolean> = _userToggledRtmp
+
+    /**
+     * Show camera controls only when on camera source (neither RTMP nor UVC toggle is ON)
+     */
+    val showCameraControls: LiveData<Boolean> = MediatorLiveData<Boolean>().apply {
+        value = true // Initial value: show controls when both toggles are OFF
+        
+        var rtmpOn = _userToggledRtmp.value ?: false
+        var uvcOn = _userToggledUvc.value ?: false
+        
+        addSource(_userToggledRtmp) { 
+            rtmpOn = it ?: false
+            value = !rtmpOn && !uvcOn
+        }
+        addSource(_userToggledUvc) { 
+            uvcOn = it ?: false
+            value = !rtmpOn && !uvcOn
+        }
+    }
 
     val isRtmpOrBitmapSource: LiveData<Boolean>
         get() = serviceReadyFlow.flatMapLatest { ready ->
