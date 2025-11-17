@@ -75,10 +75,6 @@ dependencies {
     implementation("com.herohan:UVCAndroid:1.0.11")
     implementation("com.google.code.gson:gson:2.11.0")
 
-    // Needed because we copied PreviewView into the app module which depends on viewfinder types
-    implementation("androidx.camera.viewfinder:viewfinder-core:1.4.0-alpha13")
-    implementation("androidx.camera.viewfinder:viewfinder-view:1.4.0-alpha13")
-
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
     implementation("androidx.media3:media3-datasource-rtmp:1.8.0")
