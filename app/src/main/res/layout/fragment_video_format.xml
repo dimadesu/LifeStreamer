@@ -6,37 +6,35 @@
   android:orientation="vertical">
 
   <TextView
-    android:layout_width="match_parent"
+    android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:text="Format"
-    android:textSize="16sp"
-    android:paddingBottom="8dp" />
+    android:textSize="13sp"
+    android:layout_marginTop="10dp" />
 
   <Spinner
     android:id="@+id/spVideoFormatFormat"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:paddingBottom="16dp" />
+    android:layout_height="wrap_content" />
 
   <TextView
-    android:layout_width="match_parent"
+    android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:text="Resolution"
-    android:textSize="16sp"
-    android:paddingBottom="8dp" />
+    android:textSize="13sp"
+    android:layout_marginTop="10dp" />
 
   <Spinner
     android:id="@+id/spVideoFormatResolution"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:paddingBottom="16dp" />
+    android:layout_height="wrap_content" />
 
   <TextView
-    android:layout_width="match_parent"
+    android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:text="Frame Rate"
-    android:textSize="16sp"
-    android:paddingBottom="8dp" />
+    android:textSize="13sp"
+    android:layout_marginTop="10dp" />
 
   <Spinner
     android:id="@+id/spVideoFormatFrameRate"
