@@ -2270,7 +2270,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 viewModelScope.launch {
                                     streamingMediaProjection = projection
                                     if (projection == null) {
-                                        _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
+                                        // Permission denied - turn off RTMP toggle
+                                        _userToggledRtmp.postValue(false)
+                                        _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
                                         return@launch
                                     }
 
