@@ -180,10 +180,11 @@ class UvcVideoSource(
                 outputSurface?.let { cameraHelper.removeSurface(it) }
                 previewSurface?.let { cameraHelper.removeSurface(it) }
                 
-                // Note: Don't close camera or release CameraHelper here
-                // as it's shared with UvcTestActivity
+                // Close camera and release CameraHelper
+                cameraHelper.closeCamera()
+                cameraHelper.release()
                 
-                Log.d(TAG, "UVC camera detached from surfaces")
+                Log.d(TAG, "UVC camera released")
             } catch (e: Exception) {
                 Log.e(TAG, "Error releasing: ${e.message}", e)
             }
