@@ -36,6 +36,7 @@ import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.databinding.Bindable
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.asLiveData
 import androidx.lifecycle.viewModelScope
@@ -2641,6 +2642,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Expose user toggle state for RTMP button
      */
     val isRtmpSource: LiveData<Boolean> = _userToggledRtmp
+
+    /**
+     * Show camera controls only when on camera source (neither RTMP nor UVC toggle is ON)
+     */
+    val showCameraControls: LiveData<Boolean> = MediatorLiveData<Boolean>().apply {
+        var rtmpOn = false
+        var uvcOn = false
+        
+        addSource(_userToggledRtmp) { 
+            rtmpOn = it ?: false
+            value = !rtmpOn && !uvcOn
+        }
+        addSource(_userToggledUvc) { 
+            uvcOn = it ?: false
+            value = !rtmpOn && !uvcOn
+        }
+        
+        value = false // Initial value
+    }
 
     val isRtmpOrBitmapSource: LiveData<Boolean>
         get() = serviceReadyFlow.flatMapLatest { ready ->

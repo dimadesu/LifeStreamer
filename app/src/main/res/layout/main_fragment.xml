@@ -265,7 +265,7 @@
                     android:contentDescription="@string/turn_on_off_torch"
                     android:onClick="@{() -> viewmodel.toggleFlash()}"
                     android:src="@drawable/ic_baseline_flash_on_24"
-                    app:goneUnless="@{viewmodel.isFlashAvailable}"
+                    app:goneUnless="@{viewmodel.isFlashAvailable &amp;&amp; viewmodel.showCameraControls}"
                     app:tint="@android:color/white" />
 
                 <ImageButton
@@ -274,7 +274,7 @@
                     android:contentDescription="@string/set_white_balance"
                     android:onClick="@{() -> viewmodel.toggleAutoWhiteBalanceMode()}"
                     android:src="@drawable/ic_baseline_wb_auto_24"
-                    app:goneUnless="@{viewmodel.isAutoWhiteBalanceAvailable}"
+                    app:goneUnless="@{viewmodel.isAutoWhiteBalanceAvailable &amp;&amp; viewmodel.showCameraControls}"
                     app:tint="@android:color/white" />
 
                 <ImageButton
@@ -283,7 +283,7 @@
                     android:contentDescription="@string/set_exposure_compensation"
                     android:onClick="@{() -> viewmodel.toggleExposureSlider()}"
                     android:src="@drawable/ic_baseline_exposure_24"
-                    app:goneUnless="@{viewmodel.isExposureCompensationAvailable()}"
+                    app:goneUnless="@{viewmodel.isExposureCompensationAvailable() &amp;&amp; viewmodel.showCameraControls}"
                     app:tint="@android:color/white" />
 
                 <ImageButton
@@ -292,7 +292,7 @@
                     android:contentDescription="@string/set_zoom_ratio"
                     android:onClick="@{() -> viewmodel.toggleZoomSlider()}"
                     android:src="@drawable/ic_baseline_zoom_in_24"
-                    app:goneUnless="@{viewmodel.isZoomAvailable()}"
+                    app:goneUnless="@{viewmodel.isZoomAvailable() &amp;&amp; viewmodel.showCameraControls}"
                     app:tint="@android:color/white" />
 
                 <ImageButton
@@ -301,7 +301,7 @@
                     android:contentDescription="@string/set_auto_focus_mode"
                     android:onClick="@{() -> viewmodel.toggleAutoFocusMode()}"
                     android:src="@drawable/ic_baseline_center_focus_strong_24"
-                    app:goneUnless="@{viewmodel.isAutoFocusModeAvailable()}"
+                    app:goneUnless="@{viewmodel.isAutoFocusModeAvailable() &amp;&amp; viewmodel.showCameraControls}"
                     app:tint="@android:color/white" />
 
                 <ToggleButton
