@@ -2574,6 +2574,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         val device = deviceList[0]
                         Log.i(TAG, "Selecting UVC device: ${device.deviceName}")
                         
+                        // Close existing camera connection if any (e.g., if returning from UvcTestActivity)
+                        try {
+                            if (helper.isCameraOpened) {
+                                Log.d(TAG, "Closing existing camera connection before reopening")
+                                helper.stopPreview()
+                                helper.closeCamera()
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing existing camera: ${e.message}")
+                        }
+                        
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
                         
