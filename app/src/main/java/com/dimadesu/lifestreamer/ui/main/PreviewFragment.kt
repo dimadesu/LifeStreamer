@@ -328,16 +328,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     binding.cameraButtonsContainer.addView(button)
                 }
             }
+            
+            // Update visibility after adding/removing buttons
+            updateCameraButtonsVisibility()
         }
         
-        // Show/hide camera buttons based on current source
-        previewViewModel.isCameraSource.observe(viewLifecycleOwner) { isCameraSource ->
-            binding.cameraButtonsContainer.visibility = if (isCameraSource && 
-                binding.cameraButtonsContainer.childCount > 0) {
-                android.view.View.VISIBLE
-            } else {
-                android.view.View.GONE
-            }
+        // Show/hide camera buttons based on current source (hide when RTMP or UVC toggle is ON)
+        previewViewModel.showCameraControls.observe(viewLifecycleOwner) { 
+            updateCameraButtonsVisibility()
         }
         
         // Update button states when camera changes (including on startup)
@@ -978,6 +976,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
         if (missingPermissions.isNotEmpty()) {
             showPermissionError(*missingPermissions.toTypedArray())
+        }
+    }
+
+    private fun updateCameraButtonsVisibility() {
+        val showControls = previewViewModel.showCameraControls.value ?: true
+        binding.cameraButtonsContainer.visibility = if (showControls && 
+            binding.cameraButtonsContainer.childCount > 0) {
+            android.view.View.VISIBLE
+        } else {
+            android.view.View.GONE
         }
     }
 

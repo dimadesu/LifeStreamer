@@ -2647,8 +2647,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Show camera controls only when on camera source (neither RTMP nor UVC toggle is ON)
      */
     val showCameraControls: LiveData<Boolean> = MediatorLiveData<Boolean>().apply {
-        var rtmpOn = false
-        var uvcOn = false
+        value = true // Initial value: show controls when both toggles are OFF
+        
+        var rtmpOn = _userToggledRtmp.value ?: false
+        var uvcOn = _userToggledUvc.value ?: false
         
         addSource(_userToggledRtmp) { 
             rtmpOn = it ?: false
@@ -2658,8 +2660,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             uvcOn = it ?: false
             value = !rtmpOn && !uvcOn
         }
-        
-        value = false // Initial value
     }
 
     val isRtmpOrBitmapSource: LiveData<Boolean>
