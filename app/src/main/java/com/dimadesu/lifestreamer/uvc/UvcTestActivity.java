@@ -24,7 +24,6 @@ import com.dimadesu.lifestreamer.R;
 import com.dimadesu.lifestreamer.databinding.ActivityUvcTestBinding;
 
 import android.os.SystemClock;
-import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
