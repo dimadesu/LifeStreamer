@@ -2525,7 +2525,36 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 
                                 override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
-                                    Log.d(TAG, "UVC device opened")
+                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen)")
+                                    
+                                    // If this is first open after permission grant, switch video source now
+                                    if (isFirstOpen) {
+                                        Log.i(TAG, "First open after permission grant - switching to UVC source")
+                                        viewModelScope.launch {
+                                            try {
+                                                // Mark that user toggled UVC ON
+                                                _userToggledUvc.postValue(true)
+                                                _userToggledRtmp.postValue(false)
+                                                
+                                                // Remove bitrate regulator if streaming with SRT
+                                                removeBitrateRegulatorIfNeeded()
+                                                
+                                                // Switch to UVC source
+                                                delay(300)
+                                                currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
+                                                currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                                
+                                                // Re-add bitrate regulator if streaming with SRT
+                                                readdBitrateRegulatorIfNeeded()
+                                                
+                                                Log.i(TAG, "Switched to UVC source after permission grant")
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
+                                                _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
+                                            }
+                                        }
+                                    }
+                                    
                                     // Open the camera after device is opened
                                     openCamera()
                                 }
@@ -2562,6 +2591,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 
                                 override fun onCancel(device: android.hardware.usb.UsbDevice) {
                                     Log.d(TAG, "UVC camera permission cancelled")
+                                    _toastMessageLiveData.postValue("USB permission denied")
                                 }
                             })
                         }
@@ -2588,12 +2618,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Check if we have permission for this USB device
                         val usbManager = application.getSystemService(android.content.Context.USB_SERVICE) as android.hardware.usb.UsbManager
                         if (!usbManager.hasPermission(device)) {
-                            Log.d(TAG, "No USB permission yet - requesting permission first")
-                            // Request permission - when granted, user should toggle UVC again
+                            Log.d(TAG, "No USB permission yet - requesting permission")
+                            _toastMessageLiveData.postValue("USB permission required")
+                            // Request permission - onDeviceOpen will be called automatically after grant
                             helper.selectDevice(device) // This will trigger permission dialog
-                            _toastMessageLiveData.postValue("USB permission required - please toggle UVC again after granting")
+                            // The source switch will happen in onDeviceOpen callback when isFirstOpen=true
                             return@launch
                         }
+                        
+                        // We have permission - proceed with source switch
+                        Log.d(TAG, "USB permission already granted - switching source now")
                         
                         // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
                         _userToggledUvc.postValue(true)
