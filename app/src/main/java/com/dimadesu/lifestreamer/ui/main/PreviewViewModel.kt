@@ -1186,13 +1186,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             // Lock stream rotation BEFORE starting to ensure it matches UI orientation
             // Get current display rotation and lock the service to it
-            val currentRotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                application.display?.rotation ?: android.view.Surface.ROTATION_0
-            } else {
-                val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-                @Suppress("DEPRECATION")
-                windowManager.defaultDisplay.rotation
-            }
+            // Note: We use WindowManager.defaultDisplay for all API levels here because
+            // Application context doesn't have an associated display. The deprecation
+            // is acceptable since this is just reading the current rotation value.
+            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            @Suppress("DEPRECATION")
+            val currentRotation = windowManager.defaultDisplay.rotation
             service?.lockStreamRotation(currentRotation)
             Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
             
