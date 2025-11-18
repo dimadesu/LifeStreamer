@@ -76,7 +76,7 @@ public class UvcTestActivity extends AppCompatActivity {
         setSupportActionBar(mBinding.toolbar);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("Configure UVC Camera Here");
+            getSupportActionBar().setTitle("Configure USB Source");
         }
 
         checkCameraHelper();

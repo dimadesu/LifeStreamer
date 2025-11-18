@@ -2606,7 +2606,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         val deviceList = helper.deviceList
                         if (deviceList.isNullOrEmpty()) {
-                            _streamerErrorLiveData.postValue("No UVC camera connected")
+                            _streamerErrorLiveData.postValue("No USB camera connected")
                             Log.w(TAG, "No UVC devices found")
                             return@launch
                         }
