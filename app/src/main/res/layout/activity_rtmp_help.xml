@@ -101,7 +101,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="The LifeStreamer app uses the Media Projection API (aka Android screen recorder) to capture RTMP player audio.\n\nRTMP video is easy to capture from the RTMP player without a screen recorder.\n\nIf you want to capture RTMP audio, you need to allow the app to capture screen and audio when prompted by the Android system dialog.\n\nNote that the LifeStreamer app will always try to capture only its own audio with Media Projection.\n\nOn newer phones, Android might ask to record a single app or the whole phone. You can use either option.\n\nIf you select the whole phone, LifeStreamer will still capture only its own audio.\n\nIf you go with the option to capture a single app, please make sure you pick the LifeStreamer app as an to capture."
+      android:text="The LifeStreamer app uses the Media Projection API (aka Android screen recorder) to capture RTMP player audio.\n\nRTMP video is easy to capture from the RTMP player without a screen recorder.\n\nIf you want to capture RTMP audio, you need to allow the app to capture screen and audio when prompted by the Android system dialog.\n\nNote that the LifeStreamer app will always try to capture only its own audio with Media Projection.\n\nOn newer phones, Android might ask to record a single app or the whole phone. You can use either option.\n\nIf you select the whole phone, LifeStreamer will still capture only its own audio.\n\nIf you go with the option to capture a single app, please make sure you pick the LifeStreamer app as an app to capture."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
