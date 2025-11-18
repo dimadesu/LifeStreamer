@@ -2500,55 +2500,66 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         lastUsedCameraId = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
-                        // Initialize UVC camera if needed
-                        if (uvcCameraHelper == null) {
-                            uvcCameraHelper = com.herohan.uvcapp.CameraHelper().apply {
-                                setStateCallback(object : com.herohan.uvcapp.ICameraHelper.StateCallback {
-                                    override fun onAttach(device: android.hardware.usb.UsbDevice) {
-                                        Log.d(TAG, "UVC camera attached: ${device.deviceName}")
-                                    }
-                                    
-                                    override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
-                                        Log.d(TAG, "UVC device opened")
-                                        // Open the camera after device is opened
-                                        openCamera()
-                                    }
-                                    
-                                    override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
-                                        Log.i(TAG, "UVC camera opened and ready")
-                                        // Camera is now ready and streaming
-                                        startPreview()
-                                    }
-                                    
-                                    override fun onCameraClose(device: android.hardware.usb.UsbDevice) {
-                                        Log.d(TAG, "UVC camera closed")
-                                    }
-                                    
-                                    override fun onDeviceClose(device: android.hardware.usb.UsbDevice) {
-                                        Log.d(TAG, "UVC device closed")
-                                    }
-                                    
-                                    override fun onDetach(device: android.hardware.usb.UsbDevice) {
-                                        Log.w(TAG, "UVC camera detached - switching to fallback")
-                                        viewModelScope.launch {
-                                            try {
-                                                RtmpSourceSwitchHelper.switchToBitmapFallback(
-                                                    currentStreamer,
-                                                    testBitmap,
-                                                    streamingMediaProjection,
-                                                    mediaProjectionHelper
-                                                )
-                                            } catch (e: Exception) {
-                                                Log.e(TAG, "Error switching to fallback: ${e.message}", e)
-                                            }
+                        // Clean up existing UVC camera helper if it exists (might be stale after UvcTestActivity)
+                        uvcCameraHelper?.let { existingHelper ->
+                            try {
+                                Log.d(TAG, "Releasing existing UVC camera helper")
+                                existingHelper.stopPreview()
+                                existingHelper.closeCamera()
+                                existingHelper.release()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error releasing existing helper: ${e.message}")
+                            }
+                            uvcCameraHelper = null
+                        }
+                        
+                        // Always create a fresh CameraHelper instance
+                        uvcCameraHelper = com.herohan.uvcapp.CameraHelper().apply {
+                            setStateCallback(object : com.herohan.uvcapp.ICameraHelper.StateCallback {
+                                override fun onAttach(device: android.hardware.usb.UsbDevice) {
+                                    Log.d(TAG, "UVC camera attached: ${device.deviceName}")
+                                }
+                                
+                                override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
+                                    Log.d(TAG, "UVC device opened")
+                                    // Open the camera after device is opened
+                                    openCamera()
+                                }
+                                
+                                override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
+                                    Log.i(TAG, "UVC camera opened and ready")
+                                    // Camera is now ready and streaming
+                                    startPreview()
+                                }
+                                
+                                override fun onCameraClose(device: android.hardware.usb.UsbDevice) {
+                                    Log.d(TAG, "UVC camera closed")
+                                }
+                                
+                                override fun onDeviceClose(device: android.hardware.usb.UsbDevice) {
+                                    Log.d(TAG, "UVC device closed")
+                                }
+                                
+                                override fun onDetach(device: android.hardware.usb.UsbDevice) {
+                                    Log.w(TAG, "UVC camera detached - switching to fallback")
+                                    viewModelScope.launch {
+                                        try {
+                                            RtmpSourceSwitchHelper.switchToBitmapFallback(
+                                                currentStreamer,
+                                                testBitmap,
+                                                streamingMediaProjection,
+                                                mediaProjectionHelper
+                                            )
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "Error switching to fallback: ${e.message}", e)
                                         }
                                     }
-                                    
-                                    override fun onCancel(device: android.hardware.usb.UsbDevice) {
-                                        Log.d(TAG, "UVC camera permission cancelled")
-                                    }
-                                })
-                            }
+                                }
+                                
+                                override fun onCancel(device: android.hardware.usb.UsbDevice) {
+                                    Log.d(TAG, "UVC camera permission cancelled")
+                                }
+                            })
                         }
                         
                         // Get available UVC devices
