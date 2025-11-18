@@ -116,7 +116,7 @@
                     android:id="@+id/uvcTestButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="UVC TEST"
+                    android:text="UVC CONFIG"
                     app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource}" />
 
             </LinearLayout>
