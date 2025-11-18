@@ -2584,7 +2584,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         return
                                     }
                                     
-                                    Log.w(TAG, "UVC toggle is ON - switching to fallback")
+                                    Log.w(TAG, "UVC toggle is ON - switching to fallback (toggle stays ON)")
                                     viewModelScope.launch {
                                         try {
                                             RtmpSourceSwitchHelper.switchToBitmapFallback(
@@ -2593,8 +2593,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 streamingMediaProjection,
                                                 mediaProjectionHelper
                                             )
-                                            // Turn off UVC toggle since device is gone
-                                            _userToggledUvc.postValue(false)
+                                            // Keep UVC toggle ON - user can plug cable back in
+                                            // and toggle will reconnect automatically
                                         } catch (e: Exception) {
                                             Log.e(TAG, "Error switching to fallback: ${e.message}", e)
                                         }
