@@ -24,7 +24,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="What USB/UVC devices can be used?"
+      android:text="What UVC devices can be used?"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -34,10 +34,9 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="In theory any UVC (USB Video Class) device should work."
-      android:textSize="20sp"
-      android:textStyle="bold"
-      android:paddingTop="8dp"
-      android:paddingBottom="8dp" />
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
 
     <TextView
       android:layout_width="match_parent"
@@ -58,7 +57,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Note on USB audio"
+      android:text="Note on UVC audio"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
