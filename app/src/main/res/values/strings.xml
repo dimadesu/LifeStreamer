@@ -3,7 +3,7 @@
 
     <string name="action_settings">Settings</string>
     <string name="action_rtmp_help">How to use RTMP as source</string>
-    <string name="action_uvc_help">How to use USB as source</string>
+    <string name="action_uvc_help">How to use USB camera source</string>
     <string name="menu_actions">Menu actions</string>
 
     <!-- Camera Streaming Service -->

@@ -16,7 +16,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="How to use USB as source"
+      android:text="How to use USB (UVC) source"
       android:textSize="28sp"
       android:textStyle="bold"
       android:paddingBottom="16dp" />
@@ -24,7 +24,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Sample heading"
+      android:text="What USB/UVC devices can be used?"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -33,7 +33,57 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Sample text paragraph. You can edit this content to explain how to use USB cameras as a video source."
+      android:text="In theory any UVC (USB Video Class) device should work."
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="The app is tested mostly with Dji Osmo Action 4 in 'Webcam/UVC' mode. Camera has to be connected directly to the phone with one USB-C to USB-C cable. Both video and audio should work."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="HDMI capture cards that have USB-C might work. You'll have to test and see. Try to have as little adapters and hubs as possible in between capture card and phone."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Note on USB audio"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Looks like UVC audio on Android behaves just like any USB headphones or USB audio device that you plug into your phone. By default, once you plug any audio device into USB, system automatically uses it as the default audio device."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="LifeStreamer shows default audio input as 'Microphone' in the top right corner of main screen. This can be both built-in microphone of the phone or USB/UVC audio if it is connected."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="I want to emphasize: once you plug in any USB audio device into your phone that device becomes your audio input in LifeStreamer. This includes UVC devices if they have audio. Actually, I don't have a UVC device without audio to test, so not sure how LifeStreamer will behave in that case. Hopefully, it will just use built-in microphone of the phone."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
