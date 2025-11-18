@@ -117,7 +117,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="UVC TEST"
-                    app:goneUnless="@{!viewmodel.isRtmpSource}" />
+                    app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource}" />
 
             </LinearLayout>
 
