@@ -53,27 +53,5 @@
       android:textSize="14sp"
       android:visibility="gone"
       tools:text="99:99:99" />
-
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-      android:id="@+id/fabVideo"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:layout_above="@id/fabPicture"
-      android:layout_alignParentEnd="true"
-      android:layout_marginEnd="16dp"
-      android:layout_marginBottom="16dp"
-      android:visibility="invisible"
-      app:srcCompat="@android:drawable/ic_menu_camera" />
-
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-      android:id="@+id/fabPicture"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:layout_alignParentEnd="true"
-      android:layout_alignParentBottom="true"
-      android:layout_marginEnd="16dp"
-      android:layout_marginBottom="16dp"
-      android:visibility="invisible"
-      app:srcCompat="@android:drawable/ic_menu_gallery" />
   </RelativeLayout>
 </LinearLayout>

@@ -2,29 +2,25 @@ package com.dimadesu.lifestreamer.uvc;
 
 import android.Manifest;
 import android.content.Intent;
-import android.content.res.ColorStateList;
 import android.graphics.SurfaceTexture;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Bundle;
+import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.gson.Gson;
-import com.herohan.uvcapp.ImageCapture;
-import com.herohan.uvcapp.VideoCapture;
+import com.herohan.uvcapp.CameraHelper;
+import com.herohan.uvcapp.ICameraHelper;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import android.content.pm.PackageManager;
 import com.serenegiant.opengl.renderer.MirrorMode;
-import com.herohan.uvcapp.CameraHelper;
-import com.herohan.uvcapp.ICameraHelper;
 import com.serenegiant.usb.IButtonCallback;
 import com.serenegiant.usb.Size;
 import com.serenegiant.usb.USBMonitor;
-import com.serenegiant.utils.UriHelper;
 import com.dimadesu.lifestreamer.R;
 import com.dimadesu.lifestreamer.databinding.ActivityUvcTestBinding;
 
@@ -49,15 +45,9 @@ public class UvcTestActivity extends AppCompatActivity {
 
     private ActivityUvcTestBinding mBinding;
 
-    private static final int QUARTER_SECOND = 250;
-    private static final int HALF_SECOND = 500;
-    private static final int ONE_SECOND = 1000;
-
     private static final int DEFAULT_WIDTH = 640;
     private static final int DEFAULT_HEIGHT = 480;
 
-    private static final int REQUEST_STORAGE_PERMISSION = 100;
-    private static final int REQUEST_STORAGE_AUDIO_PERMISSION = 101;
     private static final int REQUEST_CAMERA_PERMISSION = 102;
 
     /**
@@ -76,11 +66,6 @@ public class UvcTestActivity extends AppCompatActivity {
     private UsbDevice mUsbDevice;
     private final ICameraHelper.StateCallback mStateCallback = new MyCameraHelperCallback();
 
-    private long mRecordStartTime = 0;
-    private Timer mRecordTimer = null;
-    private DecimalFormat mDecimalFormat;
-
-    private boolean mIsRecording = false;
     private boolean mIsCameraConnected = false;
 
     private VideoFormatDialogFragment mFormatDialog;
@@ -99,8 +84,6 @@ public class UvcTestActivity extends AppCompatActivity {
         }
 
         checkCameraHelper();
-
-        setListeners();
     }
 
     @Override
@@ -126,18 +109,10 @@ public class UvcTestActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            switch (requestCode) {
-                case REQUEST_STORAGE_PERMISSION:
-                    takePicture();
-                    break;
-                case REQUEST_STORAGE_AUDIO_PERMISSION:
-                    toggleVideoRecord(true);
-                    break;
-                case REQUEST_CAMERA_PERMISSION:
-                    if (mUsbDevice != null) {
-                        selectDevice(mUsbDevice);
-                    }
-                    break;
+            if (requestCode == REQUEST_CAMERA_PERMISSION) {
+                if (mUsbDevice != null) {
+                    selectDevice(mUsbDevice);
+                }
             }
         } else {
             Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
@@ -154,9 +129,6 @@ public class UvcTestActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
-        if (mIsRecording) {
-            toggleVideoRecord(false);
-        }
     }
 
     @Override
@@ -214,31 +186,7 @@ public class UvcTestActivity extends AppCompatActivity {
         return super.onPrepareOptionsMenu(menu);
     }
 
-    private void setListeners() {
-        mBinding.fabPicture.setOnClickListener(v -> {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    == PackageManager.PERMISSION_GRANTED) {
-                takePicture();
-            } else {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                        REQUEST_STORAGE_PERMISSION);
-            }
-        });
 
-        mBinding.fabVideo.setOnClickListener(v -> {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    == PackageManager.PERMISSION_GRANTED
-                    && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                    == PackageManager.PERMISSION_GRANTED) {
-                toggleVideoRecord(!mIsRecording);
-            } else {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.RECORD_AUDIO},
-                        REQUEST_STORAGE_AUDIO_PERMISSION);
-            }
-        });
-    }
 
     private void showVideoFormatDialog() {
         if (mFormatDialog != null && mFormatDialog.isAdded()) {
@@ -436,10 +384,6 @@ public class UvcTestActivity extends AppCompatActivity {
         public void onCameraClose(UsbDevice device) {
             if (DEBUG) Log.v(TAG, "onCameraClose:device=" + device.getDeviceName());
 
-            if (mIsRecording) {
-                toggleVideoRecord(false);
-            }
-
             if (mCameraHelper != null && mBinding.viewMainPreview.getSurfaceTexture() != null) {
                 mCameraHelper.removeSurface(mBinding.viewMainPreview.getSurfaceTexture());
             }
@@ -485,25 +429,9 @@ public class UvcTestActivity extends AppCompatActivity {
             if (mIsCameraConnected) {
                 mBinding.viewMainPreview.setVisibility(View.VISIBLE);
                 mBinding.tvConnectUSBCameraTip.setVisibility(View.GONE);
-
-                mBinding.fabPicture.setVisibility(View.VISIBLE);
-                mBinding.fabVideo.setVisibility(View.VISIBLE);
-
-                // Update record button
-                int colorId = android.R.color.white;
-                if (mIsRecording) {
-                    colorId = android.R.color.holo_red_dark;
-                }
-                ColorStateList colorStateList = ColorStateList.valueOf(getResources().getColor(colorId));
-                mBinding.fabVideo.setSupportImageTintList(colorStateList);
-
             } else {
                 mBinding.viewMainPreview.setVisibility(View.GONE);
                 mBinding.tvConnectUSBCameraTip.setVisibility(View.VISIBLE);
-
-                mBinding.fabPicture.setVisibility(View.GONE);
-                mBinding.fabVideo.setVisibility(View.GONE);
-
                 mBinding.tvVideoRecordTime.setVisibility(View.GONE);
             }
             invalidateOptionsMenu();
@@ -537,149 +465,11 @@ public class UvcTestActivity extends AppCompatActivity {
                 mCameraHelper.getImageCaptureConfig().setJpegCompressionQuality(90));
     }
 
-    public void takePicture() {
-        if (mIsRecording) {
-            return;
-        }
-
-        try {
-            File picturesDir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
-            File file = new File(picturesDir, "UVC_" + System.currentTimeMillis() + ".jpg");
-            ImageCapture.OutputFileOptions options =
-                    new ImageCapture.OutputFileOptions.Builder(file).build();
-            mCameraHelper.takePicture(options, new ImageCapture.OnImageCaptureCallback() {
-                @Override
-                public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
-                    Toast.makeText(UvcTestActivity.this,
-                            "Saved: " + file.getName(),
-                            Toast.LENGTH_SHORT).show();
-                }
-
-                @Override
-                public void onError(int imageCaptureError, @NonNull String message, @Nullable Throwable cause) {
-                    Toast.makeText(UvcTestActivity.this, message, Toast.LENGTH_SHORT).show();
-                }
-            });
-        } catch (Exception e) {
-            Log.e(TAG, e.getLocalizedMessage(), e);
-        }
-    }
-
-    public void toggleVideoRecord(boolean isRecording) {
-        try {
-            if (isRecording) {
-                if (mIsCameraConnected && mCameraHelper != null && !mCameraHelper.isRecording()) {
-                    startRecord();
-                }
-            } else {
-                if (mIsCameraConnected && mCameraHelper != null && mCameraHelper.isRecording()) {
-                    stopRecord();
-                }
-
-                stopRecordTimer();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, e.getLocalizedMessage(), e);
-            stopRecordTimer();
-        }
-
-        mIsRecording = isRecording;
-
-        updateUIControls();
-    }
-
     private void setCustomVideoCaptureConfig() {
         mCameraHelper.setVideoCaptureConfig(
                 mCameraHelper.getVideoCaptureConfig()
                         .setBitRate((int) (1024 * 1024 * 25 * 0.25))
                         .setVideoFrameRate(25)
                         .setIFrameInterval(1));
-    }
-
-    private void startRecord() {
-        File moviesDir = getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES);
-        File file = new File(moviesDir, "UVC_" + System.currentTimeMillis() + ".mp4");
-        VideoCapture.OutputFileOptions options =
-                new VideoCapture.OutputFileOptions.Builder(file).build();
-        mCameraHelper.startRecording(options, new VideoCapture.OnVideoCaptureCallback() {
-            @Override
-            public void onStart() {
-                startRecordTimer();
-            }
-
-            @Override
-            public void onVideoSaved(@NonNull VideoCapture.OutputFileResults outputFileResults) {
-                toggleVideoRecord(false);
-
-                Toast.makeText(
-                        UvcTestActivity.this,
-                        "Saved: " + file.getName(),
-                        Toast.LENGTH_SHORT).show();
-            }
-
-            @Override
-            public void onError(int videoCaptureError, @NonNull String message, @Nullable Throwable cause) {
-                toggleVideoRecord(false);
-
-                Toast.makeText(UvcTestActivity.this, message, Toast.LENGTH_LONG).show();
-            }
-        });
-    }
-
-    private void stopRecord() {
-        mCameraHelper.stopRecording();
-    }
-
-    private void startRecordTimer() {
-        runOnUiThread(() -> mBinding.tvVideoRecordTime.setVisibility(View.VISIBLE));
-
-        // Set "00:00:00" to record time TextView
-        setVideoRecordTimeText(formatTime(0));
-
-        // Start Record Timer
-        mRecordStartTime = SystemClock.elapsedRealtime();
-        mRecordTimer = new Timer();
-        //The timer is refreshed every quarter second
-        mRecordTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                long recordTime = (SystemClock.elapsedRealtime() - mRecordStartTime) / 1000;
-                if (recordTime > 0) {
-                    setVideoRecordTimeText(formatTime(recordTime));
-                }
-            }
-        }, QUARTER_SECOND, QUARTER_SECOND);
-    }
-
-    private void stopRecordTimer() {
-        runOnUiThread(() -> mBinding.tvVideoRecordTime.setVisibility(View.GONE));
-
-        // Stop Record Timer
-        mRecordStartTime = 0;
-        if (mRecordTimer != null) {
-            mRecordTimer.cancel();
-            mRecordTimer = null;
-        }
-        // Set "00:00:00" to record time TextView
-        setVideoRecordTimeText(formatTime(0));
-    }
-
-    private void setVideoRecordTimeText(String timeText) {
-        runOnUiThread(() -> {
-            mBinding.tvVideoRecordTime.setText(timeText);
-        });
-    }
-
-    /**
-     * Format seconds to HH:mm:ss
-     */
-    private String formatTime(long time) {
-        if (mDecimalFormat == null) {
-            mDecimalFormat = new DecimalFormat("00");
-        }
-        String hh = mDecimalFormat.format(time / 3600);
-        String mm = mDecimalFormat.format(time % 3600 / 60);
-        String ss = mDecimalFormat.format(time % 60);
-        return hh + ":" + mm + ":" + ss;
     }
 }
