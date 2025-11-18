@@ -26,6 +26,7 @@ import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
 import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
+import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: MainActivityBinding
@@ -100,6 +101,10 @@ class MainActivity : AppCompatActivity() {
                     goToRtmpHelpActivity()
                     true
                 }
+                R.id.action_uvc_help -> {
+                    goToUvcHelpActivity()
+                    true
+                }
                 else -> {
                     Log.e(TAG, "Unknown menu item ${it.itemId}")
                     false
@@ -115,6 +120,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun goToRtmpHelpActivity() {
         val intent = Intent(this, RtmpHelpActivity::class.java)
+        startActivity(intent)
+    }
+
+    private fun goToUvcHelpActivity() {
+        val intent = Intent(this, UvcHelpActivity::class.java)
         startActivity(intent)
     }
 

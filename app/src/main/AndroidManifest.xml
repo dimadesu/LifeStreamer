@@ -47,6 +47,7 @@
         </activity>
         <activity android:name=".ui.settings.SettingsActivity" />
         <activity android:name=".ui.help.RtmpHelpActivity" />
+        <activity android:name=".ui.help.UvcHelpActivity" />
 
         <!-- UVC Camera Test Activity -->
         <activity
