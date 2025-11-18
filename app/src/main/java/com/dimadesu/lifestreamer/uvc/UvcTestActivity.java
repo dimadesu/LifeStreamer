@@ -17,7 +17,6 @@ import com.herohan.uvcapp.ICameraHelper;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import android.content.pm.PackageManager;
-import com.serenegiant.opengl.renderer.MirrorMode;
 import com.serenegiant.usb.IButtonCallback;
 import com.serenegiant.usb.Size;
 import com.serenegiant.usb.USBMonitor;
@@ -58,8 +57,6 @@ public class UvcTestActivity extends AppCompatActivity {
      * Camera preview height
      */
     private int mPreviewHeight = DEFAULT_HEIGHT;
-
-    private int mPreviewRotation = 0;
 
     private ICameraHelper mCameraHelper;
 
@@ -153,14 +150,6 @@ public class UvcTestActivity extends AppCompatActivity {
             showVideoFormatDialog();
         } else if (id == R.id.action_safely_eject) {
             safelyEject();
-        } else if (id == R.id.action_rotate_90_CW) {
-            rotateBy(90);
-        } else if (id == R.id.action_rotate_90_CCW) {
-            rotateBy(-90);
-        } else if (id == R.id.action_flip_horizontally) {
-            flipHorizontally();
-        } else if (id == R.id.action_flip_vertically) {
-            flipVertically();
         }
 
         return super.onOptionsItemSelected(item);
@@ -171,17 +160,9 @@ public class UvcTestActivity extends AppCompatActivity {
         if (mIsCameraConnected) {
             menu.findItem(R.id.action_video_format).setVisible(true);
             menu.findItem(R.id.action_safely_eject).setVisible(true);
-            menu.findItem(R.id.action_rotate_90_CW).setVisible(true);
-            menu.findItem(R.id.action_rotate_90_CCW).setVisible(true);
-            menu.findItem(R.id.action_flip_horizontally).setVisible(true);
-            menu.findItem(R.id.action_flip_vertically).setVisible(true);
         } else {
             menu.findItem(R.id.action_video_format).setVisible(false);
             menu.findItem(R.id.action_safely_eject).setVisible(false);
-            menu.findItem(R.id.action_rotate_90_CW).setVisible(false);
-            menu.findItem(R.id.action_rotate_90_CCW).setVisible(false);
-            menu.findItem(R.id.action_flip_horizontally).setVisible(false);
-            menu.findItem(R.id.action_flip_vertically).setVisible(false);
         }
         return super.onPrepareOptionsMenu(menu);
     }
@@ -219,33 +200,6 @@ public class UvcTestActivity extends AppCompatActivity {
     private void safelyEject() {
         if (mCameraHelper != null) {
             mCameraHelper.closeCamera();
-        }
-    }
-
-    private void rotateBy(int angle) {
-        mPreviewRotation += angle;
-        mPreviewRotation %= 360;
-        if (mPreviewRotation < 0) {
-            mPreviewRotation += 360;
-        }
-
-        if (mCameraHelper != null) {
-            mCameraHelper.setPreviewConfig(
-                    mCameraHelper.getPreviewConfig().setRotation(mPreviewRotation));
-        }
-    }
-
-    private void flipHorizontally() {
-        if (mCameraHelper != null) {
-            mCameraHelper.setPreviewConfig(
-                    mCameraHelper.getPreviewConfig().setMirror(MirrorMode.MIRROR_HORIZONTAL));
-        }
-    }
-
-    private void flipVertically() {
-        if (mCameraHelper != null) {
-            mCameraHelper.setPreviewConfig(
-                    mCameraHelper.getPreviewConfig().setMirror(MirrorMode.MIRROR_VERTICAL));
         }
     }
 
