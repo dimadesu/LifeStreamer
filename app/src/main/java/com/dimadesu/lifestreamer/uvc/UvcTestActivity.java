@@ -24,7 +24,6 @@ import com.dimadesu.lifestreamer.R;
 import com.dimadesu.lifestreamer.databinding.ActivityUvcTestBinding;
 
 import android.os.SystemClock;
-import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -77,7 +76,7 @@ public class UvcTestActivity extends AppCompatActivity {
         setSupportActionBar(mBinding.toolbar);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("UVC Camera Test");
+            getSupportActionBar().setTitle("Configure UVC Camera Here");
         }
 
         checkCameraHelper();
@@ -395,7 +394,7 @@ public class UvcTestActivity extends AppCompatActivity {
     private Size getSavedPreviewSize() {
         if (mUsbDevice == null) return null;
         String key = "saved_preview_size_" + USBMonitor.getProductKey(mUsbDevice);
-        String sizeStr = getPreferences(MODE_PRIVATE).getString(key, null);
+        String sizeStr = getSharedPreferences("uvc_camera_prefs", MODE_PRIVATE).getString(key, null);
         if (TextUtils.isEmpty(sizeStr)) {
             return null;
         }
@@ -408,7 +407,7 @@ public class UvcTestActivity extends AppCompatActivity {
         String key = "saved_preview_size_" + USBMonitor.getProductKey(mUsbDevice);
         Gson gson = new Gson();
         String json = gson.toJson(size);
-        getPreferences(MODE_PRIVATE)
+        getSharedPreferences("uvc_camera_prefs", MODE_PRIVATE)
                 .edit()
                 .putString(key, json)
                 .apply();
