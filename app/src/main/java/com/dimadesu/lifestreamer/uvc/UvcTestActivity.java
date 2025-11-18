@@ -76,7 +76,7 @@ public class UvcTestActivity extends AppCompatActivity {
         setSupportActionBar(mBinding.toolbar);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("Configure UVC Camera Here");
+            getSupportActionBar().setTitle("Configure USB Source");
         }
 
         checkCameraHelper();
@@ -84,6 +84,10 @@ public class UvcTestActivity extends AppCompatActivity {
 
     @Override
     public boolean onSupportNavigateUp() {
+        // Always navigate to main screen, even if this activity was launched directly via USB intent
+        Intent intent = new Intent(this, com.dimadesu.lifestreamer.ui.main.MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
         finish();
         return true;
     }
