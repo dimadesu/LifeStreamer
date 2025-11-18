@@ -406,7 +406,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
          * restore the exact same orientation if the app goes to background and returns.
          */
         // Get the actual current orientation from the display
-        val rotation = requireActivity().windowManager.defaultDisplay.rotation
+        val rotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            requireContext().display?.rotation ?: android.view.Surface.ROTATION_0
+        } else {
+            @Suppress("DEPRECATION")
+            requireActivity().windowManager.defaultDisplay.rotation
+        }
         val currentOrientation = when (rotation) {
             android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
