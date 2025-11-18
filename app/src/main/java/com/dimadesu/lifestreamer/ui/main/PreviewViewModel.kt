@@ -2574,7 +2574,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 
                                 override fun onDetach(device: android.hardware.usb.UsbDevice) {
-                                    Log.w(TAG, "UVC camera detached - switching to fallback")
+                                    Log.w(TAG, "UVC camera detached - device=${device.deviceName}")
+                                    
+                                    // Only switch to fallback if UVC source is actually active
+                                    // If UVC toggle is OFF, this detach might be from UvcTestActivity or other code
+                                    val isUvcActive = _userToggledUvc.value ?: false
+                                    if (!isUvcActive) {
+                                        Log.d(TAG, "UVC toggle is OFF, ignoring detach event")
+                                        return
+                                    }
+                                    
+                                    Log.w(TAG, "UVC toggle is ON - switching to fallback")
                                     viewModelScope.launch {
                                         try {
                                             RtmpSourceSwitchHelper.switchToBitmapFallback(
@@ -2583,6 +2593,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 streamingMediaProjection,
                                                 mediaProjectionHelper
                                             )
+                                            // Turn off UVC toggle since device is gone
+                                            _userToggledUvc.postValue(false)
                                         } catch (e: Exception) {
                                             Log.e(TAG, "Error switching to fallback: ${e.message}", e)
                                         }
