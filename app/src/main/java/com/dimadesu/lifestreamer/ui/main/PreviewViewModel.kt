@@ -2577,13 +2577,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             return@launch
                         }
                         
-                        // Mark that user toggled UVC ON (only after confirming device is available)
-                        _userToggledUvc.postValue(true)
-                        _userToggledRtmp.postValue(false)
-                        
                         // Select the first available device
                         val device = deviceList[0]
                         Log.i(TAG, "Selecting UVC device: ${device.deviceName}")
+                        
+                        // Check if we have permission for this USB device
+                        val usbManager = application.getSystemService(android.content.Context.USB_SERVICE) as android.hardware.usb.UsbManager
+                        if (!usbManager.hasPermission(device)) {
+                            Log.d(TAG, "No USB permission yet - requesting permission first")
+                            // Request permission - when granted, user should toggle UVC again
+                            helper.selectDevice(device) // This will trigger permission dialog
+                            _toastMessageLiveData.postValue("USB permission required - please toggle UVC again after granting")
+                            return@launch
+                        }
+                        
+                        // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
+                        _userToggledUvc.postValue(true)
+                        _userToggledRtmp.postValue(false)
                         
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
