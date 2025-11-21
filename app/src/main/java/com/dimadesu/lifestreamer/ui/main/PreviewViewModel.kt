@@ -248,6 +248,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Track current RTMP ExoPlayer for monitoring disconnections
     private var currentRtmpPlayer: androidx.media3.exoplayer.ExoPlayer? = null
     private var rtmpDisconnectListener: androidx.media3.common.Player.Listener? = null
+    
+    // Monitor audio toggle for RTMP sources (OFF by default)
+    private val _isMonitorAudioOn: MutableLiveData<Boolean> = MutableLiveData(false)
+    val isMonitorAudioOn: LiveData<Boolean> = _isMonitorAudioOn
     private var rtmpBufferingStartTime = 0L
     private var bufferingCheckJob: kotlinx.coroutines.Job? = null
     private var isHandlingDisconnection = false // Guard flag to prevent duplicate disconnection handling
@@ -2029,6 +2033,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
     
     /**
+     * Toggle monitor audio for RTMP source
+     * When ON: sets ExoPlayer volume to 1.0 (100%)
+     * When OFF: sets ExoPlayer volume to 0.0 (muted)
+     */
+    fun toggleMonitorAudio() {
+        val newState = !(_isMonitorAudioOn.value ?: false)
+        _isMonitorAudioOn.value = newState
+        
+        currentRtmpPlayer?.let { player ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try {
+                    player.volume = if (newState) 1.0f else 0f
+                    Log.i(TAG, "Monitor audio ${if (newState) "ON" else "OFF"} - ExoPlayer volume: ${player.volume}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to set ExoPlayer volume: ${e.message}", e)
+                }
+            }
+        } ?: run {
+            Log.w(TAG, "Cannot toggle monitor audio - no RTMP player available")
+        }
+    }
+    
+    /**
      * Monitor RTMP ExoPlayer for disconnections and automatically fallback + retry
      */
     private fun monitorRtmpConnection(player: androidx.media3.exoplayer.ExoPlayer) {
@@ -2351,6 +2378,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     bufferingCheckJob?.cancel()
                     bufferingCheckJob = null
                     rtmpBufferingStartTime = 0L
+                    
+                    // Reset monitor audio to OFF when switching away from RTMP
+                    _isMonitorAudioOn.postValue(false)
                     
                     // Stop monitoring RTMP connection
                     rtmpDisconnectListener?.let { listener ->
