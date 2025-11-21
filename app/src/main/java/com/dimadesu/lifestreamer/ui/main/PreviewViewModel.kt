@@ -2790,6 +2790,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }.asLiveData()
 
+    /**
+     * Check if current video source is actually RTMP (not bitmap fallback)
+     * Used to show monitor audio button only for RTMP sources
+     */
+    val isActualRtmpSource: LiveData<Boolean>
+        get() = serviceReadyFlow.flatMapLatest { ready ->
+            if (ready && serviceStreamer != null) {
+                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                    val isRtmp = source?.javaClass?.simpleName == "RTMPVideoSource"
+                    Log.d(TAG, "isActualRtmpSource: video source = ${source?.javaClass?.simpleName}, isRtmp = $isRtmp")
+                    isRtmp
+                } ?: kotlinx.coroutines.flow.flowOf(false)
+            } else {
+                kotlinx.coroutines.flow.flowOf(false)
+            }
+        }.asLiveData()
+
     val isFlashAvailable = MutableLiveData(false)
     fun toggleFlash() {
         cameraSettings?.let {
