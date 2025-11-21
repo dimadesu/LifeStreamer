@@ -2071,6 +2071,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         currentRtmpPlayer = player
         
+        // Reapply monitor audio state to the new player instance
+        // This handles cases where ExoPlayer is recreated (e.g., after app resume when not streaming)
+        val shouldMonitor = _isMonitorAudioOn.value ?: false
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                player.volume = if (shouldMonitor) 1.0f else 0f
+                Log.i(TAG, "Applied monitor audio state to new player: ${if (shouldMonitor) "ON" else "OFF"} (volume: ${player.volume})")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to apply monitor audio state: ${e.message}", e)
+            }
+        }
+        
         val maxBufferingDuration = 2_000L // 2 seconds of buffering = disconnection
         
         rtmpDisconnectListener = object : androidx.media3.common.Player.Listener {
