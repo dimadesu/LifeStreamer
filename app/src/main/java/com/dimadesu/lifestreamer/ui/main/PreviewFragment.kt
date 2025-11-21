@@ -123,6 +123,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
         */
 
+        binding.monitorAudioButton.setOnClickListener {
+            previewViewModel.toggleMonitorAudio()
+        }
+
         binding.switchSourceButton.setOnClickListener {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher)
         }
