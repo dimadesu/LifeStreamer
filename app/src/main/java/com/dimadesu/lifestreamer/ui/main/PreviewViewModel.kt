@@ -2798,9 +2798,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         get() = serviceReadyFlow.flatMapLatest { ready ->
             if (ready && serviceStreamer != null) {
                 serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
-                    val isRtmp = source?.javaClass?.simpleName == "RTMPVideoSource"
-                    Log.d(TAG, "isActualRtmpSource: video source = ${source?.javaClass?.simpleName}, isRtmp = $isRtmp")
-                    isRtmp
+                    source is RTMPVideoSource
                 } ?: kotlinx.coroutines.flow.flowOf(false)
             } else {
                 kotlinx.coroutines.flow.flowOf(false)
