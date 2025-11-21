@@ -102,7 +102,7 @@
                     android:id="@+id/monitorAudioButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text='@{viewmodel.isMonitorAudioOn ? "MONITOR AUDIO: ON" : "MONITOR AUDIO: OFF"}'
+                    android:text='@{viewmodel.isMonitorAudioOn ? "AUDIO MONITOR: ON" : "AUDIO MONITOR: OFF"}'
                     app:goneUnless="@{viewmodel.isActualRtmpSource}" />
 
                 <Button
