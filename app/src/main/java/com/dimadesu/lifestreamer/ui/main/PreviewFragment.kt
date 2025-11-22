@@ -304,9 +304,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                             marginEnd = 8 // 8dp spacing between buttons
                         }
                         
-                        // Highlight if this is the active camera
-                        isEnabled = (camera.id != currentCameraId)
-                        alpha = if (camera.id == currentCameraId) 0.5f else 1.0f
+                        // Apply green background if this is the active camera
+                        val isActive = camera.id == currentCameraId
+                        backgroundTintList = android.content.res.ColorStateList.valueOf(
+                            if (isActive) 
+                                androidx.core.content.ContextCompat.getColor(context, R.color.active_button_green)
+                            else 
+                                androidx.core.content.ContextCompat.getColor(context, R.color.button_gray)
+                        )
                         
                         setOnClickListener {
                             lifecycleScope.launch {
@@ -318,8 +323,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                                     binding.cameraButtonsContainer.children.forEach { view ->
                                         if (view is android.widget.Button) {
                                             val isActive = view.tag == camera.id
-                                            view.isEnabled = !isActive
-                                            view.alpha = if (isActive) 0.5f else 1.0f
+                                            view.backgroundTintList = android.content.res.ColorStateList.valueOf(
+                                                if (isActive) 
+                                                    androidx.core.content.ContextCompat.getColor(requireContext(), R.color.active_button_green)
+                                                else 
+                                                    androidx.core.content.ContextCompat.getColor(requireContext(), R.color.button_gray)
+                                            )
                                         }
                                     }
                                 } catch (e: Exception) {
@@ -353,8 +362,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         binding.cameraButtonsContainer.children.forEach { view ->
                             if (view is android.widget.Button) {
                                 val isActive = view.tag == currentCameraId
-                                view.isEnabled = !isActive
-                                view.alpha = if (isActive) 0.5f else 1.0f
+                                view.backgroundTintList = android.content.res.ColorStateList.valueOf(
+                                    if (isActive) 
+                                        androidx.core.content.ContextCompat.getColor(requireContext(), R.color.active_button_green)
+                                    else 
+                                        androidx.core.content.ContextCompat.getColor(requireContext(), R.color.button_gray)
+                                )
                             }
                         }
                     }
