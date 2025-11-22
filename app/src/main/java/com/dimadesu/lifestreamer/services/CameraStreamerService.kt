@@ -321,6 +321,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     }
                 }
         }
+        
+        // Observe audio config changes and update passthrough if monitoring is active
+        serviceScope.launch {
+            storageRepository.audioConfigFlow
+                .distinctUntilChanged()
+                .drop(1) // Skip initial emission to avoid updating on startup
+                .collect { audioConfig ->
+                    if (audioConfig != null) {
+                        val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
+                            sampleRate = audioConfig.sampleRate,
+                            channelConfig = audioConfig.channelConfig,
+                            audioFormat = audioConfig.byteFormat
+                        )
+                        audioPassthroughManager.setConfig(passthroughConfig)
+                        Log.i(TAG, "Audio passthrough config updated from settings: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
+                    }
+                }
+        }
     }
 
     private fun initNotificationPendingIntents() {
@@ -1214,10 +1232,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
     /**
      * Start audio passthrough - monitors microphone input and plays through speakers
+     * Uses audio configuration from settings to match streaming audio
      */
     fun startAudioPassthrough() {
         serviceScope.launch(Dispatchers.Default) {
             try {
+                // Get audio config from settings to match streaming configuration
+                val audioConfig = storageRepository.audioConfigFlow.first()
+                if (audioConfig != null) {
+                    val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
+                        sampleRate = audioConfig.sampleRate,
+                        channelConfig = audioConfig.channelConfig,
+                        audioFormat = audioConfig.byteFormat
+                    )
+                    audioPassthroughManager.setConfig(passthroughConfig)
+                    Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
+                }
                 audioPassthroughManager.start()
                 Log.i(TAG, "Audio passthrough started")
             } catch (e: Exception) {

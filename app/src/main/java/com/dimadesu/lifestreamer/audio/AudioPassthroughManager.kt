@@ -10,10 +10,22 @@ import android.os.Process
 import android.util.Log
 
 /**
+ * Audio configuration for passthrough
+ * @param sampleRate Sample rate in Hz (typically 44100 or 48000)
+ * @param channelConfig Audio channel configuration (CHANNEL_IN_MONO or CHANNEL_IN_STEREO)
+ * @param audioFormat Audio format (typically ENCODING_PCM_16BIT)
+ */
+data class AudioPassthroughConfig(
+    val sampleRate: Int = 44100,
+    val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
+    val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT
+)
+
+/**
  * Minimal audio passthrough manager that captures audio from microphone
  * and plays it through speakers/headphones with low latency.
  */
-class AudioPassthroughManager {
+class AudioPassthroughManager(private var config: AudioPassthroughConfig = AudioPassthroughConfig()) {
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
     private var passthroughThread: Thread? = null
@@ -27,10 +39,10 @@ class AudioPassthroughManager {
         }
 
         try {
-            // Audio configuration
-            val sampleRate = 44100 // Hz
-            val channelConfig = AudioFormat.CHANNEL_IN_MONO
-            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            // Audio configuration - from provided config
+            val sampleRate = config.sampleRate
+            val channelConfig = config.channelConfig
+            val audioFormat = config.audioFormat
             
             // Calculate buffer size
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
@@ -51,13 +63,20 @@ class AudioPassthroughManager {
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build()
             
+            // Convert input channel config to output channel mask
+            val outputChannelMask = when (channelConfig) {
+                AudioFormat.CHANNEL_IN_MONO -> AudioFormat.CHANNEL_OUT_MONO
+                AudioFormat.CHANNEL_IN_STEREO -> AudioFormat.CHANNEL_OUT_STEREO
+                else -> AudioFormat.CHANNEL_OUT_STEREO // Default to stereo
+            }
+            
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(audioAttributes)
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(audioFormat)
                         .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .setChannelMask(outputChannelMask)
                         .build()
                 )
                 .setBufferSizeInBytes(bufferSize)
@@ -120,6 +139,26 @@ class AudioPassthroughManager {
         audioTrack = null
         
         Log.i(TAG, "Audio passthrough stopped")
+    }
+
+    /**
+     * Update audio configuration.
+     * If currently running, automatically restarts with the new configuration.
+     */
+    fun setConfig(newConfig: AudioPassthroughConfig) {
+        val wasRunning = isRunning
+        
+        if (wasRunning) {
+            Log.i(TAG, "Passthrough is running - restarting with new config")
+            stop()
+        }
+        
+        config = newConfig
+        Log.i(TAG, "Audio config updated: sampleRate=${config.sampleRate}, channels=${if (config.channelConfig == AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
+        
+        if (wasRunning) {
+            start()
+        }
     }
 
     companion object {
