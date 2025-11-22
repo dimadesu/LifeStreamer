@@ -15,7 +15,7 @@ Live streaming app for Android designed for IRL streaming based on [StreamPack S
 
 ![LifeStreamer screenshot](docs/LifeStreamer-screenshot.png)
 
-Discord server: https://discord.gg/2UzEkU2AJW
+Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create Git issues.
 
 ## Apps that can work together
 
