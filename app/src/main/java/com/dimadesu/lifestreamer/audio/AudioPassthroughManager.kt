@@ -144,10 +144,25 @@ class AudioPassthroughManager(private var config: AudioPassthroughConfig = Audio
             } catch (_: Exception) {}
         }
 
+        // Try to join the thread with multiple short attempts to ensure termination
         try {
-            passthroughThread?.join(500)
-        } catch (e: InterruptedException) {
-            Log.w(TAG, "Interrupted while stopping passthrough thread")
+            var attempts = 0
+            while (passthroughThread != null && passthroughThread?.isAlive == true && attempts < 10) {
+                try {
+                    passthroughThread?.join(100)
+                } catch (_: InterruptedException) {
+                    Log.w(TAG, "Interrupted while joining passthrough thread (attempt=$attempts)")
+                }
+                if (passthroughThread?.isAlive == true) {
+                    try { passthroughThread?.interrupt() } catch (_: Exception) {}
+                }
+                attempts++
+            }
+            if (passthroughThread?.isAlive == true) {
+                Log.w(TAG, "Passthrough thread still alive after attempts; it may be stuck")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error while joining passthrough thread: ${t.message}")
         }
         passthroughThread = null
         

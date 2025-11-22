@@ -397,10 +397,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try { releaseWakeLock() } catch (_: Exception) {}
         try { releaseNetworkWakeLock() } catch (_: Exception) {}
 
+        // Ensure audio passthrough is stopped - Quit from notification may call
+        // Activity.finishAndRemoveTask() which doesn't always guarantee the
+        // service stopped state is fully cleaned up. Stop passthrough here
+        // synchronously to avoid stray audio threads continuing to run.
+        try {
+            Log.i(TAG, "onDestroy: stopping audio passthrough to ensure cleanup")
+            // Stop and wait a short time for the passthrough to exit
+            audioPassthroughManager.stop()
+            // best-effort brief sleep to give thread time to terminate
+            try { Thread.sleep(50) } catch (_: InterruptedException) {}
+        } catch (t: Throwable) {
+            Log.w(TAG, "onDestroy: failed to stop audio passthrough cleanly: ${t.message}")
+        }
+
         super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Diagnostic: log passthrough thread state when start command arrives
+        try {
+            val alive = try {
+                val f = audioPassthroughManager::class.java.getDeclaredField("passthroughThread")
+                f.isAccessible = true
+                (f.get(audioPassthroughManager) as? Thread)?.isAlive
+            } catch (_: Throwable) { null }
+            Log.i(TAG, "onStartCommand: passthrough thread alive=$alive")
+        } catch (_: Throwable) {}
+
         // Handle notification action intents here too
         intent?.action?.let { action ->
             when (action) {
@@ -1193,6 +1217,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // NOTE: This is a synchronous snapshot of the current state. Prefer collecting
         // the `isPassthroughRunning` StateFlow for reactive updates where possible.
         fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
+        // Diagnostic: report whether passthrough thread is alive (best-effort)
+        fun isPassthroughThreadAlive(): Boolean {
+            return try {
+                val field = this@CameraStreamerService.audioPassthroughManager::class.java.getDeclaredField("passthroughThread")
+                field.isAccessible = true
+                val thread = field.get(this@CameraStreamerService.audioPassthroughManager) as? Thread
+                thread?.isAlive == true
+            } catch (t: Throwable) {
+                false
+            }
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
