@@ -98,6 +98,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var localRotationProvider: IRotationProvider? = null
     private var localRotationListener: IRotationProvider.Listener? = null
     
+    // Audio passthrough manager for monitoring microphone input
+    private val audioPassthroughManager = com.dimadesu.lifestreamer.audio.AudioPassthroughManager()
+    
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
@@ -315,6 +318,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to update bitrate regulator controller: ${e.message}")
                         }
+                    }
+                }
+        }
+        
+        // Observe audio config changes and update passthrough if monitoring is active
+        serviceScope.launch {
+            storageRepository.audioConfigFlow
+                .distinctUntilChanged()
+                .drop(1) // Skip initial emission to avoid updating on startup
+                .collect { audioConfig ->
+                    if (audioConfig != null) {
+                        val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
+                            sampleRate = audioConfig.sampleRate,
+                            channelConfig = audioConfig.channelConfig,
+                            audioFormat = audioConfig.byteFormat
+                        )
+                        audioPassthroughManager.setConfig(passthroughConfig)
+                        Log.i(TAG, "Audio passthrough config updated from settings: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
                     }
                 }
         }
@@ -1157,6 +1178,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}
             this@CameraStreamerService.setMuted(isMuted)
         }
+        // Start audio passthrough monitoring
+        fun startAudioPassthrough() {
+            this@CameraStreamerService.startAudioPassthrough()
+        }
+        // Stop audio passthrough monitoring
+        fun stopAudioPassthrough() {
+            this@CameraStreamerService.stopAudioPassthrough()
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -1197,6 +1226,46 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 notifyForCurrentState()
             } catch (e: Exception) {
                 Log.w(TAG, "setMuted failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Start audio passthrough - monitors microphone input and plays through speakers
+     * Uses audio configuration from settings to match streaming audio
+     */
+    fun startAudioPassthrough() {
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                // Get audio config from settings to match streaming configuration
+                val audioConfig = storageRepository.audioConfigFlow.first()
+                if (audioConfig != null) {
+                    val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
+                        sampleRate = audioConfig.sampleRate,
+                        channelConfig = audioConfig.channelConfig,
+                        audioFormat = audioConfig.byteFormat
+                    )
+                    audioPassthroughManager.setConfig(passthroughConfig)
+                    Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
+                }
+                audioPassthroughManager.start()
+                Log.i(TAG, "Audio passthrough started")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start audio passthrough: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Stop audio passthrough
+     */
+    fun stopAudioPassthrough() {
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                audioPassthroughManager.stop()
+                Log.i(TAG, "Audio passthrough stopped")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)
             }
         }
     }

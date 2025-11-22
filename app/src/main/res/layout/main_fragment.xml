@@ -99,24 +99,20 @@
                 -->
 
                 <Button
-                    android:id="@+id/monitorAudioButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text='@{viewmodel.isMonitorAudioOn ? "AUDIO MONITOR: ON" : "AUDIO MONITOR: OFF"}'
-                    app:goneUnless="@{viewmodel.isRtmpSource &amp;&amp; viewmodel.isActualRtmpSource}" />
-
-                <Button
                     android:id="@+id/switchSourceButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text='@{viewmodel.isRtmpSource ? "RTMP SRC: ON" : "RTMP SRC: OFF"}'
+                    android:text="RTMP SRC"
+                    android:backgroundTint='@{viewmodel.isRtmpSource ? @color/active_button_green : @color/button_gray}'
                     app:goneUnless="@{!viewmodel.isUvcSource}" />
 
                 <Button
                     android:id="@+id/toggleUvcButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text='@{viewmodel.isUvcSource ? "USB SRC: ON" : "USB SRC: OFF"}'
+                    android:text="USB SRC"
+                    android:minWidth="50dp"
+                    android:backgroundTint='@{viewmodel.isUvcSource ? @color/active_button_green : @color/button_gray}'
                     app:goneUnless="@{!viewmodel.isRtmpSource}" />
 
                 <Button
@@ -124,7 +120,15 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="USB SRC ⚙️"
+                    android:backgroundTint="@color/button_gray"
                     app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource}" />
+
+                <Button
+                    android:id="@+id/monitorAudioButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="MONITOR &#x1F3A4;"
+                    android:backgroundTint='@{viewmodel.isMonitorAudioOn ? @color/active_button_green : @color/button_gray}' />
 
             </LinearLayout>
 
