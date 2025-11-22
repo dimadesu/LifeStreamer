@@ -33,9 +33,21 @@ class AudioPassthroughManager(private var config: AudioPassthroughConfig = Audio
     private var isRunning = false
 
     fun start() {
-        if (isRunning) {
-            Log.w(TAG, "Audio passthrough already running")
-            return
+        synchronized(this) {
+            if (isRunning) {
+                Log.w(TAG, "Audio passthrough already running")
+                return
+            }
+            // Prevent residual thread from previous UI/service lifecycle
+            if (passthroughThread != null && passthroughThread!!.isAlive) {
+                Log.w(TAG, "Existing passthrough thread still alive - attempting to interrupt and join")
+                try {
+                    passthroughThread?.interrupt()
+                    passthroughThread?.join(200)
+                } catch (_: InterruptedException) {}
+                passthroughThread = null
+            }
+            isRunning = true
         }
 
         try {
@@ -96,17 +108,23 @@ class AudioPassthroughManager(private var config: AudioPassthroughConfig = Audio
             passthroughThread = Thread({
                 Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
                 val buffer = ByteArray(bufferSize)
-                
-                while (isRunning) {
-                    val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
-                    if (bytesRead > 0) {
-                        audioTrack?.write(buffer, 0, bytesRead)
+
+                try {
+                    while (isRunning && !Thread.currentThread().isInterrupted) {
+                        val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                        if (bytesRead > 0) {
+                            audioTrack?.write(buffer, 0, bytesRead)
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Passthrough thread exception: ${e.message}")
+                } finally {
+                    Log.i(TAG, "Passthrough thread exiting")
                 }
             }, "AudioPassthroughThread")
-            
+
             passthroughThread?.start()
-            Log.i(TAG, "Audio passthrough started successfully")
+            Log.i(TAG, "Audio passthrough started successfully (thread=${passthroughThread?.name})")
             
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start audio passthrough: ${e.message}", e)
@@ -115,8 +133,17 @@ class AudioPassthroughManager(private var config: AudioPassthroughConfig = Audio
     }
 
     fun stop() {
-        isRunning = false
-        
+        synchronized(this) {
+            if (!isRunning && (passthroughThread == null || passthroughThread?.isAlive == false)) {
+                Log.d(TAG, "stop() called but passthrough already stopped")
+                return
+            }
+            isRunning = false
+            try {
+                passthroughThread?.interrupt()
+            } catch (_: Exception) {}
+        }
+
         try {
             passthroughThread?.join(500)
         } catch (e: InterruptedException) {
