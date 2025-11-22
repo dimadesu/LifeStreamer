@@ -738,6 +738,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to collect bitrate from service: ${t.message}")
                     }
+                    // Observe passthrough running state so UI can reflect actual service state
+                    try {
+                        val svc = binder.getService()
+                        viewModelScope.launch {
+                            svc.isPassthroughRunning.collect { running ->
+                                _isMonitorAudioOn.postValue(running)
+                                Log.i(TAG, "Service passthrough running state observed: $running")
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to observe passthrough running state: ${t.message}")
+                    }
                     streamerFlow.value = serviceStreamer
                     _serviceReady.value = true
                     // Collect service-provided stream status and map it to ViewModel status

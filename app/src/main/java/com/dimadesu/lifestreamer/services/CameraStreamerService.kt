@@ -141,6 +141,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current audio mute state exposed as a StateFlow for UI synchronization
     private val _isMutedFlow = MutableStateFlow(false)
     val isMutedFlow = _isMutedFlow.asStateFlow()
+    // Whether audio passthrough (monitoring) is currently running on the service
+    private val _isPassthroughRunning = MutableStateFlow(false)
+    val isPassthroughRunning = _isPassthroughRunning.asStateFlow()
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -1235,9 +1238,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Uses audio configuration from settings to match streaming audio
      */
     fun startAudioPassthrough() {
+        // Cancel any previous job and start a fresh one that will update state when ready
         serviceScope.launch(Dispatchers.Default) {
             try {
-                // Get audio config from settings to match streaming configuration
                 val audioConfig = storageRepository.audioConfigFlow.first()
                 if (audioConfig != null) {
                     val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
@@ -1248,10 +1251,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     audioPassthroughManager.setConfig(passthroughConfig)
                     Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
                 }
+
                 audioPassthroughManager.start()
+                // Emit running state after successful start
+                try { _isPassthroughRunning.tryEmit(true) } catch (_: Throwable) {}
                 Log.i(TAG, "Audio passthrough started")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start audio passthrough: ${e.message}", e)
+                try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
             }
         }
     }
@@ -1263,6 +1270,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         serviceScope.launch(Dispatchers.Default) {
             try {
                 audioPassthroughManager.stop()
+                try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
                 Log.i(TAG, "Audio passthrough stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)
