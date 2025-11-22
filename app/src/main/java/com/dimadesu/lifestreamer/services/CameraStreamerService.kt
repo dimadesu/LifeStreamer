@@ -141,6 +141,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current audio mute state exposed as a StateFlow for UI synchronization
     private val _isMutedFlow = MutableStateFlow(false)
     val isMutedFlow = _isMutedFlow.asStateFlow()
+    // Whether audio passthrough (monitoring) is currently running on the service
+    private val _isPassthroughRunning = MutableStateFlow(false)
+    val isPassthroughRunning = _isPassthroughRunning.asStateFlow()
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -393,6 +396,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Release wake locks if held
         try { releaseWakeLock() } catch (_: Exception) {}
         try { releaseNetworkWakeLock() } catch (_: Exception) {}
+
+        // Ensure audio passthrough is stopped - Quit from notification may call
+        // Activity.finishAndRemoveTask() which doesn't always guarantee the
+        // service stopped state is fully cleaned up. Stop passthrough here
+        // synchronously to avoid stray audio threads continuing to run.
+        try {
+            Log.i(TAG, "onDestroy: stopping audio passthrough to ensure cleanup")
+            // Stop and wait for the passthrough to exit (stop() does join attempts)
+            audioPassthroughManager.stop()
+        } catch (t: Throwable) {
+            Log.w(TAG, "onDestroy: failed to stop audio passthrough cleanly: ${t.message}")
+        }
 
         super.onDestroy()
     }
@@ -1186,6 +1201,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun stopAudioPassthrough() {
             this@CameraStreamerService.stopAudioPassthrough()
         }
+        // Expose current passthrough running state for Java consumers
+        // NOTE: This is a synchronous snapshot of the current state. Prefer collecting
+        // the `isPassthroughRunning` StateFlow for reactive updates where possible.
+        fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -1235,9 +1254,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Uses audio configuration from settings to match streaming audio
      */
     fun startAudioPassthrough() {
+        // Cancel any previous job and start a fresh one that will update state when ready
         serviceScope.launch(Dispatchers.Default) {
             try {
-                // Get audio config from settings to match streaming configuration
                 val audioConfig = storageRepository.audioConfigFlow.first()
                 if (audioConfig != null) {
                     val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
@@ -1248,10 +1267,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     audioPassthroughManager.setConfig(passthroughConfig)
                     Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
                 }
+
                 audioPassthroughManager.start()
+                // Emit running state after successful start
+                try { _isPassthroughRunning.tryEmit(true) } catch (_: Throwable) {}
                 Log.i(TAG, "Audio passthrough started")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start audio passthrough: ${e.message}", e)
+                try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
             }
         }
     }
@@ -1263,6 +1286,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         serviceScope.launch(Dispatchers.Default) {
             try {
                 audioPassthroughManager.stop()
+                try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
                 Log.i(TAG, "Audio passthrough stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)

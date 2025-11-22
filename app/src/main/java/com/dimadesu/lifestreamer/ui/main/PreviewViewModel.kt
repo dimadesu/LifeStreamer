@@ -738,6 +738,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to collect bitrate from service: ${t.message}")
                     }
+                    // Observe passthrough running state so UI can reflect actual service state
+                    try {
+                        val svc = binder.getService()
+                        // First set UI to current snapshot so UI matches service immediately
+                        try {
+                            val snapshot = svc.isPassthroughRunning.value
+                            _isMonitorAudioOn.postValue(snapshot)
+                            Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
+                        } catch (_: Throwable) {}
+
+                        // Then observe for updates
+                        viewModelScope.launch {
+                            svc.isPassthroughRunning.collect { running ->
+                                _isMonitorAudioOn.postValue(running)
+                                Log.i(TAG, "Service passthrough running state observed: $running")
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to observe passthrough running state: ${t.message}")
+                    }
                     streamerFlow.value = serviceStreamer
                     _serviceReady.value = true
                     // Collect service-provided stream status and map it to ViewModel status
@@ -2047,6 +2067,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             stopAllMonitoring()
         }
     }
+
+    /**
+     * Set monitor UI state without invoking start/stop logic.
+     * Useful when synchronizing UI with the service snapshot on bind.
+     */
+    fun setMonitorUiState(state: Boolean) {
+        _isMonitorAudioOn.value = state
+    }
     
     /**
      * Apply audio monitoring based on current video/audio source configuration
@@ -2442,7 +2470,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rtmpBufferingStartTime = 0L
                     
                     // Reset monitor audio to OFF when switching away from RTMP
-                    _isMonitorAudioOn.postValue(false)
+                    // If the service is bound, prefer the service's passthrough state
+                    // to avoid overriding the UI after a rebind (e.g., when app is
+                    // restarted from notification while service continues running).
+                    try {
+                        val svc = streamerService
+                        if (svc != null) {
+                            val running = svc.isPassthroughRunning.value
+                            _isMonitorAudioOn.postValue(running)
+                            Log.i(TAG, "Preserving service passthrough state on source switch: $running")
+                        } else {
+                            _isMonitorAudioOn.postValue(false)
+                        }
+                    } catch (t: Throwable) {
+                        _isMonitorAudioOn.postValue(false)
+                    }
                     
                     // Stop monitoring RTMP connection
                     rtmpDisconnectListener?.let { listener ->
