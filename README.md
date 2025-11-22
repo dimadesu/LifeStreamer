@@ -153,3 +153,19 @@ Minimise transitions between foreground/background and stay in foreground for be
 Goal for near future is stabilising as much as possible and making sure it's solid. It will take some time to refine.
 
 Use recommended workarounds if you encounter issues.
+
+## Apps that can stream SRT on Android
+
+- IRL Pro (free)
+- Larix Broadcaster (subscription)
+- Larix Screencaster (subscription)
+- Can do HDMI/USB/UVC as input:
+  - USB Camera (free with ads) / USB Camera Pro (one-time payment to remove ads)
+  - CameraFi (free version with ads or subscription)
+
+## Similar/related projects
+
+- [IRL Pro](https://irlpro.app/)
+- [BELABOX](https://belabox.net/)
+- [Moblin](https://github.com/eerimoq/moblin)
+- [Moblink](https://github.com/eerimoq/moblink)
