@@ -99,13 +99,6 @@
                 -->
 
                 <Button
-                    android:id="@+id/monitorAudioButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text='@{viewmodel.isMonitorAudioOn ? "AUDIO MONITOR: ON" : "AUDIO MONITOR: OFF"}'
-                    app:goneUnless="@{viewmodel.isRtmpSource &amp;&amp; viewmodel.isActualRtmpSource}" />
-
-                <Button
                     android:id="@+id/switchSourceButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -324,6 +317,12 @@
                     android:textOff=""
                     android:textOn=""
                     app:tint="@android:color/white" />
+
+                <Button
+                    android:id="@+id/monitorAudioButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text='@{viewmodel.isMonitorAudioOn ? "AUDIO MONITOR: ON" : "AUDIO MONITOR: OFF"}' />
 
             </LinearLayout>
 

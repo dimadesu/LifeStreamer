@@ -2033,26 +2033,82 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
     
     /**
-     * Toggle monitor audio for RTMP source
-     * When ON: sets ExoPlayer volume to 1.0 (100%)
-     * When OFF: sets ExoPlayer volume to 0.0 (muted)
+     * Toggle audio monitoring - intelligently switches between RTMP audio and microphone monitoring
+     * When ON: monitors RTMP audio (ExoPlayer) or microphone input based on current audio source
+     * When OFF: stops all monitoring
      */
     fun toggleMonitorAudio() {
         val newState = !(_isMonitorAudioOn.value ?: false)
         _isMonitorAudioOn.value = newState
         
+        if (newState) {
+            applyMonitorAudioState()
+        } else {
+            stopAllMonitoring()
+        }
+    }
+    
+    /**
+     * Apply audio monitoring based on current video/audio source configuration
+     */
+    private fun applyMonitorAudioState() {
+        val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+        val audioSource = serviceStreamer?.audioInput?.sourceFlow?.value
+        
+        when {
+            // RTMP source - monitor ExoPlayer audio
+            videoSource is RTMPVideoSource -> {
+                currentRtmpPlayer?.let { player ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        try {
+                            player.volume = 1.0f
+                            Log.i(TAG, "Audio monitor ON - RTMP audio (ExoPlayer volume: ${player.volume})")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set ExoPlayer volume: ${e.message}", e)
+                        }
+                    }
+                }
+                service?.stopAudioPassthrough()
+            }
+            
+            // Camera/UVC/Bitmap with microphone - monitor default audio input
+            audioSource is io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSource -> {
+                currentRtmpPlayer?.let { player ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        try {
+                            player.volume = 0f
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to mute ExoPlayer: ${e.message}", e)
+                        }
+                    }
+                }
+                service?.startAudioPassthrough()
+                Log.i(TAG, "Audio monitor ON - Microphone passthrough")
+            }
+            
+            // MediaProjection audio or other - don't monitor (would cause echo)
+            else -> {
+                stopAllMonitoring()
+                Log.i(TAG, "Audio monitor OFF - MediaProjection audio detected (cannot monitor without echo)")
+            }
+        }
+    }
+    
+    /**
+     * Stop all audio monitoring
+     */
+    private fun stopAllMonitoring() {
         currentRtmpPlayer?.let { player ->
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 try {
-                    player.volume = if (newState) 1.0f else 0f
-                    Log.i(TAG, "Monitor audio ${if (newState) "ON" else "OFF"} - ExoPlayer volume: ${player.volume}")
+                    player.volume = 0f
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set ExoPlayer volume: ${e.message}", e)
+                    Log.e(TAG, "Failed to mute ExoPlayer: ${e.message}", e)
                 }
             }
-        } ?: run {
-            Log.w(TAG, "Cannot toggle monitor audio - no RTMP player available")
         }
+        service?.stopAudioPassthrough()
+        Log.i(TAG, "Audio monitor OFF")
     }
     
     /**
@@ -2073,14 +2129,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // Reapply monitor audio state to the new player instance
         // This handles cases where ExoPlayer is recreated (e.g., after app resume when not streaming)
-        val shouldMonitor = _isMonitorAudioOn.value ?: false
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            try {
-                player.volume = if (shouldMonitor) 1.0f else 0f
-                Log.i(TAG, "Applied monitor audio state to new player: ${if (shouldMonitor) "ON" else "OFF"} (volume: ${player.volume})")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to apply monitor audio state: ${e.message}", e)
-            }
+        if (_isMonitorAudioOn.value == true) {
+            applyMonitorAudioState()
         }
         
         val maxBufferingDuration = 2_000L // 2 seconds of buffering = disconnection
@@ -2430,6 +2480,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Re-add bitrate regulator if streaming with SRT
                     readdBitrateRegulatorIfNeeded()
+                    
+                    // Reapply audio monitoring if toggle is ON
+                    if (_isMonitorAudioOn.value == true) {
+                        applyMonitorAudioState()
+                    }
                 }
             }
 //            when (videoSource) {
@@ -2537,6 +2592,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
                         
+                        // Reapply audio monitoring if toggle is ON
+                        if (_isMonitorAudioOn.value == true) {
+                            applyMonitorAudioState()
+                        }
+                        
                         Log.i(TAG, "Switched to camera source")
                     }
                     is ICameraSource -> {
@@ -2588,6 +2648,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 
                                                 // Re-add bitrate regulator if streaming with SRT
                                                 readdBitrateRegulatorIfNeeded()
+                                                
+                                                // Reapply audio monitoring if toggle is ON
+                                                if (_isMonitorAudioOn.value == true) {
+                                                    applyMonitorAudioState()
+                                                }
                                                 
                                                 Log.i(TAG, "Switched to UVC source after permission grant")
                                             } catch (e: Exception) {
@@ -2698,6 +2763,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
                         
+                        // Reapply audio monitoring if toggle is ON
+                        if (_isMonitorAudioOn.value == true) {
+                            applyMonitorAudioState()
+                        }
+                        
                         // Then select the device (this will trigger onDeviceOpen -> onCameraOpen)
                         helper.selectDevice(device)
                         
@@ -2720,6 +2790,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
+                        
+                        // Reapply audio monitoring if toggle is ON
+                        if (_isMonitorAudioOn.value == true) {
+                            applyMonitorAudioState()
+                        }
                         
                         Log.i(TAG, "Switched to camera source")
                     }

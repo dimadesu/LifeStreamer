@@ -98,6 +98,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var localRotationProvider: IRotationProvider? = null
     private var localRotationListener: IRotationProvider.Listener? = null
     
+    // Audio passthrough manager for monitoring microphone input
+    private val audioPassthroughManager = com.dimadesu.lifestreamer.audio.AudioPassthroughManager()
+    
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
@@ -1157,6 +1160,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}
             this@CameraStreamerService.setMuted(isMuted)
         }
+        // Start audio passthrough monitoring
+        fun startAudioPassthrough() {
+            this@CameraStreamerService.startAudioPassthrough()
+        }
+        // Stop audio passthrough monitoring
+        fun stopAudioPassthrough() {
+            this@CameraStreamerService.stopAudioPassthrough()
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -1197,6 +1208,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 notifyForCurrentState()
             } catch (e: Exception) {
                 Log.w(TAG, "setMuted failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Start audio passthrough - monitors microphone input and plays through speakers
+     */
+    fun startAudioPassthrough() {
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                audioPassthroughManager.start()
+                Log.i(TAG, "Audio passthrough started")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start audio passthrough: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Stop audio passthrough
+     */
+    fun stopAudioPassthrough() {
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                audioPassthroughManager.stop()
+                Log.i(TAG, "Audio passthrough stopped")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)
             }
         }
     }
