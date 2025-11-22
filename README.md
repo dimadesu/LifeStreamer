@@ -4,13 +4,18 @@ Live streaming app for Android designed for IRL streaming based on [StreamPack S
 
 ## Features
 
-- Publish streams over SRT with dynamic/adaptive bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
-- RTMP as video/audio source - restream RTMP feed from action cameras as SRT HEVC with great dynamic bitrate.
+- Restream RTMP feed or USB video/audio (UVC/UAC) from action cameras as SRT HEVC/H.265 with amazing dynamic/adaptive bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
+- Can use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
+- Can use any RTMP server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android.
+- USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: it seems phones lower USB audio quality when USB video is used.
+- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. (Phone limits access to resources in this mode, so performance is worse. Test first and consider lowering video encoder settings and bitrate.)
+- Aggressive infinite reconnect when app loses connection.
+- Audio monitoring for all sources.
 - A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
 
 ![LifeStreamer screenshot](docs/LifeStreamer-screenshot.png)
 
-Discord server: https://discord.gg/2UzEkU2AJW
+Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create Git issues.
 
 ## Apps that can work together
 
@@ -58,6 +63,8 @@ I've started with original camera demo from StreamPack. I'm tweaking it and addi
   - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
   - There are many things that can go wrong with RTMP source. I think it's working pretty good now.
 - [x] Reconnect on disconnect.
+- [x] USB video/audio as source.
+- [x] Audio monitoring for all sources.
 
 ### Planning to implement next
 - Polish existing functionality and user flows.
@@ -133,7 +140,7 @@ Applies to [LifeStreamer v0.4.1](https://github.com/dimadesu/LifeStreamer/releas
 
 - :white_check_mark:  Reconnect on disconnect
 
-  Should be pretty stable. Still testing. It affected many user flows.
+  Should be pretty stable. Still testing.
 
 ## Recommended solutions to most issues
 
@@ -146,3 +153,19 @@ Minimise transitions between foreground/background and stay in foreground for be
 Goal for near future is stabilising as much as possible and making sure it's solid. It will take some time to refine.
 
 Use recommended workarounds if you encounter issues.
+
+## Apps that can stream SRT on Android
+
+- IRL Pro (free)
+- Larix Broadcaster (subscription)
+- Larix Screencaster (subscription)
+- Can do HDMI/USB/UVC as input:
+  - USB Camera (free with ads) / USB Camera Pro (one-time payment to remove ads)
+  - CameraFi (free version with ads or subscription)
+
+## Similar/related projects
+
+- [IRL Pro](https://irlpro.app/)
+- [BELABOX](https://belabox.net/)
+- [Moblin](https://github.com/eerimoq/moblin)
+- [Moblink](https://github.com/eerimoq/moblink)
