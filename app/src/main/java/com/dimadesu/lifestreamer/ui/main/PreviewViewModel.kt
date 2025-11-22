@@ -741,6 +741,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Observe passthrough running state so UI can reflect actual service state
                     try {
                         val svc = binder.getService()
+                        // First set UI to current snapshot so UI matches service immediately
+                        try {
+                            val snapshot = svc.isPassthroughRunning.value
+                            _isMonitorAudioOn.postValue(snapshot)
+                            Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
+                        } catch (_: Throwable) {}
+
+                        // Then observe for updates
                         viewModelScope.launch {
                             svc.isPassthroughRunning.collect { running ->
                                 _isMonitorAudioOn.postValue(running)
@@ -2058,6 +2066,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         } else {
             stopAllMonitoring()
         }
+    }
+
+    /**
+     * Set monitor UI state without invoking start/stop logic.
+     * Useful when synchronizing UI with the service snapshot on bind.
+     */
+    fun setMonitorUiState(state: Boolean) {
+        _isMonitorAudioOn.value = state
     }
     
     /**

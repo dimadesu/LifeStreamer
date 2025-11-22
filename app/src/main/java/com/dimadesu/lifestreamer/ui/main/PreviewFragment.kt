@@ -124,7 +124,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         */
 
         binding.monitorAudioButton.setOnClickListener {
-            previewViewModel.toggleMonitorAudio()
+            val svc = previewViewModel.service
+            val runningSnapshot = try { svc?.isPassthroughRunning?.value } catch (_: Throwable) { null }
+            if (runningSnapshot == true) {
+                // Service already running - ask service to stop
+                try { svc?.stopAudioPassthrough() } catch (t: Throwable) { previewViewModel.toggleMonitorAudio() }
+            } else if (runningSnapshot == false) {
+                // Service not running - ask service to start
+                try { svc?.startAudioPassthrough() } catch (t: Throwable) { previewViewModel.toggleMonitorAudio() }
+            } else {
+                // No service snapshot available yet - fallback to ViewModel toggle
+                previewViewModel.toggleMonitorAudio()
+            }
         }
 
         binding.switchSourceButton.setOnClickListener {

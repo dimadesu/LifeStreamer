@@ -1190,6 +1190,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             this@CameraStreamerService.stopAudioPassthrough()
         }
         // Expose current passthrough running state for Java consumers
+        // NOTE: This is a synchronous snapshot of the current state. Prefer collecting
+        // the `isPassthroughRunning` StateFlow for reactive updates where possible.
         fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
     }
 
