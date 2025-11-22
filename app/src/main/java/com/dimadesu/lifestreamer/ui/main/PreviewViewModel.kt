@@ -2072,7 +2072,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             
             // Camera/UVC/Bitmap with microphone - monitor default audio input
-            audioSource is io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSource -> {
+            audioSource?.javaClass?.simpleName?.contains("Microphone") == true -> {
                 currentRtmpPlayer?.let { player ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         try {
