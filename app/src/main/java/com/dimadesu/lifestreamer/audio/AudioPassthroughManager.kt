@@ -58,6 +58,8 @@ class AudioPassthroughManager(private var config: AudioPassthroughConfig = Audio
             )
             
             // Create AudioTrack (output to speakers/headphones)
+            // This will apply similar audio processing and effects to what goes to stream,
+            // giving a better preview of what viewers will actually hear.
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
