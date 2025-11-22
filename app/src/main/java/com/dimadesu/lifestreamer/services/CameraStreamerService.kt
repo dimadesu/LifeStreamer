@@ -1189,6 +1189,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun stopAudioPassthrough() {
             this@CameraStreamerService.stopAudioPassthrough()
         }
+        // Expose current passthrough running state for Java consumers
+        fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
     }
 
     private val customBinder = CameraStreamerServiceBinder()
