@@ -27,6 +27,7 @@ import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
 import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
 import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
+import com.dimadesu.lifestreamer.permissions.PermissionRequester
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: MainActivityBinding
@@ -35,6 +36,18 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = MainActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Request microphone + bluetooth permissions early so features depending on them
+        // (Bluetooth mic passthrough / detection) can run when needed.
+        val permissionRequester = PermissionRequester(this)
+        permissionRequester.requestPermissionsIfNeeded { granted ->
+            if (!granted) {
+                // Log, but do not block: user may grant later via settings
+                android.util.Log.w(TAG, "Required permissions not granted; Bluetooth mic may not work")
+            } else {
+                android.util.Log.i(TAG, "Required permissions granted")
+            }
+        }
 
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
