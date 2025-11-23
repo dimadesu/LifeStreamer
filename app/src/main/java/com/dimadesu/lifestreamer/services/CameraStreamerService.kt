@@ -3,6 +3,8 @@ package com.dimadesu.lifestreamer.services
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import android.os.Binder
@@ -1268,6 +1270,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
                 }
 
+                // Attempt to detect a Bluetooth input device and publish it to the app-level
+                // BluetoothAudioConfig so factories can prefer it when creating audio sources.
+                try {
+                    val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                    val btDevice = audioManager
+                        ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                        ?.firstOrNull { d ->
+                            d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                                    d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                        }
+                    if (btDevice != null) {
+                        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
+                        Log.i(TAG, "Detected BT input device (id=${btDevice.id}) and set as preferred")
+                    } else {
+                        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                        Log.i(TAG, "No BT input device detected for passthrough")
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Error while detecting BT input devices: ${t.message}")
+                }
+
                 audioPassthroughManager.start()
                 // Emit running state after successful start
                 try { _isPassthroughRunning.tryEmit(true) } catch (_: Throwable) {}
@@ -1288,6 +1311,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 audioPassthroughManager.stop()
                 try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
                 Log.i(TAG, "Audio passthrough stopped")
+                // Clear preferred BT device when passthrough stops so factories re-evaluate
+                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)
             }

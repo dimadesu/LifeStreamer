@@ -219,6 +219,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _streamerErrorLiveData: MutableLiveData<String?> = MutableLiveData()
     val streamerErrorLiveData: LiveData<String?> = _streamerErrorLiveData
 
+    // UI toggle: Use Bluetooth mic when available
+    private val _useBluetoothMic = MutableLiveData<Boolean>(false)
+    val useBluetoothMic: LiveData<Boolean> get() = _useBluetoothMic
+
+    fun setUseBluetoothMic(enabled: Boolean) {
+        _useBluetoothMic.postValue(enabled)
+        // Bluetooth is hardcoded enabled in `BluetoothAudioConfig`; ignore setter.
+    }
+
+    // Data-binding getter expected by generated binding code
+    fun getUseBluetoothMic(): MutableLiveData<Boolean> = _useBluetoothMic
+
     // Toast messages (nullable to support single-event pattern - cleared after observation)
     private val _toastMessageLiveData: MutableLiveData<String?> = MutableLiveData()
     val toastMessageLiveData: LiveData<String?> = _toastMessageLiveData

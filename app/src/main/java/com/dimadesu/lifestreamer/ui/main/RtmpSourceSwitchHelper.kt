@@ -127,12 +127,12 @@ internal object RtmpSourceSwitchHelper {
                     Log.i(TAG, "Switched to bitmap fallback with MediaProjection audio")
                 } catch (e: Exception) {
                     Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
-                    streamer.setAudioSource(MicrophoneSourceFactory())
+                    streamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                     Log.i(TAG, "Switched to bitmap fallback with microphone audio")
                 }
             } else {
                 // No MediaProjection available - use microphone
-                streamer.setAudioSource(MicrophoneSourceFactory())
+                streamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                 Log.i(TAG, "Switched to bitmap fallback with microphone audio (no MediaProjection)")
             }
         } catch (e: Exception) {
