@@ -16,7 +16,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="How to use USB (UVC) source"
+      android:text="How to use USB audio/video source"
       android:textSize="28sp"
       android:textStyle="bold"
       android:paddingBottom="16dp" />
@@ -24,7 +24,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="What UVC devices can be used?"
+      android:text="What USB devices can be used?"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -33,7 +33,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="In theory any UVC (USB Video Class) device should work."
+      android:text="The app is tested mostly with DJI Osmo Action 4 in 'Webcam' mode. The camera has to be connected directly to the phone with one USB-C to USB-C cable. Both video and audio should work."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -41,7 +41,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="The app is tested mostly with DJI Osmo Action 4 in 'Webcam/UVC' mode. The camera has to be connected directly to the phone with one USB-C to USB-C cable. Both video and audio should work."
+      android:text="I think it's reasonable for this app to target action cameras that have 'Webcam' mode or lightweight HDMI capture cards such as Elgato Cam Link."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -49,7 +49,24 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="HDMI capture cards that have USB-C might work. You'll have to test and see. Try to have as little adapters and hubs as possible between capture card and phone."
+      android:text="Elgato Cam Link can be used with GoPro via Media Mod or Sony X3000 (as it has HDMI out). I already have these devices, so I can test if they work."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="How about other HDMI capture cards?"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="As for other HDMI capture cards - you'll have to test and see if they work. Try to have as little USB adapters and hubs as possible between capture card and the phone."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="24dp" />
@@ -57,7 +74,15 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Note on UVC audio"
+      android:text="I tested Elgato HD60 S+ and HD60 X. Elgato HD60 S+ can sort of work without audio. You can try using USB hub and connect some other USB audio device and use that as an audio source. With HD60 X I mostly get black screen."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="24dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Test first with USB Camera (Pro) and CameraFi apps"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -66,7 +91,32 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Looks like UVC audio on Android behaves just like any USB headphones or USB audio device that you plug into your phone. By default, once you plug any audio device into USB, system automatically uses it as the default audio device."
+      android:text="I recommend testing first if they work at all on your phone with USB Camera (Pro) app or CameraFi app. They've been around for many years, so they might've done extra fixes to work better with different USB devices. LifeStreamer app supports less formats."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="24dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="LifeStreamer app simply uses USB/UVC library without any additional modifications. It uses libusb and libuvc + some other stuff. I am not an expert in this area, so I can't do any special changes to make more devices work."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="24dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Note on USB audio"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="By default, once you plug any audio device into USB, system automatically uses it as the default audio input and output."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -74,7 +124,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="LifeStreamer shows the default audio input as 'Microphone' in the top right corner of the main screen. This can be either the built-in microphone of the phone or USB/UVC audio."
+      android:text="LifeStreamer shows the default audio input as 'Microphone' in the top right corner of the main screen. This can be either the built-in microphone of the phone, USB audio or 3.5mm if you still have that."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -82,7 +132,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="To emphasize: once you plug any USB audio device into your phone, that device becomes your audio input in LifeStreamer. This includes UVC devices if they have audio."
+      android:text="To emphasize: once you plug any USB audio device into your phone, that device instantly becomes your audio input in LifeStreamer. You don't have to switch to USB source to use it."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -90,7 +140,66 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="I don't have a UVC device without audio to test. Hopefully, LifeStreamer will use the built-in microphone in this case."
+      android:text="USB audio is lower quality when USB video is used"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="I test mostly with Samsung phones. I've noticed phone lowers audio quality of USB audio when USB video is used. It seems to happen on the low level, that I can't control from the app side. So I can't make the phone give highter quality audio. Just something to be aware of."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="App needs a good audio source to produce playable SRT stream"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="If USB audio is bad and you start publishing SRT stream - it can create SRT stream that is unplayable by players and OBS. For Elgato Cam Link if it has issues with audio I recommened to use USB hub, connect Cam Link first, then connect some other USB audio device. Phone automatically switches to the last USB device connected and uses that as audio output and input. That way you can use some other USB audio device with video from Cam Link."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="How to monitor USB audio?"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="In the bottom left corner of the main screen there is a button to enable audio monitoring. It will play audio input via default audio ouput."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="When USB audio device is connected it's instantly used as the default audio input and output. If you connect USB headphones - they have both audio output and input, so you should be able to hear yourself fine. But when you connect DJI OA4 or Elgato Cam Link - those devices don't have audio output."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="The solution is to connect Bluetooth headphones - this allows to hear HDMI/USB audio through them. Phone doesn't switch audio input to Bluetooth automatically when USB audio device is connected, so you can still use USB audio input while monitoring audio through Bluetooth headphones."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
