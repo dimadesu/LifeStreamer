@@ -28,6 +28,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICame
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import android.app.AppOpsManager
 import android.content.Context
+import android.media.AudioManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -160,6 +161,33 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 previewViewModel.clearToastMessage() // Clear after showing to prevent re-show on rotation
             }
         }
+
+        // Show SCO / audio routing status
+        val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        fun updateScoText() {
+            val scoOn = audioManager.isBluetoothScoOn
+            binding.audioScoStatusText.text = if (scoOn) "SCO: connected" else "SCO: off"
+        }
+
+        updateScoText()
+
+        val scoReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                if (intent?.action == AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) {
+                    updateScoText()
+                }
+            }
+        }
+
+        val scoFilter = android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+        requireContext().registerReceiver(scoReceiver, scoFilter)
+
+        // Unregister when view is destroyed
+        viewLifecycleOwner.lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) {
+                try { requireContext().unregisterReceiver(scoReceiver) } catch (_: Throwable) {}
+            }
+        })
 
         // Reconnection status is now displayed via data binding in the layout XML
         // No need for manual observer - the TextView will automatically show/hide
