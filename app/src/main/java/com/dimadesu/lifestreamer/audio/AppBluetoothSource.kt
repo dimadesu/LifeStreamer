@@ -124,10 +124,14 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                         val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
                         if (granted) {
+                            android.util.Log.i("AppBluetoothSource", "Calling startBluetoothSco() (with BLUETOOTH_CONNECT granted)")
                             audioManager.startBluetoothSco()
                             scoStarted = true
+                        } else {
+                            android.util.Log.w("AppBluetoothSource", "BLUETOOTH_CONNECT permission not granted; cannot start SCO on S+")
                         }
                     } else {
+                        android.util.Log.i("AppBluetoothSource", "Calling startBluetoothSco() (pre-S)")
                         audioManager.startBluetoothSco()
                         scoStarted = true
                     }
@@ -136,8 +140,12 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
                 // Try to set communication device reflectively (if available)
                 try {
                     val m = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
+                    android.util.Log.i("AppBluetoothSource", "Invoking AudioManager.setCommunicationDevice via reflection")
                     m.invoke(audioManager, device)
-                } catch (_: Throwable) {}
+                    android.util.Log.i("AppBluetoothSource", "setCommunicationDevice invoked")
+                } catch (t: Throwable) {
+                    android.util.Log.w("AppBluetoothSource", "setCommunicationDevice reflection failed: ${t.message}")
+                }
             }
         } catch (_: Throwable) {}
         // If we started SCO, wait for it to become connected before starting recording.

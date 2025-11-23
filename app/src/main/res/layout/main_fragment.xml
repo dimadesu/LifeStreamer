@@ -130,6 +130,27 @@
                     android:text="MONITOR &#x1F3A4;"
                     android:backgroundTint='@{viewmodel.isMonitorAudioOn ? @color/active_button_green : @color/button_gray}' />
 
+                <Button
+                    android:id="@+id/scoStartButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SCO START"
+                    android:backgroundTint='@color/button_gray' />
+
+                <Button
+                    android:id="@+id/scoStopButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SCO STOP"
+                    android:backgroundTint='@color/button_gray' />
+
+                <Button
+                    android:id="@+id/listBtButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LIST BT"
+                    android:backgroundTint='@color/button_gray' />
+
             </LinearLayout>
 
         </ScrollView>
