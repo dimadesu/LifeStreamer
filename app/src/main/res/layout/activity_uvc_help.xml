@@ -16,7 +16,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="How to use USB audio/video source"
+      android:text="How to use USB video/audio source"
       android:textSize="28sp"
       android:textStyle="bold"
       android:paddingBottom="16dp" />
