@@ -19,7 +19,10 @@ import io.github.thibaultbee.streampack.core.elements.interfaces.Releasable
 import io.github.thibaultbee.streampack.core.elements.utils.pool.IReadOnlyRawFrameFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.ByteBuffer
+import kotlin.coroutines.resume
 
 /**
  * App-level Bluetooth-backed audio source that implements the StreamPack public/internal
@@ -122,12 +125,10 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
                         val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
                         if (granted) {
                             audioManager.startBluetoothSco()
-                            audioManager.isBluetoothScoOn = true
                             scoStarted = true
                         }
                     } else {
                         audioManager.startBluetoothSco()
-                        audioManager.isBluetoothScoOn = true
                         scoStarted = true
                     }
                 } catch (_: Throwable) {}
@@ -139,9 +140,46 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
                 } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {}
+        // If we started SCO, wait for it to become connected before starting recording.
+        if (scoStarted) {
+            val connected = waitForScoConnected(context, 3000)
+            if (!connected) {
+                // SCO didn't connect in time; still try to record but log.
+                try { android.util.Log.w("AppBluetoothSource", "SCO did not connect before timeout") } catch (_: Throwable) {}
+            }
+        }
 
         ar.startRecording()
         _isStreamingFlow.tryEmit(true)
+    }
+
+    private suspend fun waitForScoConnected(context: Context, timeoutMs: Long): Boolean {
+        return withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<Boolean> { cont ->
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val receiver = object : android.content.BroadcastReceiver() {
+                    override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                        intent?.let { i ->
+                            if (i.action == AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) {
+                                val state = i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
+                                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                                    if (cont.isActive) cont.resume(true)
+                                } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
+                                    // ignore; wait for connected or timeout
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val filter = android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+                context.registerReceiver(receiver, filter)
+
+                cont.invokeOnCancellation {
+                    try { context.unregisterReceiver(receiver) } catch (_: Throwable) {}
+                }
+            }
+        } != null
     }
 
     override suspend fun stopStream() {
