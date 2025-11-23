@@ -16,7 +16,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="How to use USB video/audio source"
+      android:text="How to use USB source"
       android:textSize="28sp"
       android:textStyle="bold"
       android:paddingBottom="16dp" />
@@ -82,7 +82,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Test first with USB Camera (Pro) and CameraFi apps"
+      android:text="Test with USB Camera (Pro) and CameraFi apps first"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -91,7 +91,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="I recommend testing first if they work at all on your phone with USB Camera (Pro) app or CameraFi app. They've been around for many years, so they might've done extra fixes to work better with different USB devices. LifeStreamer app supports less formats."
+      android:text="I recommend using USB Camera (Pro) or CameraFi apps first to test if USB device works with your Android device. They've been around for many years, so they might've done extra fixes to work better with different USB devices. LifeStreamer app supports less formats."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="24dp" />
@@ -116,7 +116,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="By default, once you plug any audio device into USB, system automatically uses it as the default audio input and output."
+      android:text="By default, once you plug any audio device into USB, system automatically uses it as the default audio output and input."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -166,7 +166,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="If USB audio is bad and you start publishing SRT stream - it can create SRT stream that is unplayable by players and OBS. For Elgato Cam Link if it has issues with audio I recommened to use USB hub, connect Cam Link first, then connect some other USB audio device. Phone automatically switches to the last USB device connected and uses that as audio output and input. That way you can use some other USB audio device with video from Cam Link."
+      android:text="If USB audio is bad and you start publishing SRT stream - it can create SRT stream that is unplayable by players and OBS. For Elgato Cam Link if it has issues with audio I recommened to use USB hub, connect Cam Link first, then connect some other USB audio device. Phone automatically switches to the last USB device connected and uses that as audio output and input. That way you can use some other USB audio device as audio input with video from Cam Link."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -183,7 +183,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="In the bottom left corner of the main screen there is a button to enable audio monitoring. It will play audio input via default audio ouput."
+      android:text="In the bottom left corner of the main screen there is a button to enable audio monitoring. It will play audio input that goes to stream via default audio output."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -191,7 +191,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="When USB audio device is connected it's instantly used as the default audio input and output. If you connect USB headphones - they have both audio output and input, so you should be able to hear yourself fine. But when you connect DJI OA4 or Elgato Cam Link - those devices don't have audio output."
+      android:text="When USB audio device is connected it's instantly used as the default audio input and output. If you connect USB headphones - they have both audio output and input, so you should be able to hear yourself fine. When you connect DJI OA4 or Elgato Cam Link these devices don't have audio output and that creates a problem - you can't monitor their audio."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -199,7 +199,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="The solution is to connect Bluetooth headphones - this allows to hear HDMI/USB audio through them. Phone doesn't switch audio input to Bluetooth automatically when USB audio device is connected, so you can still use USB audio input while monitoring audio through Bluetooth headphones."
+      android:text="The solution is to connect Bluetooth headphones. This allows to hear HDMI/USB audio through them. Phone doesn't switch audio input to Bluetooth automatically when USB audio device is connected, so you can still use USB audio input while monitoring audio through Bluetooth headphones."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
