@@ -2,6 +2,7 @@ package com.dimadesu.lifestreamer.audio
 
 import android.Manifest
 import android.content.Context
+import android.media.AudioManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -29,7 +30,7 @@ import java.nio.ByteBuffer
  * when building `AudioRecord` by using reflection to call `setPreferredDevice` on the builder
  * when supported.
  */
-class AppBluetoothSource(private val preferredDevice: AudioDeviceInfo?) :
+class AppBluetoothSource(private val context: Context, private val preferredDevice: AudioDeviceInfo?) :
     IAudioSourceInternal, IAudioFrameSourceInternal, SuspendStreamable, SuspendConfigurable<AudioSourceConfig>, Releasable {
 
     private var audioRecord: AudioRecord? = null
@@ -39,6 +40,7 @@ class AppBluetoothSource(private val preferredDevice: AudioDeviceInfo?) :
     override val isStreamingFlow = _isStreamingFlow.asStateFlow()
 
     private var currentConfig: AudioSourceConfig? = null
+    private var scoStarted = false
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     override suspend fun configure(config: AudioSourceConfig) {
@@ -104,6 +106,40 @@ class AppBluetoothSource(private val preferredDevice: AudioDeviceInfo?) :
     override suspend fun startStream() {
         val ar = requireNotNull(audioRecord) { "Audio source is not configured" }
         if (ar.recordingState == AudioRecord.RECORDSTATE_RECORDING) return
+        // If a Bluetooth SCO device is preferred, attempt to start SCO and route audio.
+        try {
+            preferredDevice?.let { device ->
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                // Set communication mode
+                try {
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                } catch (_: Throwable) {}
+
+                // Start SCO if available
+                try {
+                    // On Android S+, ensure BLUETOOTH_CONNECT permission; guard calls if missing
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (granted) {
+                            audioManager.startBluetoothSco()
+                            audioManager.isBluetoothScoOn = true
+                            scoStarted = true
+                        }
+                    } else {
+                        audioManager.startBluetoothSco()
+                        audioManager.isBluetoothScoOn = true
+                        scoStarted = true
+                    }
+                } catch (_: Throwable) {}
+
+                // Try to set communication device reflectively (if available)
+                try {
+                    val m = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
+                    m.invoke(audioManager, device)
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
+
         ar.startRecording()
         _isStreamingFlow.tryEmit(true)
     }
@@ -113,6 +149,17 @@ class AppBluetoothSource(private val preferredDevice: AudioDeviceInfo?) :
         if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) return
         ar.stop()
         _isStreamingFlow.tryEmit(false)
+
+        // Stop SCO if we started it
+        try {
+            if (scoStarted) {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                audioManager.stopBluetoothSco()
+                audioManager.isBluetoothScoOn = false
+                try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+                scoStarted = false
+            }
+        } catch (_: Throwable) {}
     }
 
     override fun release() {
@@ -120,6 +167,16 @@ class AppBluetoothSource(private val preferredDevice: AudioDeviceInfo?) :
         audioRecord?.release()
         audioRecord = null
         currentConfig = null
+        // Ensure SCO stopped on release
+        try {
+            if (scoStarted) {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                audioManager.stopBluetoothSco()
+                audioManager.isBluetoothScoOn = false
+                try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+                scoStarted = false
+            }
+        } catch (_: Throwable) {}
     }
 
     override fun fillAudioFrame(frame: RawFrame): RawFrame {
@@ -155,7 +212,7 @@ class AppBluetoothSource(private val preferredDevice: AudioDeviceInfo?) :
  */
 class AppBluetoothSourceFactory(private val device: AudioDeviceInfo?) : IAudioSourceInternal.Factory {
     override suspend fun create(context: Context): IAudioSourceInternal {
-        return AppBluetoothSource(device)
+        return AppBluetoothSource(context.applicationContext, device)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
