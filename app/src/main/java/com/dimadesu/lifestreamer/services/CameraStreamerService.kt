@@ -427,6 +427,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             // Cancel any ongoing SCO orchestration and unregister receiver
             scoSwitchJob?.cancel()
             unregisterScoDisconnectReceiver()
+            unregisterBtDeviceReceiver()
         } catch (_: Throwable) {}
 
         super.onDestroy()
@@ -1248,6 +1249,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // SCO orchestration state
     private var scoSwitchJob: Job? = null
     private var scoDisconnectReceiver: BroadcastReceiver? = null
+    // Receiver for Bluetooth device connect/disconnect events when policy is enabled
+    private var btDeviceReceiver: BroadcastReceiver? = null
     private val scoMutex = kotlinx.coroutines.sync.Mutex()
     // SCO negotiation state exposed to UI
     enum class ScoState { IDLE, TRYING, USING_BT, FAILED }
@@ -1286,6 +1289,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try { recreateMicSource(this.streamer) } catch (_: Throwable) {}
             // Update state
             try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+            // Unregister device receiver when policy disabled
+            try { unregisterBtDeviceReceiver() } catch (_: Throwable) {}
         } else {
             // If enabled and we are streaming, attempt SCO orchestration
             try {
@@ -1345,7 +1350,64 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     }
                 }
             } catch (_: Throwable) {}
+            // Register receiver to monitor BT device connect/disconnect while policy enabled
+            try { registerBtDeviceReceiver() } catch (_: Throwable) {}
         }
+    }
+
+    private fun registerBtDeviceReceiver() {
+        try {
+            if (btDeviceReceiver != null) return
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    try {
+                        val action = intent?.action ?: return
+                        if (action == android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED ||
+                            action == android.bluetooth.BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED) {
+                            // When any device disconnects, check if a BT input device still exists
+                            serviceScope.launch(Dispatchers.Default) {
+                                try {
+                                    val btDevice = scoOrchestrator.detectBtInputDevice()
+                                    if (btDevice == null) {
+                                        Log.i(TAG, "BT device disconnected and no BT input remains - reverting Bluetooth policy off")
+                                        try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                                        try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+                                        try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                                        // If we started SCO for passthrough, stop it
+                                        try {
+                                            if (_scoStartedForPassthrough) {
+                                                scoOrchestrator.stopScoQuietly()
+                                                _scoStartedForPassthrough = false
+                                            }
+                                        } catch (_: Throwable) {}
+                                    }
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, "BT device receiver handling failed: ${t.message}")
+                                }
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "BT device receiver onReceive error: ${t.message}")
+                    }
+                }
+            }
+            val filter = IntentFilter().apply {
+                addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
+                addAction(android.bluetooth.BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
+            }
+            registerReceiver(receiver, filter)
+            btDeviceReceiver = receiver
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to register BT device receiver: ${t.message}")
+        }
+    }
+
+    private fun unregisterBtDeviceReceiver() {
+        try {
+            btDeviceReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Throwable) {}
+        btDeviceReceiver = null
     }
 
     /**
