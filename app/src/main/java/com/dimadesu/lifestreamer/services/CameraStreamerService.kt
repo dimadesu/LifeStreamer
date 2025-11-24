@@ -1258,6 +1258,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
+        // If Bluetooth policy already enabled when client binds, ensure receiver
+        // is registered so we catch disconnects even when not streaming/passthrough.
+        try {
+            if (com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
+                registerBtDeviceReceiver()
+                // Quick check: if no BT input device currently present, revert policy
+                serviceScope.launch(Dispatchers.Default) {
+                    try {
+                        val btDevice = scoOrchestrator.detectBtInputDevice()
+                        if (btDevice == null) {
+                            Log.i(TAG, "onBind: Bluetooth policy enabled but no BT device found - reverting")
+                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+                            try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                        }
+                    } catch (_: Throwable) {}
+                }
+            }
+        } catch (_: Throwable) {}
         return customBinder
     }
 
