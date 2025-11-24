@@ -1236,6 +1236,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
         // Expose SCO state flow for UI
         fun scoStateFlow() = this@CameraStreamerService.scoStateFlow.asSharedFlow()
+        // Allow bound clients to enable/disable Bluetooth mic policy at runtime
+        fun setUseBluetoothMic(enabled: Boolean) {
+            try { this@CameraStreamerService.applyBluetoothPolicy(enabled) } catch (_: Throwable) {}
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
@@ -1259,6 +1263,38 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             (streamer as? IWithAudioSource)?.audioInput?.isMuted ?: false
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    // Apply Bluetooth mic policy at runtime. When disabled, stop any ongoing SCO orchestration
+    // and clear preferred device so factories will not select Bluetooth.
+    fun applyBluetoothPolicy(enabled: Boolean) {
+        try {
+            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
+        } catch (_: Throwable) {}
+
+        if (!enabled) {
+            // Cancel SCO orchestration job and stop SCO if active
+            try { scoSwitchJob?.cancel() } catch (_: Throwable) {}
+            try {
+                val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                try { am?.stopBluetoothSco() } catch (_: Throwable) {}
+            } catch (_: Throwable) {}
+            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+            // Update state
+            try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+        } else {
+            // If enabled and we are streaming, attempt SCO orchestration
+            try {
+                val currentStreamer = this.streamer
+                if (currentStreamer != null && currentStreamer.isStreamingFlow.value == true) {
+                    scoSwitchJob?.cancel()
+                    scoSwitchJob = serviceScope.launch(Dispatchers.Default) {
+                        delay(200)
+                        try { attemptScoNegotiationAndSwitch(currentStreamer) } catch (_: Throwable) {}
+                    }
+                }
+            } catch (_: Throwable) {}
         }
     }
 

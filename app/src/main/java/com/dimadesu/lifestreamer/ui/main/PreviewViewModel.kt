@@ -223,12 +223,37 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val streamerErrorLiveData: LiveData<String?> = _streamerErrorLiveData
 
     // UI toggle: Use Bluetooth mic when available
-    private val _useBluetoothMic = MutableLiveData<Boolean>(false)
+    private val _useBluetoothMic = MutableLiveData<Boolean>(com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled())
     val useBluetoothMic: LiveData<Boolean> get() = _useBluetoothMic
 
     fun setUseBluetoothMic(enabled: Boolean) {
         _useBluetoothMic.postValue(enabled)
-        // Bluetooth is hardcoded enabled in `BluetoothAudioConfig`; ignore setter.
+        try {
+            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
+        } catch (_: Throwable) {}
+        // If bound to service, notify it so it can apply the policy immediately
+        try {
+            // serviceConnection holds the active connection with a binder
+            val conn = serviceConnection
+            if (conn != null) {
+                // Retrieve binder via the currently bound service reference if available
+                val svc = streamerService
+                if (svc != null) {
+                    try {
+                        // Use the binder if possible (safe cast)
+                        val binderField = svc::class.java.getDeclaredField("customBinder")
+                        binderField.isAccessible = true
+                        val binder = binderField.get(svc)
+                        if (binder is com.dimadesu.lifestreamer.services.CameraStreamerService.CameraStreamerServiceBinder) {
+                            binder.setUseBluetoothMic(enabled)
+                        }
+                    } catch (_: Throwable) {
+                        // Fallback: try calling service method directly
+                        try { svc.applyBluetoothPolicy(enabled) } catch (_: Throwable) {}
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
     }
 
     // Data-binding getter expected by generated binding code
