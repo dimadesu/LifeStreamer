@@ -162,32 +162,15 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
     }
 
     private suspend fun waitForScoConnected(context: Context, timeoutMs: Long): Boolean {
-        return withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine<Boolean> { cont ->
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                val receiver = object : android.content.BroadcastReceiver() {
-                    override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
-                        intent?.let { i ->
-                            if (i.action == AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) {
-                                val state = i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
-                                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
-                                    if (cont.isActive) cont.resume(true)
-                                } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
-                                    // ignore; wait for connected or timeout
-                                }
-                            }
-                        }
-                    }
-                }
-
-                val filter = android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-                context.registerReceiver(receiver, filter)
-
-                cont.invokeOnCancellation {
-                    try { context.unregisterReceiver(receiver) } catch (_: Throwable) {}
-                }
-            }
-        } != null
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (audioManager.isBluetoothScoOn) return true
+            } catch (_: Throwable) {}
+            kotlinx.coroutines.delay(200)
+        }
+        return false
     }
 
     override suspend fun stopStream() {

@@ -5,6 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import kotlinx.coroutines.sync.Mutex
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import android.os.Binder
@@ -410,6 +415,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (t: Throwable) {
             Log.w(TAG, "onDestroy: failed to stop audio passthrough cleanly: ${t.message}")
         }
+
+        try {
+            // Cancel any ongoing SCO orchestration and unregister receiver
+            scoSwitchJob?.cancel()
+            unregisterScoDisconnectReceiver()
+        } catch (_: Throwable) {}
 
         super.onDestroy()
     }
@@ -1169,6 +1180,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
 
             Log.i(TAG, "startStreamFromConfiguredEndpoint: stream started successfully")
+            // Launch SCO orchestration after stream start so we can attempt to switch
+            // to a Bluetooth mic while keeping the mic source active until SCO connects.
+            try {
+                scoSwitchJob?.cancel()
+                scoSwitchJob = serviceScope.launch(Dispatchers.Default) {
+                    // Small stabilization delay to let stream fully settle
+                    delay(300)
+                    try {
+                        attemptScoNegotiationAndSwitch(currentStreamer)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "SCO orchestration job failed: ${t.message}")
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to start SCO orchestration job: ${t.message}")
+            }
             // Notify UI of success via notification / status flow; no dialog needed
             // Keep API surface unchanged for future use
         } catch (e: Exception) {
@@ -1207,9 +1234,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // NOTE: This is a synchronous snapshot of the current state. Prefer collecting
         // the `isPassthroughRunning` StateFlow for reactive updates where possible.
         fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
+        // Expose SCO state flow for UI
+        fun scoStateFlow() = this@CameraStreamerService.scoStateFlow.asSharedFlow()
     }
 
     private val customBinder = CameraStreamerServiceBinder()
+
+    // SCO orchestration state
+    private var scoSwitchJob: Job? = null
+    private var scoDisconnectReceiver: BroadcastReceiver? = null
+    private val scoMutex = kotlinx.coroutines.sync.Mutex()
+    // SCO negotiation state exposed to UI
+    enum class ScoState { IDLE, TRYING, USING_BT, FAILED }
+    private val scoStateFlow = kotlinx.coroutines.flow.MutableStateFlow(ScoState.IDLE)
 
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
@@ -1442,6 +1479,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     fun setStreamStatus(status: StreamStatus) {
         Log.d(TAG, "setStreamStatus: $status (isReconnecting=${_isReconnecting.value})")
         _serviceStreamStatus.value = status
+        // Trigger watcher to start/stop SCO orchestration as needed
+        onServiceStatusChanged(status)
+    }
+
+    // Watcher: trigger SCO orchestration when entering STREAMING
+    private fun onServiceStatusChanged(status: StreamStatus) {
+        try {
+            if (status == StreamStatus.STREAMING) {
+                // start orchestration if not already running
+                scoSwitchJob?.cancel()
+                scoSwitchJob = serviceScope.launch(Dispatchers.Default) {
+                    delay(300)
+                    try { attemptScoNegotiationAndSwitch(streamer) } catch (t: Throwable) { Log.w(TAG, "SCO orchestration job failed: ${t.message}") }
+                }
+            } else {
+                // cancel orchestration if we stop streaming
+                scoSwitchJob?.cancel()
+            }
+        } catch (t: Throwable) { Log.w(TAG, "onServiceStatusChanged failed: ${t.message}") }
     }
 
     // Helper to compute the localized mute/unmute label based on current audio state
@@ -1516,5 +1572,165 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
         )
+    }
+
+    /**
+     * Attempt to negotiate SCO and switch the streamer's audio source to Bluetooth.
+     * This function is safe to call multiple times; it serializes attempts using a mutex.
+     */
+    private suspend fun attemptScoNegotiationAndSwitch(streamerInstance: ISingleStreamer?) {
+        if (streamerInstance == null) return
+        // Ensure Bluetooth policy is enabled
+        if (!com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
+            Log.i(TAG, "SCO orchestration: Bluetooth disabled by policy")
+            return
+        }
+
+        // Ensure we have a preferred BT device. If not set yet, try to detect one now.
+        var preferred = try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.getPreferredDevice() } catch (_: Throwable) { null }
+        if (preferred == null) {
+            try {
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val btDevice = audioManager
+                    ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                    ?.firstOrNull { d ->
+                        d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    }
+                if (btDevice != null) {
+                    com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
+                    preferred = btDevice
+                    Log.i(TAG, "SCO orchestration: detected and selected BT input device id=${btDevice.id}")
+                } else {
+                    Log.i(TAG, "SCO orchestration: no BT input device detected")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "SCO orchestration: error detecting BT device: ${t.message}")
+            }
+        }
+
+        if (preferred == null) {
+            Log.i(TAG, "SCO orchestration: no preferred BT device available - will still attempt SCO (nullable device)")
+        }
+
+            // Ensure only one orchestration at a time
+            scoMutex.lock()
+            try {
+                scoStateFlow.tryEmit(ScoState.TRYING)
+                // Verify streamer still running and current audio source is not already BT
+                val audioInput = (streamerInstance as? IWithAudioSource)?.audioInput
+                val currentSource = audioInput?.sourceFlow?.value
+                if (currentSource != null && currentSource.javaClass.simpleName.contains("Bluetooth", ignoreCase = true)) {
+                    Log.i(TAG, "SCO orchestration: audio source already Bluetooth - skipping")
+                    scoStateFlow.tryEmit(ScoState.USING_BT)
+                    return
+                }
+
+                Log.i(TAG, "SCO orchestration: starting negotiation for device id=${preferred?.id ?: -1}")
+
+                // Request BLUETOOTH_CONNECT on S+ before attempting SCO
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val granted = ContextCompat.checkSelfPermission(this@CameraStreamerService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        Log.w(TAG, "SCO orchestration: BLUETOOTH_CONNECT not granted - aborting automatic SCO")
+                        return
+                    }
+                }
+
+                // Start SCO and wait for connected broadcast
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                if (audioManager == null) {
+                    Log.w(TAG, "SCO orchestration: AudioManager unavailable")
+                    return
+                }
+
+                try {
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                } catch (_: Throwable) {}
+
+                try {
+                    audioManager.startBluetoothSco()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "SCO orchestration: startBluetoothSco failed: ${t.message}")
+                }
+
+                // Wait up to 4s for SCO connected
+                val connected = waitForScoConnected(this@CameraStreamerService, 4000)
+                if (!connected) {
+                    Log.i(TAG, "SCO orchestration: SCO did not connect - leaving mic source")
+                    try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+                    scoStateFlow.tryEmit(ScoState.FAILED)
+                    return
+                }
+
+                Log.i(TAG, "SCO orchestration: SCO connected - switching audio source to Bluetooth")
+
+                // Switch streamer audio source to AppBluetoothSourceFactory with preferred device
+                try {
+                    (streamerInstance as? IWithAudioSource)?.let { withAudio ->
+                        withAudio.setAudioSource(com.dimadesu.lifestreamer.audio.AppBluetoothSourceFactory(preferred))
+                        Log.i(TAG, "SCO orchestration: setAudioSource called for Bluetooth factory")
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "SCO orchestration: setAudioSource failed: ${t.message}")
+                    scoStateFlow.tryEmit(ScoState.FAILED)
+                }
+
+                // Register disconnect receiver to revert to mic on SCO disconnect
+                registerScoDisconnectReceiver()
+                scoStateFlow.tryEmit(ScoState.USING_BT)
+            } finally {
+                scoMutex.unlock()
+            }
+    }
+
+    private fun registerScoDisconnectReceiver() {
+        try {
+            if (scoDisconnectReceiver != null) return
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    intent?.let { i ->
+                        if (i.action == AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) {
+                            val state = i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
+                            if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
+                                Log.i(TAG, "SCO disconnect detected - reverting to microphone source")
+                                // Revert to mic source asynchronously
+                                serviceScope.launch(Dispatchers.Default) {
+                                    try {
+                                        (streamer as? IWithAudioSource)?.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory())
+                                            scoStateFlow.tryEmit(ScoState.IDLE)
+                                    } catch (t: Throwable) {
+                                        Log.w(TAG, "Failed to revert to mic on SCO disconnect: ${t.message}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+            registerReceiver(receiver, filter)
+            scoDisconnectReceiver = receiver
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to register SCO disconnect receiver: ${t.message}")
+        }
+    }
+
+    private fun unregisterScoDisconnectReceiver() {
+        try {
+            scoDisconnectReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Throwable) {}
+        scoDisconnectReceiver = null
+    }
+
+    private suspend fun waitForScoConnected(context: Context, timeoutMs: Long): Boolean {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (audioManager.isBluetoothScoOn) return true
+            } catch (_: Throwable) {}
+            delay(200)
+        }
+        return false
     }
 }

@@ -143,6 +143,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Expose current mute state to the UI
     private val _isMutedLiveData = MutableLiveData<Boolean>(false)
     val isMutedLiveData: LiveData<Boolean> get() = _isMutedLiveData
+    // SCO negotiation state exposed to UI
+    private val _scoStateLiveData = MutableLiveData<String>(null)
+    val scoStateLiveData: LiveData<String> get() = _scoStateLiveData
     
     // Remember last used camera ID when switching to RTMP/bitmap sources
     private var lastUsedCameraId: String? = null
@@ -807,6 +810,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             }
                         } catch (t: Throwable) {
                             Log.w(TAG, "Failed to collect isMuted flow from service: ${t.message}")
+                        }
+                        // Collect SCO state flow if provided by binder
+                        try {
+                            val scoFlow = binder.scoStateFlow()
+                            viewModelScope.launch {
+                                scoFlow.collect { state ->
+                                    try { _scoStateLiveData.postValue(state.name) } catch (_: Throwable) {}
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to collect SCO state flow from service: ${t.message}")
                         }
                             // Collect uptime flow to display runtime in UI
                             try {

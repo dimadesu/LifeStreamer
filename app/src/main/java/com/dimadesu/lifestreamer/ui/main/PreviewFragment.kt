@@ -195,32 +195,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Show SCO / audio routing status
-        val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-        fun updateScoText() {
-            val scoOn = audioManager.isBluetoothScoOn
-            binding.audioScoStatusText.text = if (scoOn) "SCO: connected" else "SCO: off"
-        }
-
-        updateScoText()
-
-        val scoReceiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
-                if (intent?.action == AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) {
-                    updateScoText()
-                }
-            }
-        }
-
-        val scoFilter = android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-        requireContext().registerReceiver(scoReceiver, scoFilter)
-
-        // Unregister when view is destroyed
-        viewLifecycleOwner.lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
-            override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) {
-                try { requireContext().unregisterReceiver(scoReceiver) } catch (_: Throwable) {}
-            }
-        })
+        // SCO negotiation state is provided by the Service and exposed via ViewModel.scoStateLiveData
+        // It will update the bound `audioScoStatusText` through data binding.
 
         // Reconnection status is now displayed via data binding in the layout XML
         // No need for manual observer - the TextView will automatically show/hide

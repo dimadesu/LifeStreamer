@@ -229,7 +229,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
                 android:textSize="14sp"
-                android:text="SCO: unknown"
+                android:text='@{viewmodel.scoStateLiveData != null ? ("SCO: " + viewmodel.scoStateLiveData) : "SCO: unknown"}'
                 android:paddingStart="6dp" />
 
         </LinearLayout>
