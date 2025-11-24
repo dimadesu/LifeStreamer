@@ -9,6 +9,8 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothProfile
 
 class ScoOrchestrator(
     private val context: Context,
@@ -21,6 +23,14 @@ class ScoOrchestrator(
             am?.getDevices(AudioManager.GET_DEVICES_INPUTS)
                 ?.firstOrNull { d -> try { d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } catch (_: Throwable) { false } }
         } catch (_: Throwable) { null }
+    }
+
+    fun isHeadsetConnected(): Boolean {
+        try {
+            val adapter = BluetoothAdapter.getDefaultAdapter() ?: return false
+            val state = adapter.getProfileConnectionState(BluetoothProfile.HEADSET)
+            return state == BluetoothProfile.STATE_CONNECTED
+        } catch (_: Throwable) { return false }
     }
 
     fun ensurePermission(): Boolean {

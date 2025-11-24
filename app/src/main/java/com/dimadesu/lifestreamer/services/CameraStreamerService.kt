@@ -1251,6 +1251,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var scoDisconnectReceiver: BroadcastReceiver? = null
     // Receiver for Bluetooth device connect/disconnect events when policy is enabled
     private var btDeviceReceiver: BroadcastReceiver? = null
+    // Background job that periodically polls for BT input device presence
+    private var btDeviceMonitorJob: Job? = null
     private val scoMutex = kotlinx.coroutines.sync.Mutex()
     // SCO negotiation state exposed to UI
     enum class ScoState { IDLE, TRYING, USING_BT, FAILED }
@@ -1262,18 +1264,26 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // is registered so we catch disconnects even when not streaming/passthrough.
         try {
             if (com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
-                registerBtDeviceReceiver()
-                // Quick check: if no BT input device currently present, revert policy
-                serviceScope.launch(Dispatchers.Default) {
-                    try {
-                        val btDevice = scoOrchestrator.detectBtInputDevice()
-                        if (btDevice == null) {
-                            Log.i(TAG, "onBind: Bluetooth policy enabled but no BT device found - reverting")
-                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
-                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                            try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
-                        }
-                    } catch (_: Throwable) {}
+                // Ensure we have permission to inspect Bluetooth devices. If not,
+                // request it via the existing permission flow so the UI can prompt.
+                if (!scoOrchestrator.ensurePermission()) {
+                    Log.i(TAG, "onBind: BLUETOOTH_CONNECT not granted - requesting from UI")
+                    // Don't attempt detection until permission granted; UI should call
+                    // setUseBluetoothMic(true) again (ViewModel will do this) after grant.
+                } else {
+                    registerBtDeviceReceiver()
+                    // Quick check: if no BT input device currently present, revert policy
+                    serviceScope.launch(Dispatchers.Default) {
+                        try {
+                            val btDevice = scoOrchestrator.detectBtInputDevice()
+                            if (btDevice == null) {
+                                Log.i(TAG, "onBind: Bluetooth policy enabled but no BT device found - reverting")
+                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+                                try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                            }
+                        } catch (_: Throwable) {}
+                    }
                 }
             }
         } catch (_: Throwable) {}
@@ -1311,6 +1321,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             // Unregister device receiver when policy disabled
             try { unregisterBtDeviceReceiver() } catch (_: Throwable) {}
         } else {
+            // Ensure we have permission before attempting any detection or orchestration.
+            if (!scoOrchestrator.ensurePermission()) {
+                Log.i(TAG, "applyBluetoothPolicy: BLUETOOTH_CONNECT not granted - requesting UI and reverting toggle")
+                // Ask UI to request permission via the shared flow and revert the policy until user grants.
+                try { bluetoothConnectPermissionRequest.tryEmit(Unit) } catch (_: Throwable) {}
+                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                return
+            }
             // If enabled and we are streaming, attempt SCO orchestration
             try {
                 val currentStreamer = this.streamer
@@ -1381,12 +1400,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 override fun onReceive(context: Context?, intent: Intent?) {
                     try {
                         val action = intent?.action ?: return
+                        Log.d(TAG, "BT device receiver action=$action")
                         if (action == android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED ||
                             action == android.bluetooth.BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED) {
                             // When any device disconnects, check if a BT input device still exists
                             serviceScope.launch(Dispatchers.Default) {
                                 try {
-                                    val btDevice = scoOrchestrator.detectBtInputDevice()
+                                    var btDevice = scoOrchestrator.detectBtInputDevice()
+                                    // If no device detected via AudioManager, check headset profile state
+                                    if (btDevice == null) {
+                                        val headsetConnected = scoOrchestrator.isHeadsetConnected()
+                                        if (!headsetConnected) btDevice = null
+                                    }
+                                    Log.d(TAG, "BT device receiver: detected btDevice=${btDevice?.id}")
                                     if (btDevice == null) {
                                         Log.i(TAG, "BT device disconnected and no BT input remains - reverting Bluetooth policy off")
                                         try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
@@ -1417,6 +1443,44 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
             registerReceiver(receiver, filter)
             btDeviceReceiver = receiver
+            // Start a short-lived monitor that polls for device presence while policy is enabled
+            try {
+                btDeviceMonitorJob?.cancel()
+                btDeviceMonitorJob = serviceScope.launch(Dispatchers.Default) {
+                    var consecutiveMisses = 0
+                    while (isActive) {
+                        try {
+                            val btDevice = scoOrchestrator.detectBtInputDevice()
+                            val headsetConnected = if (btDevice == null) scoOrchestrator.isHeadsetConnected() else true
+                            if (btDevice != null || headsetConnected) {
+                                consecutiveMisses = 0
+                            } else {
+                                consecutiveMisses++
+                                Log.d(TAG, "BT monitor: no device found (misses=$consecutiveMisses)")
+                            }
+                            if (consecutiveMisses >= 2) {
+                                Log.i(TAG, "BT monitor: device missing for multiple checks - reverting Bluetooth policy off")
+                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+                                try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                                // Stop SCO if we started it for passthrough
+                                try {
+                                    if (_scoStartedForPassthrough) {
+                                        scoOrchestrator.stopScoQuietly()
+                                        _scoStartedForPassthrough = false
+                                    }
+                                } catch (_: Throwable) {}
+                                break
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "BT monitor error: ${t.message}")
+                        }
+                        delay(2000)
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to start BT monitor job: ${t.message}")
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to register BT device receiver: ${t.message}")
         }
@@ -1427,6 +1491,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             btDeviceReceiver?.let { unregisterReceiver(it) }
         } catch (_: Throwable) {}
         btDeviceReceiver = null
+        try { btDeviceMonitorJob?.cancel() } catch (_: Throwable) {}
+        btDeviceMonitorJob = null
     }
 
     /**
