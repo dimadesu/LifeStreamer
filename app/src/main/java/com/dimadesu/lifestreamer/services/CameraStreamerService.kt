@@ -1378,9 +1378,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 return@launch
                             }
 
-                            // Success - stop SCO (don't keep it running) and report USING_BT briefly
+                            // Success - stop SCO (don't keep it running) and verify routing
                             scoOrchestrator.stopScoQuietly()
-                            scoStateFlow.tryEmit(ScoState.USING_BT)
+                            verifyAndEmitUsingBtOrFail(1500)
                         } catch (t: Throwable) {
                             Log.w(TAG, "Connectivity check failed: ${t.message}")
                             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false)
@@ -1513,14 +1513,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try {
                 if (_isPassthroughRunning.value) {
                     Log.i(TAG, "Restarting passthrough to switch input device to Bluetooth")
-                    try { audioPassthroughManager.stop() } catch (_: Throwable) {}
-                    try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
+                    try { stopAudioPassthrough() } catch (_: Throwable) {}
                     // Give the system a small moment to switch audio routing
                     delay(300)
-                    // Start passthrough which will now prefer Bluetooth if policy/device present
-                    try { audioPassthroughManager.start() } catch (_: Throwable) {}
-                    try { _isPassthroughRunning.tryEmit(true) } catch (_: Throwable) {}
-                    Log.i(TAG, "Passthrough restarted")
+                    try { startAudioPassthrough() } catch (_: Throwable) {}
+                    Log.i(TAG, "Passthrough restarted via service methods")
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to restart passthrough: ${t.message}")
@@ -1582,7 +1579,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                     if (connected) {
                                         _scoStartedForPassthrough = true
                                         Log.i(TAG, "Passthrough SCO: SCO connected, will prefer BT input")
-                                        scoStateFlow.tryEmit(ScoState.USING_BT)
+                                        try {
+                                            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                                            try { am?.mode = AudioManager.MODE_IN_COMMUNICATION } catch (_: Throwable) {}
+                                        } catch (_: Throwable) {}
+                                        // Verify routing before announcing USING_BT
+                                        verifyAndEmitUsingBtOrFail(2000)
                                     } else {
                                         Log.i(TAG, "Passthrough SCO: SCO did not connect - will use mic")
                                         scoOrchestrator.stopScoQuietly()
@@ -1668,7 +1670,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 try {
                     if (_scoStartedForPassthrough) {
                         val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                        try { am?.stopBluetoothSco() } catch (_: Throwable) {}
+                            try { am?.stopBluetoothSco() } catch (_: Throwable) {}
+                            try { am?.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
                         try { _scoStartedForPassthrough = false } catch (_: Throwable) {}
                         Log.i(TAG, "Stopped SCO that was started for passthrough")
                     }
@@ -1961,7 +1964,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 val currentSource = audioInput?.sourceFlow?.value
                 if (currentSource != null && currentSource.javaClass.simpleName.contains("Bluetooth", ignoreCase = true)) {
                     Log.i(TAG, "SCO orchestration: audio source already Bluetooth - skipping")
-                    scoStateFlow.tryEmit(ScoState.USING_BT)
+                    // Verify routing before announcing USING_BT to avoid false positives
+                    verifyAndEmitUsingBtOrFail(1200)
                     return
                 }
 
@@ -2000,7 +2004,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
                 // Register disconnect receiver to revert to mic on SCO disconnect
                 registerScoDisconnectReceiver()
-                scoStateFlow.tryEmit(ScoState.USING_BT)
+                // Verify routing before announcing USING_BT
+                verifyAndEmitUsingBtOrFail(2000)
             } finally {
                 scoMutex.unlock()
             }
@@ -2082,6 +2087,32 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } catch (_: Throwable) {}
             delay(200)
         }
+        return false
+    }
+
+    /**
+     * Verify that the platform actually routed audio over SCO/BT before emitting USING_BT.
+     * This helps avoid reporting USING_BT when the system hasn't applied routing yet.
+     * Returns true if USING_BT was emitted, false if verification failed and FAILED emitted.
+     */
+    private suspend fun verifyAndEmitUsingBtOrFail(timeoutMs: Long = 2000, pollMs: Long = 250): Boolean {
+        val am = try { getSystemService(Context.AUDIO_SERVICE) as? AudioManager } catch (_: Throwable) { null }
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var attempt = 0
+        while (System.currentTimeMillis() < deadline) {
+            attempt++
+            val isScoOn = try { am?.isBluetoothScoOn ?: false } catch (_: Throwable) { false }
+            val btDevice = try { scoOrchestrator.detectBtInputDevice() } catch (_: Throwable) { null }
+            Log.d(TAG, "verifyAndEmitUsingBtOrFail: attempt=$attempt isBluetoothScoOn=$isScoOn btDeviceId=${btDevice?.id ?: -1}")
+            if (isScoOn || btDevice != null) {
+                try { scoStateFlow.tryEmit(ScoState.USING_BT) } catch (_: Throwable) {}
+                Log.i(TAG, "verifyAndEmitUsingBtOrFail: confirmed SCO routing (isBluetoothScoOn=$isScoOn btDevice=${btDevice?.id}) - emitted USING_BT")
+                return true
+            }
+            delay(pollMs)
+        }
+        Log.i(TAG, "verifyAndEmitUsingBtOrFail: failed to confirm SCO routing after ${timeoutMs}ms - emitting FAILED")
+        try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
         return false
     }
 
