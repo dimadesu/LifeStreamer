@@ -1294,7 +1294,86 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         try { attemptScoNegotiationAndSwitch(currentStreamer) } catch (_: Throwable) {}
                     }
                 }
+                // If not streaming, proactively try a quick connectivity check so the UI
+                // reflects immediately whether a BT mic is available. This makes the
+                // toggle feel responsive even before monitoring/streaming starts.
+                if (currentStreamer == null || currentStreamer.isStreamingFlow.value != true) {
+                    // Fire-and-forget connectivity check
+                    serviceScope.launch(Dispatchers.Default) {
+                        try {
+                            val ok = attemptScoConnectivityCheck()
+                            if (!ok) {
+                                // Revert policy and emit failed state so UI updates
+                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Connectivity check failed: ${t.message}")
+                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+                            try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                        }
+                    }
+                }
             } catch (_: Throwable) {}
+        }
+    }
+
+    /**
+     * Quick connectivity check used when the user toggles Bluetooth mic ON.
+     * Attempts to detect a BT SCO input device, checks permission on S+, and
+     * tries starting SCO briefly to verify connectivity. Returns true if SCO
+     * connected, false otherwise. This does NOT switch the streamer's audio
+     * source — it only validates availability so the UI can update.
+     */
+    private suspend fun attemptScoConnectivityCheck(): Boolean {
+        try {
+            scoStateFlow.tryEmit(ScoState.TRYING)
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: run {
+                scoStateFlow.tryEmit(ScoState.FAILED)
+                return false
+            }
+
+            // Detect BT input device
+            val btDevice = audioManager
+                .getDevices(AudioManager.GET_DEVICES_INPUTS)
+                .firstOrNull { d -> try { d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } catch (_: Throwable) { false } }
+            if (btDevice == null) {
+                Log.i(TAG, "Connectivity check: no BT input device detected")
+                scoStateFlow.tryEmit(ScoState.FAILED)
+                return false
+            }
+
+            // Check permission for S+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val granted = ContextCompat.checkSelfPermission(this@CameraStreamerService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                if (!granted) {
+                    Log.i(TAG, "Connectivity check: BLUETOOTH_CONNECT not granted, requesting UI")
+                    try { bluetoothConnectPermissionRequest.tryEmit(Unit) } catch (_: Throwable) {}
+                    scoStateFlow.tryEmit(ScoState.FAILED)
+                    return false
+                }
+            }
+
+            // Start SCO and wait briefly
+            try { audioManager.startBluetoothSco() } catch (_: Throwable) { /* ignore */ }
+            val connected = waitForScoConnected(this@CameraStreamerService, 3000)
+            if (connected) {
+                Log.i(TAG, "Connectivity check: SCO connected")
+                try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
+                scoStateFlow.tryEmit(ScoState.USING_BT)
+                // Don't persist preferred device here; caller handles policy
+                return true
+            }
+            Log.i(TAG, "Connectivity check: SCO did not connect")
+            try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
+            scoStateFlow.tryEmit(ScoState.FAILED)
+            return false
+        } catch (t: Throwable) {
+            Log.w(TAG, "attemptScoConnectivityCheck failed: ${t.message}")
+            try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+            return false
         }
     }
 
