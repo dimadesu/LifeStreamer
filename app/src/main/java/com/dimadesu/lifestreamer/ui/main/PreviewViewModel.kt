@@ -839,6 +839,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             viewModelScope.launch {
                                 scoFlow.collect { state ->
                                     try { _scoStateLiveData.postValue(state.name) } catch (_: Throwable) {}
+
+                                    // If SCO negotiation failed, revert user toggle and notify UI
+                                    try {
+                                        val failedEnum = com.dimadesu.lifestreamer.services.CameraStreamerService.ScoState.FAILED
+                                        if (state == failedEnum) {
+                                            // Update UI toggle
+                                            _useBluetoothMic.postValue(false)
+                                            // Inform the service via binder (best-effort)
+                                            try { serviceBinder?.setUseBluetoothMic(false) } catch (_: Throwable) {}
+                                            // Notify user
+                                            try { _toastMessageLiveData.postValue("Bluetooth mic unavailable — reverted to built-in mic") } catch (_: Throwable) {}
+                                        }
+                                    } catch (_: Throwable) {}
                                 }
                             }
                             // Collect BLUETOOTH_CONNECT permission requests from service
