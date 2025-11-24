@@ -232,7 +232,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     // Data-binding getter expected by generated binding code
-    fun getUseBluetoothMic(): MutableLiveData<Boolean> = _useBluetoothMic
+    // Note: do not add a Java-style getter here; the Kotlin property `useBluetoothMic`
+    // already exposes `getUseBluetoothMic()` to data binding. Keeping another method
+    // with the same name causes an ambiguous reference during kapt/Java compilation.
 
     // Toast messages (nullable to support single-event pattern - cleared after observation)
     private val _toastMessageLiveData: MutableLiveData<String?> = MutableLiveData()
