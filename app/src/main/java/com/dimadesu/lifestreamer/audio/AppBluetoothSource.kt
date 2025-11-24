@@ -113,10 +113,7 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
         try {
             preferredDevice?.let { device ->
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                // Set communication mode
-                try {
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                } catch (_: Throwable) {}
+                // Do not change AudioManager.mode here; keep MODE_NORMAL to avoid residual routing issues
 
                 // Start SCO if available
                 try {

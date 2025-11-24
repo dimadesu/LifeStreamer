@@ -10,22 +10,14 @@ class ConditionalAudioSourceFactory : IAudioSourceInternal.Factory {
     private val TAG = "ConditionalAudioSourceFactory"
 
     override suspend fun create(context: Context): IAudioSourceInternal {
-        val useBt = try { BluetoothAudioConfig.isEnabled() } catch (_: Throwable) { false }
-        val device = try { BluetoothAudioConfig.getPreferredDevice() } catch (_: Throwable) { null }
-
-        Log.i(TAG, "Conditional factory invoked: useBt=$useBt device=${device?.id}")
-
-        return try {
-            if (useBt && device != null) {
-                Log.i(TAG, "Using app-level Bluetooth source for device id=${device.id}")
-                AppBluetoothSourceFactory(device).create(context)
-            } else {
-                MicrophoneSourceFactory().create(context)
-            }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Audio source create failed: ${t.message}. Rethrowing.")
-            throw t
-        }
+        // Always create the system microphone source at streamer creation time.
+        // SCO is negotiated asynchronously by the service and the service will
+        // call `setAudioSource(...)` to switch to the Bluetooth source only after
+        // SCO is confirmed. Choosing Bluetooth at creation time can produce
+        // degraded audio if SCO is not yet connected (some devices expose
+        // output-only A2DP devices or the SCO path isn't established yet).
+        Log.i(TAG, "Conditional factory invoked: creating system microphone source (deferred BT switch)")
+        return MicrophoneSourceFactory().create(context)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {

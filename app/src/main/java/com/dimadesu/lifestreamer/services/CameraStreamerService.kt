@@ -1314,8 +1314,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val btDevice = audioManager
                         ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
                         ?.firstOrNull { d ->
-                            d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                                    d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                            // Only consider devices that are actual input sources
+                            // and represent Bluetooth SCO (HFP) input. A2DP is output-only
+                            // and should not be used as a recording device.
+                            try {
+                                d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                            } catch (_: Throwable) { false }
                         }
                     if (btDevice != null) {
                         com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
@@ -1470,6 +1474,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = null
         // Now update status - this will trigger notification observer
+        ensureNormalAudioRouting()
         _serviceStreamStatus.value = StreamStatus.NOT_STREAMING
     }
     
@@ -1483,10 +1488,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         onServiceStatusChanged(status)
     }
 
+    private fun ensureNormalAudioRouting() {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                Log.i(TAG, "ensureNormalAudioRouting: stopping SCO and restoring MODE_NORMAL (current mode=${am.mode})")
+                try { am.stopBluetoothSco() } catch (_: Throwable) {}
+                try { am.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "ensureNormalAudioRouting failed: ${t.message}")
+        }
+    }
+
     // Watcher: trigger SCO orchestration when entering STREAMING
     private fun onServiceStatusChanged(status: StreamStatus) {
         try {
             if (status == StreamStatus.STREAMING) {
+                // Ensure we are in normal routing before attempting SCO
+                ensureNormalAudioRouting()
                 // start orchestration if not already running
                 scoSwitchJob?.cancel()
                 scoSwitchJob = serviceScope.launch(Dispatchers.Default) {
@@ -1494,8 +1514,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     try { attemptScoNegotiationAndSwitch(streamer) } catch (t: Throwable) { Log.w(TAG, "SCO orchestration job failed: ${t.message}") }
                 }
             } else {
-                // cancel orchestration if we stop streaming
+                // cancel orchestration and ensure normal routing if we stop streaming
                 scoSwitchJob?.cancel()
+                ensureNormalAudioRouting()
             }
         } catch (t: Throwable) { Log.w(TAG, "onServiceStatusChanged failed: ${t.message}") }
     }
@@ -1594,7 +1615,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 val btDevice = audioManager
                     ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
                     ?.firstOrNull { d ->
-                        d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                        try {
+                            d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        } catch (_: Throwable) { false }
                     }
                 if (btDevice != null) {
                     com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
@@ -1644,10 +1667,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
 
                 try {
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                } catch (_: Throwable) {}
-
-                try {
                     audioManager.startBluetoothSco()
                 } catch (t: Throwable) {
                     Log.w(TAG, "SCO orchestration: startBluetoothSco failed: ${t.message}")
@@ -1657,12 +1676,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 val connected = waitForScoConnected(this@CameraStreamerService, 4000)
                 if (!connected) {
                     Log.i(TAG, "SCO orchestration: SCO did not connect - leaving mic source")
+                    try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
                     try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+                    // Recreate mic source to ensure audio session is clean
+                    try {
+                        (streamerInstance as? IWithAudioSource)?.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory())
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "SCO orchestration: failed to reset mic after SCO failure: ${t.message}")
+                    }
                     scoStateFlow.tryEmit(ScoState.FAILED)
                     return
                 }
 
                 Log.i(TAG, "SCO orchestration: SCO connected - switching audio source to Bluetooth")
+
+                // Do not change AudioManager.mode here; keep MODE_NORMAL to avoid residual routing issues
 
                 // Switch streamer audio source to AppBluetoothSourceFactory with preferred device
                 try {
@@ -1696,8 +1724,36 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 // Revert to mic source asynchronously
                                 serviceScope.launch(Dispatchers.Default) {
                                     try {
-                                        (streamer as? IWithAudioSource)?.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory())
-                                            scoStateFlow.tryEmit(ScoState.IDLE)
+                                        val wasPassthrough = _isPassthroughRunning.value
+                                        if (wasPassthrough) {
+                                            try {
+                                                audioPassthroughManager.stop()
+                                                try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
+                                            } catch (_: Throwable) {}
+                                        }
+
+                                        val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                                        try { am?.stopBluetoothSco() } catch (_: Throwable) {}
+                                        try { am?.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+
+                                        // Small delay to let system settle audio routing
+                                        delay(250)
+
+                                        recreateMicSource(streamer)
+
+                                        // Small delay to allow mic AudioRecord to initialize
+                                        delay(150)
+
+                                        if (wasPassthrough) {
+                                            try {
+                                                audioPassthroughManager.start()
+                                                try { _isPassthroughRunning.tryEmit(true) } catch (_: Throwable) {}
+                                            } catch (_: Throwable) {
+                                                try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
+                                            }
+                                        }
+
+                                        scoStateFlow.tryEmit(ScoState.IDLE)
                                     } catch (t: Throwable) {
                                         Log.w(TAG, "Failed to revert to mic on SCO disconnect: ${t.message}")
                                     }
@@ -1732,5 +1788,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             delay(200)
         }
         return false
+    }
+
+    private fun recreateMicSource(streamerInstance: ISingleStreamer?) {
+        try {
+            Log.i(TAG, "Recreating mic source to ensure clean audio session")
+            serviceScope.launch(Dispatchers.Default) {
+                try {
+                    (streamerInstance as? IWithAudioSource)?.setAudioSource(
+                        io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory()
+                    )
+                    Log.i(TAG, "Recreate mic source: used default MicrophoneSourceFactory")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Recreate mic source failed inside coroutine: ${t.message}")
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Recreate mic source failed: ${t.message}")
+        }
     }
 }
