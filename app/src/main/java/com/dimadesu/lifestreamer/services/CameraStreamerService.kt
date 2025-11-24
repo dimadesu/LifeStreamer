@@ -1253,6 +1253,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var btDeviceReceiver: BroadcastReceiver? = null
     // Background job that periodically polls for BT input device presence
     private var btDeviceMonitorJob: Job? = null
+    // Helper job to serialize passthrough restarts
+    private var passthroughRestartJob: Job? = null
     private val scoMutex = kotlinx.coroutines.sync.Mutex()
     // SCO negotiation state exposed to UI
     enum class ScoState { IDLE, TRYING, USING_BT, FAILED }
@@ -1425,6 +1427,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                                 _scoStartedForPassthrough = false
                                             }
                                         } catch (_: Throwable) {}
+                                    } else {
+                                        // A BT input device is present. If passthrough is running
+                                        // and Bluetooth policy is enabled, restart passthrough
+                                        // so monitoring switches to BT immediately.
+                                        try {
+                                            if (_isPassthroughRunning.value && com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
+                                                restartPassthroughIfRunning()
+                                            }
+                                        } catch (_: Throwable) {}
                                     }
                                 } catch (t: Throwable) {
                                     Log.w(TAG, "BT device receiver handling failed: ${t.message}")
@@ -1493,6 +1504,28 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         btDeviceReceiver = null
         try { btDeviceMonitorJob?.cancel() } catch (_: Throwable) {}
         btDeviceMonitorJob = null
+    }
+
+    private fun restartPassthroughIfRunning() {
+        // Serialize restarts to avoid overlapping stop/start
+        passthroughRestartJob?.cancel()
+        passthroughRestartJob = serviceScope.launch(Dispatchers.Default) {
+            try {
+                if (_isPassthroughRunning.value) {
+                    Log.i(TAG, "Restarting passthrough to switch input device to Bluetooth")
+                    try { audioPassthroughManager.stop() } catch (_: Throwable) {}
+                    try { _isPassthroughRunning.tryEmit(false) } catch (_: Throwable) {}
+                    // Give the system a small moment to switch audio routing
+                    delay(300)
+                    // Start passthrough which will now prefer Bluetooth if policy/device present
+                    try { audioPassthroughManager.start() } catch (_: Throwable) {}
+                    try { _isPassthroughRunning.tryEmit(true) } catch (_: Throwable) {}
+                    Log.i(TAG, "Passthrough restarted")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to restart passthrough: ${t.message}")
+            }
+        }
     }
 
     /**
