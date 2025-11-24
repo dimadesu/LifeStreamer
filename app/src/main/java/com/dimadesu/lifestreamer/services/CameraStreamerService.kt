@@ -1280,7 +1280,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 Log.i(TAG, "onBind: Bluetooth policy enabled but no BT device found - reverting")
                                 try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
                                 try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                                try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                             }
                         } catch (_: Throwable) {}
                     }
@@ -1417,7 +1417,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                         Log.i(TAG, "BT device disconnected and no BT input remains - reverting Bluetooth policy off")
                                         try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
                                         try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                                        try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                                        try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                                         // If we started SCO for passthrough, stop it
                                         try {
                                             if (_scoStartedForPassthrough) {
@@ -1462,7 +1462,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 Log.i(TAG, "BT monitor: device missing for multiple checks - reverting Bluetooth policy off")
                                 try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
                                 try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                                try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
+                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                                 // Stop SCO if we started it for passthrough
                                 try {
                                     if (_scoStartedForPassthrough) {
