@@ -1281,6 +1281,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 try { am?.stopBluetoothSco() } catch (_: Throwable) {}
             } catch (_: Throwable) {}
             try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
+            // Recreate microphone source to switch back to built-in mic
+            try { recreateMicSource(this.streamer) } catch (_: Throwable) {}
             // Update state
             try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
         } else {
