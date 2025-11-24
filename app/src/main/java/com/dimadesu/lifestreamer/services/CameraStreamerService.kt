@@ -1333,6 +1333,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // SCO so we can stop it when passthrough stops.
                 try {
                     if (com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
+                        // Notify UI we are attempting SCO for passthrough
+                        try { scoStateFlow.tryEmit(ScoState.TRYING) } catch (_: Throwable) {}
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                         if (audioManager != null) {
                             // Detect a Bluetooth SCO input device
@@ -1353,10 +1355,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                             if (connected) {
                                                 try { _scoStartedForPassthrough = true } catch (_: Throwable) {}
                                                 Log.i(TAG, "Passthrough SCO: SCO connected, will prefer BT input")
+                                                try { scoStateFlow.tryEmit(ScoState.USING_BT) } catch (_: Throwable) {}
                                             } else {
                                                 Log.i(TAG, "Passthrough SCO: SCO did not connect - will use mic")
                                                 try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
                                                 com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                                             }
                                         }
                                     } else {
@@ -1366,21 +1370,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                         if (connected) {
                                             try { _scoStartedForPassthrough = true } catch (_: Throwable) {}
                                             Log.i(TAG, "Passthrough SCO: SCO connected (pre-S), will prefer BT input")
+                                            try { scoStateFlow.tryEmit(ScoState.USING_BT) } catch (_: Throwable) {}
                                         } else {
                                             Log.i(TAG, "Passthrough SCO: SCO did not connect (pre-S) - will use mic")
                                             try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
                                             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                            try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                                         }
                                     }
                                 } catch (t: Throwable) {
                                     Log.w(TAG, "Passthrough SCO negotiation failed: ${t.message}")
                                     com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                    try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                                 }
                             }
                         }
                     }
                 } catch (t: Throwable) {
                     Log.w(TAG, "Passthrough pre-start SCO attempt failed: ${t.message}")
+                    try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
                 }
                 val audioConfig = storageRepository.audioConfigFlow.first()
                 if (audioConfig != null) {
@@ -1452,6 +1460,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed stopping passthrough SCO: ${t.message}")
                 }
+
+                // Reset SCO state for UI now that passthrough stopped
+                try { scoStateFlow.tryEmit(ScoState.IDLE) } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)
             }
