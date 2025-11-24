@@ -128,39 +128,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleMonitorAudio()
         }
 
-        binding.scoStartButton.setOnClickListener {
-            val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            try {
-                audioManager.startBluetoothSco()
-                Toast.makeText(requireContext(), "startBluetoothSco() called", Toast.LENGTH_SHORT).show()
-                android.util.Log.i(TAG, "Manual startBluetoothSco() called from UI")
-            } catch (t: Throwable) {
-                Toast.makeText(requireContext(), "startBluetoothSco() failed: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.scoStopButton.setOnClickListener {
-            val audioManager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            try {
-                audioManager.stopBluetoothSco()
-                Toast.makeText(requireContext(), "stopBluetoothSco() called", Toast.LENGTH_SHORT).show()
-                android.util.Log.i(TAG, "Manual stopBluetoothSco() called from UI")
-            } catch (t: Throwable) {
-                Toast.makeText(requireContext(), "stopBluetoothSco() failed: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.listBtButton.setOnClickListener {
-            try {
-                val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
-                val devices = adapter?.bondedDevices?.joinToString(separator = ", ") { it.name + " (" + it.address + ")" } ?: "none"
-                Toast.makeText(requireContext(), "Paired devices: $devices", Toast.LENGTH_LONG).show()
-                android.util.Log.i(TAG, "Paired devices: $devices")
-            } catch (t: Throwable) {
-                Toast.makeText(requireContext(), "Failed to list BT devices: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-
         binding.switchSourceButton.setOnClickListener {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher)
         }
