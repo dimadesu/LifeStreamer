@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import com.dimadesu.lifestreamer.audio.ScoOrchestrator
 
 /**
  * CameraStreamerService extending StreamerService for camera streaming
@@ -155,6 +156,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var _scoStartedForPassthrough: Boolean = false
     // Flow used to request BLUETOOTH_CONNECT permission from the UI when needed
     private val bluetoothConnectPermissionRequest = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 0)
+    // SCO orchestrator helper to centralize detection/permission/start/stop logic
+    private val scoOrchestrator by lazy { ScoOrchestrator(this, serviceScope, bluetoothConnectPermissionRequest) }
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -1298,82 +1301,50 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // reflects immediately whether a BT mic is available. This makes the
                 // toggle feel responsive even before monitoring/streaming starts.
                 if (currentStreamer == null || currentStreamer.isStreamingFlow.value != true) {
-                    // Fire-and-forget connectivity check
+                    // Fire-and-forget connectivity check using the orchestrator helper
                     serviceScope.launch(Dispatchers.Default) {
                         try {
-                            val ok = attemptScoConnectivityCheck()
-                            if (!ok) {
-                                // Revert policy and emit failed state so UI updates
-                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
-                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                            scoStateFlow.tryEmit(ScoState.TRYING)
+                            val btDevice = scoOrchestrator.detectBtInputDevice()
+                            if (btDevice == null) {
+                                Log.i(TAG, "Connectivity check: no BT input device detected")
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false)
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                scoStateFlow.tryEmit(ScoState.FAILED)
+                                return@launch
                             }
+
+                            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
+                            if (!scoOrchestrator.ensurePermission()) {
+                                Log.i(TAG, "Connectivity check: permission missing, requested UI")
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false)
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                scoStateFlow.tryEmit(ScoState.FAILED)
+                                return@launch
+                            }
+
+                            val connected = scoOrchestrator.startScoAndWait(3000)
+                            if (!connected) {
+                                Log.i(TAG, "Connectivity check: SCO did not connect")
+                                scoOrchestrator.stopScoQuietly()
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false)
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                scoStateFlow.tryEmit(ScoState.FAILED)
+                                return@launch
+                            }
+
+                            // Success - stop SCO (don't keep it running) and report USING_BT briefly
+                            scoOrchestrator.stopScoQuietly()
+                            scoStateFlow.tryEmit(ScoState.USING_BT)
                         } catch (t: Throwable) {
                             Log.w(TAG, "Connectivity check failed: ${t.message}")
-                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
-                            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                            try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false)
+                            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                            scoStateFlow.tryEmit(ScoState.FAILED)
                         }
                     }
                 }
             } catch (_: Throwable) {}
-        }
-    }
-
-    /**
-     * Quick connectivity check used when the user toggles Bluetooth mic ON.
-     * Attempts to detect a BT SCO input device, checks permission on S+, and
-     * tries starting SCO briefly to verify connectivity. Returns true if SCO
-     * connected, false otherwise. This does NOT switch the streamer's audio
-     * source — it only validates availability so the UI can update.
-     */
-    private suspend fun attemptScoConnectivityCheck(): Boolean {
-        try {
-            scoStateFlow.tryEmit(ScoState.TRYING)
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: run {
-                scoStateFlow.tryEmit(ScoState.FAILED)
-                return false
-            }
-
-            // Detect BT input device
-            val btDevice = audioManager
-                .getDevices(AudioManager.GET_DEVICES_INPUTS)
-                .firstOrNull { d -> try { d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } catch (_: Throwable) { false } }
-            if (btDevice == null) {
-                Log.i(TAG, "Connectivity check: no BT input device detected")
-                scoStateFlow.tryEmit(ScoState.FAILED)
-                return false
-            }
-
-            // Check permission for S+
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val granted = ContextCompat.checkSelfPermission(this@CameraStreamerService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                if (!granted) {
-                    Log.i(TAG, "Connectivity check: BLUETOOTH_CONNECT not granted, requesting UI")
-                    try { bluetoothConnectPermissionRequest.tryEmit(Unit) } catch (_: Throwable) {}
-                    scoStateFlow.tryEmit(ScoState.FAILED)
-                    return false
-                }
-            }
-
-            // Start SCO and wait briefly
-            try { audioManager.startBluetoothSco() } catch (_: Throwable) { /* ignore */ }
-            val connected = waitForScoConnected(this@CameraStreamerService, 3000)
-            if (connected) {
-                Log.i(TAG, "Connectivity check: SCO connected")
-                try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
-                scoStateFlow.tryEmit(ScoState.USING_BT)
-                // Don't persist preferred device here; caller handles policy
-                return true
-            }
-            Log.i(TAG, "Connectivity check: SCO did not connect")
-            try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
-            scoStateFlow.tryEmit(ScoState.FAILED)
-            return false
-        } catch (t: Throwable) {
-            Log.w(TAG, "attemptScoConnectivityCheck failed: ${t.message}")
-            try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
-            return false
         }
     }
 
@@ -1418,63 +1389,36 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     if (com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
                         // Notify UI we are attempting SCO for passthrough
                         try { scoStateFlow.tryEmit(ScoState.TRYING) } catch (_: Throwable) {}
-                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                        if (audioManager != null) {
-                            // Detect a Bluetooth SCO input device
-                            val btDevice = audioManager
-                                .getDevices(AudioManager.GET_DEVICES_INPUTS)
-                                .firstOrNull { d -> try { d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } catch (_: Throwable) { false } }
-
-                                if (btDevice != null) {
-                                    com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
-                                    try {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                            val granted = ContextCompat.checkSelfPermission(this@CameraStreamerService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                                            if (!granted) {
-                                                Log.w(TAG, "Passthrough SCO: BLUETOOTH_CONNECT not granted - requesting from UI")
-                                                try { bluetoothConnectPermissionRequest.tryEmit(Unit) } catch (_: Throwable) {}
-                                                // Clear preferred device and emit failure so UI doesn't stay in TRYING
-                                                try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
-                                            } else {
-                                                try { audioManager.startBluetoothSco() } catch (t: Throwable) { Log.w(TAG, "Passthrough SCO: startBluetoothSco failed: ${t.message}") }
-                                                val connected = waitForScoConnected(this@CameraStreamerService, 4000)
-                                                if (connected) {
-                                                    try { _scoStartedForPassthrough = true } catch (_: Throwable) {}
-                                                    Log.i(TAG, "Passthrough SCO: SCO connected, will prefer BT input")
-                                                    try { scoStateFlow.tryEmit(ScoState.USING_BT) } catch (_: Throwable) {}
-                                                } else {
-                                                    Log.i(TAG, "Passthrough SCO: SCO did not connect - will use mic")
-                                                    try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
-                                                    com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
-                                                    try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
-                                                }
-                                            }
-                                        } else {
-                                            // Pre-S: start SCO without runtime permission check
-                                            try { audioManager.startBluetoothSco() } catch (t: Throwable) { Log.w(TAG, "Passthrough SCO: startBluetoothSco failed: ${t.message}") }
-                                            val connected = waitForScoConnected(this@CameraStreamerService, 4000)
-                                            if (connected) {
-                                                try { _scoStartedForPassthrough = true } catch (_: Throwable) {}
-                                                Log.i(TAG, "Passthrough SCO: SCO connected (pre-S), will prefer BT input")
-                                                try { scoStateFlow.tryEmit(ScoState.USING_BT) } catch (_: Throwable) {}
-                                            } else {
-                                                Log.i(TAG, "Passthrough SCO: SCO did not connect (pre-S) - will use mic")
-                                                try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
-                                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
-                                                try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
-                                            }
-                                        }
-                                    } catch (t: Throwable) {
-                                        Log.w(TAG, "Passthrough SCO negotiation failed: ${t.message}")
-                                        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
-                                        try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
-                                    }
+                        val btDevice = scoOrchestrator.detectBtInputDevice()
+                        if (btDevice != null) {
+                            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
+                            try {
+                                if (!scoOrchestrator.ensurePermission()) {
+                                    Log.w(TAG, "Passthrough SCO: permission missing, emitted request and failing")
+                                    com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                    scoStateFlow.tryEmit(ScoState.FAILED)
                                 } else {
-                                    Log.i(TAG, "Passthrough SCO: no BT input device detected - will use built-in mic")
-                                    try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null) } catch (_: Throwable) {}
-                                    try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                                    val connected = scoOrchestrator.startScoAndWait(4000)
+                                    if (connected) {
+                                        _scoStartedForPassthrough = true
+                                        Log.i(TAG, "Passthrough SCO: SCO connected, will prefer BT input")
+                                        scoStateFlow.tryEmit(ScoState.USING_BT)
+                                    } else {
+                                        Log.i(TAG, "Passthrough SCO: SCO did not connect - will use mic")
+                                        scoOrchestrator.stopScoQuietly()
+                                        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                        scoStateFlow.tryEmit(ScoState.FAILED)
+                                    }
                                 }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Passthrough SCO negotiation failed: ${t.message}")
+                                com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                                scoStateFlow.tryEmit(ScoState.FAILED)
+                            }
+                        } else {
+                            Log.i(TAG, "Passthrough SCO: no BT input device detected - will use built-in mic")
+                            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+                            scoStateFlow.tryEmit(ScoState.FAILED)
                         }
                     }
                 } catch (t: Throwable) {
@@ -1807,18 +1751,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             return
         }
 
-        // Ensure we have a preferred BT device. If not set yet, try to detect one now.
+        // Ensure we have a preferred BT device. If not set yet, try to detect one now
         var preferred = try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.getPreferredDevice() } catch (_: Throwable) { null }
         if (preferred == null) {
             try {
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                val btDevice = audioManager
-                    ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
-                    ?.firstOrNull { d ->
-                        try {
-                            d.isSource && d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                        } catch (_: Throwable) { false }
-                    }
+                val btDevice = scoOrchestrator.detectBtInputDevice()
                 if (btDevice != null) {
                     com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(btDevice)
                     preferred = btDevice
@@ -1850,43 +1787,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
                 Log.i(TAG, "SCO orchestration: starting negotiation for device id=${preferred?.id ?: -1}")
 
-                // Request BLUETOOTH_CONNECT on S+ before attempting SCO
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val granted = ContextCompat.checkSelfPermission(this@CameraStreamerService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                    if (!granted) {
-                        Log.w(TAG, "SCO orchestration: BLUETOOTH_CONNECT not granted - requesting from UI and aborting automatic SCO")
-                        try { bluetoothConnectPermissionRequest.tryEmit(Unit) } catch (_: Throwable) {}
-                        try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
-                        return
-                    }
-                }
-
-                // Start SCO and wait for connected broadcast
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                if (audioManager == null) {
-                    Log.w(TAG, "SCO orchestration: AudioManager unavailable")
-                    try { scoStateFlow.tryEmit(ScoState.FAILED) } catch (_: Throwable) {}
+                // Request BLUETOOTH_CONNECT on S+ before attempting SCO using orchestrator
+                if (!scoOrchestrator.ensurePermission()) {
+                    Log.w(TAG, "SCO orchestration: permission missing - requested UI and aborting automatic SCO")
+                    scoStateFlow.tryEmit(ScoState.FAILED)
                     return
                 }
 
-                try {
-                    audioManager.startBluetoothSco()
-                } catch (t: Throwable) {
-                    Log.w(TAG, "SCO orchestration: startBluetoothSco failed: ${t.message}")
-                }
-
-                // Wait up to 4s for SCO connected
-                val connected = waitForScoConnected(this@CameraStreamerService, 4000)
+                val connected = scoOrchestrator.startScoAndWait(4000)
                 if (!connected) {
                     Log.i(TAG, "SCO orchestration: SCO did not connect - leaving mic source")
-                    try { audioManager.stopBluetoothSco() } catch (_: Throwable) {}
-                    try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
-                    // Recreate mic source to ensure audio session is clean
-                    try {
-                        (streamerInstance as? IWithAudioSource)?.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory())
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "SCO orchestration: failed to reset mic after SCO failure: ${t.message}")
-                    }
+                    scoOrchestrator.stopScoQuietly()
+                    try { (streamerInstance as? IWithAudioSource)?.setAudioSource(io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory()) } catch (t: Throwable) { Log.w(TAG, "SCO orchestration: failed to reset mic after SCO failure: ${t.message}") }
                     scoStateFlow.tryEmit(ScoState.FAILED)
                     return
                 }
