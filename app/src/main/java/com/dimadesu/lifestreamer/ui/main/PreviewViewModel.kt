@@ -118,6 +118,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     @SuppressLint("StaticFieldLeak")
     private var streamerService: CameraStreamerService? = null
 
+    // Direct service binder reference for invoking service APIs safely
+    private var serviceBinder: CameraStreamerService.CameraStreamerServiceBinder? = null
+
     /**
      * Public getter for the service for foreground recovery
      */
@@ -231,29 +234,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         try {
             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
         } catch (_: Throwable) {}
-        // If bound to service, notify it so it can apply the policy immediately
+        // If we have a direct binder, call it. Otherwise rely on the config being applied
         try {
-            // serviceConnection holds the active connection with a binder
-            val conn = serviceConnection
-            if (conn != null) {
-                // Retrieve binder via the currently bound service reference if available
-                val svc = streamerService
-                if (svc != null) {
-                    try {
-                        // Use the binder if possible (safe cast)
-                        val binderField = svc::class.java.getDeclaredField("customBinder")
-                        binderField.isAccessible = true
-                        val binder = binderField.get(svc)
-                        if (binder is com.dimadesu.lifestreamer.services.CameraStreamerService.CameraStreamerServiceBinder) {
-                            binder.setUseBluetoothMic(enabled)
-                        }
-                    } catch (_: Throwable) {
-                        // Fallback: try calling service method directly
-                        try { svc.applyBluetoothPolicy(enabled) } catch (_: Throwable) {}
-                    }
-                }
-            }
-        } catch (_: Throwable) {}
+            serviceBinder?.setUseBluetoothMic(enabled)
+        } catch (_: Throwable) {
+            // Best-effort only: nothing to do if binder isn't available
+        }
     }
 
     // Data-binding getter expected by generated binding code
@@ -753,6 +739,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 if (binder is CameraStreamerService.CameraStreamerServiceBinder) {
                     streamerService = binder.getService()
+                    // Keep direct binder reference for quick API calls
+                    serviceBinder = binder
                     serviceStreamer = binder.streamer as SingleStreamer
                     
                     // Observe centralized reconnection status message from service
@@ -872,6 +860,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.w(TAG, "CameraStreamerService disconnected: $name")
                 serviceStreamer = null
                 streamerService = null
+                serviceBinder = null
                 streamerFlow.value = null
                 _serviceReady.value = false
                 // Ensure UI status is cleared when the service disconnects
