@@ -1222,18 +1222,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try { Log.d(TAG, "Binder.setMuted called: isMuted=$isMuted") } catch (_: Throwable) {}
             this@CameraStreamerService.setMuted(isMuted)
         }
-        // Start audio passthrough monitoring
-        fun startAudioPassthrough() {
-            this@CameraStreamerService.startAudioPassthrough()
-        }
-        // Stop audio passthrough monitoring
-        fun stopAudioPassthrough() {
-            this@CameraStreamerService.stopAudioPassthrough()
-        }
-        // Expose current passthrough running state for Java consumers
-        // NOTE: This is a synchronous snapshot of the current state. Prefer collecting
-        // the `isPassthroughRunning` StateFlow for reactive updates where possible.
-        fun isPassthroughRunning(): Boolean = this@CameraStreamerService._isPassthroughRunning.value
+        // Note: audio passthrough control is intentionally not exposed via Binder
+        // to keep the service API surface minimal. Bound clients can call
+        // `getService()` and control passthrough via the returned service instance
+        // when they hold a direct reference.
         // Expose SCO state flow for UI
         fun scoStateFlow() = this@CameraStreamerService.scoStateFlow.asSharedFlow()
         // Allow bound clients to enable/disable Bluetooth mic policy at runtime
