@@ -149,6 +149,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // SCO negotiation state exposed to UI
     private val _scoStateLiveData = MutableLiveData<String>(null)
     val scoStateLiveData: LiveData<String> get() = _scoStateLiveData
+    // LiveData event to notify UI to request BLUETOOTH_CONNECT permission
+    private val _bluetoothConnectRequestLiveData = MutableLiveData<Unit?>(null)
+    val bluetoothConnectRequestLiveData: LiveData<Unit?> get() = _bluetoothConnectRequestLiveData
+
+    fun clearBluetoothConnectRequest() {
+        _bluetoothConnectRequestLiveData.postValue(null)
+    }
     
     // Remember last used camera ID when switching to RTMP/bitmap sources
     private var lastUsedCameraId: String? = null
@@ -833,6 +840,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 scoFlow.collect { state ->
                                     try { _scoStateLiveData.postValue(state.name) } catch (_: Throwable) {}
                                 }
+                            }
+                            // Collect BLUETOOTH_CONNECT permission requests from service
+                            try {
+                                val permFlow = binder.bluetoothConnectPermissionRequests()
+                                viewModelScope.launch {
+                                    permFlow.collect {
+                                        try { _bluetoothConnectRequestLiveData.postValue(Unit) } catch (_: Throwable) {}
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to collect BLUETOOTH_CONNECT requests: ${t.message}")
                             }
                         } catch (t: Throwable) {
                             Log.w(TAG, "Failed to collect SCO state flow from service: ${t.message}")

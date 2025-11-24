@@ -153,6 +153,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     val isPassthroughRunning = _isPassthroughRunning.asStateFlow()
     // Tracks if we started SCO specifically for passthrough monitoring
     private var _scoStartedForPassthrough: Boolean = false
+    // Flow used to request BLUETOOTH_CONNECT permission from the UI when needed
+    private val bluetoothConnectPermissionRequest = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 0)
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -1228,6 +1230,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // to keep the service API surface minimal. Bound clients can call
         // `getService()` and control passthrough via the returned service instance
         // when they hold a direct reference.
+        // Expose a flow that will request BLUETOOTH_CONNECT permission from the UI
+        fun bluetoothConnectPermissionRequests() = this@CameraStreamerService.bluetoothConnectPermissionRequest.asSharedFlow()
         // Expose SCO state flow for UI
         fun scoStateFlow() = this@CameraStreamerService.scoStateFlow.asSharedFlow()
         // Allow bound clients to enable/disable Bluetooth mic policy at runtime
@@ -1348,7 +1352,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                         val granted = ContextCompat.checkSelfPermission(this@CameraStreamerService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
                                         if (!granted) {
-                                            Log.w(TAG, "Passthrough SCO: BLUETOOTH_CONNECT not granted - skipping automatic SCO")
+                                            Log.w(TAG, "Passthrough SCO: BLUETOOTH_CONNECT not granted - requesting from UI")
+                                            try { bluetoothConnectPermissionRequest.tryEmit(Unit) } catch (_: Throwable) {}
+                                            // Skip automatic SCO for now; UI can request permission and retry
                                         } else {
                                             try { audioManager.startBluetoothSco() } catch (t: Throwable) { Log.w(TAG, "Passthrough SCO: startBluetoothSco failed: ${t.message}") }
                                             val connected = waitForScoConnected(this@CameraStreamerService, 4000)

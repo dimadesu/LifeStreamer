@@ -76,6 +76,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
+    // BLUETOOTH_CONNECT permission launcher
+    private lateinit var bluetoothConnectLauncher: ActivityResultLauncher<String>
     // UI messages from service (notification-start feedback)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +85,16 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
         // Initialize MediaProjection launcher with helper
         mediaProjectionLauncher = previewViewModel.mediaProjectionHelper.registerLauncher(this)
+        // Initialize BLUETOOTH_CONNECT launcher
+        bluetoothConnectLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted) {
+                Toast.makeText(requireContext(), "BLUETOOTH_CONNECT granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), "BLUETOOTH_CONNECT denied", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun onCreateView(
@@ -159,6 +171,21 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             message?.let {
                 Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
                 previewViewModel.clearToastMessage() // Clear after showing to prevent re-show on rotation
+            }
+        }
+
+        // Observe service requests to ask BLUETOOTH_CONNECT permission
+        previewViewModel.bluetoothConnectRequestLiveData.observe(viewLifecycleOwner) { req ->
+            req?.let {
+                // Launch permission request only if we don't already have it
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val granted = ContextCompat.checkSelfPermission(requireContext(), android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        bluetoothConnectLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+                    }
+                }
+                // Clear the event by posting null so it doesn't retrigger
+                previewViewModel.clearBluetoothConnectRequest()
             }
         }
 
