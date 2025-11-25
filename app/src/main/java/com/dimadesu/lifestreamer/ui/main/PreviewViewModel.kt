@@ -842,7 +842,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                                     // If SCO negotiation failed, revert user toggle and notify UI
                                     try {
-                                        val failedEnum = com.dimadesu.lifestreamer.services.CameraStreamerService.ScoState.FAILED
+                                        val failedEnum = com.dimadesu.lifestreamer.audio.BluetoothAudioManager.ScoState.FAILED
                                         if (state == failedEnum) {
                                             // Update UI toggle
                                             _useBluetoothMic.postValue(false)
