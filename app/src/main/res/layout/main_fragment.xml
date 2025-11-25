@@ -136,7 +136,8 @@
                     android:layout_height="wrap_content"
                     android:text="BLUE &#x1F9B7; &#x1F3A4;"
                     android:onClick="@{() -> viewmodel.setUseBluetoothMic(!viewmodel.useBluetoothMic.getValue())}"
-                    android:backgroundTint='@{viewmodel.useBluetoothMic.getValue() ? @color/active_button_green : @color/button_gray}' />
+                    android:backgroundTint='@{viewmodel.useBluetoothMic.getValue() ? @color/active_button_green : @color/button_gray}'
+                    android:visibility="@{viewmodel.showBluetoothToggle ? android.view.View.VISIBLE : android.view.View.GONE}" />
 
             </LinearLayout>
 

@@ -235,6 +235,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // UI toggle: Use Bluetooth mic when available
     private val _useBluetoothMic = MutableLiveData<Boolean>(com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled())
     val useBluetoothMic: LiveData<Boolean> get() = _useBluetoothMic
+    
+    // BT toggle visibility - hide when using MediaProjection audio (RTMP/Bitmap sources)
+    private val _showBluetoothToggle = MutableLiveData<Boolean>(true)
+    val showBluetoothToggle: LiveData<Boolean> get() = _showBluetoothToggle
 
     fun setUseBluetoothMic(enabled: Boolean) {
         _useBluetoothMic.postValue(enabled)
@@ -2479,6 +2483,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _userToggledRtmp.postValue(true)
                     _userToggledUvc.postValue(false)
                     
+                    // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
+                    _showBluetoothToggle.postValue(false)
+                    
                     // Suppress passthrough observer updates during source switch
                     // to prevent monitor toggle from resetting to OFF
                     suppressPassthroughObserver = true
@@ -2576,6 +2583,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     // Mark that user toggled RTMP OFF (back to camera)
                     _userToggledRtmp.postValue(false)
+                    
+                    // Show BT toggle - Camera uses microphone audio
+                    _showBluetoothToggle.postValue(true)
                     
                     // Clear suppress flag (in case it was set and RTMP never connected)
                     suppressPassthroughObserver = false
