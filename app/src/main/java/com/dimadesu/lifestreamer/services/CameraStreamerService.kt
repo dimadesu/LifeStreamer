@@ -1228,9 +1228,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
     private val customBinder = CameraStreamerServiceBinder()
 
-    // Helper job to serialize passthrough restarts
-    private var passthroughRestartJob: Job? = null
-
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
         return customBinder

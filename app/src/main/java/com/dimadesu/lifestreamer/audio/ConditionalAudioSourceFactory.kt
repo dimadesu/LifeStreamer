@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
-import com.dimadesu.lifestreamer.audio.AppBluetoothSourceFactory
 
 class ConditionalAudioSourceFactory : IAudioSourceInternal.Factory {
     private val TAG = "ConditionalAudioSourceFactory"
