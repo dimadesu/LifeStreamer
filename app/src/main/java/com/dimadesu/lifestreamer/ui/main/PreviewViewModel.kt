@@ -288,6 +288,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Monitor audio toggle for RTMP sources (OFF by default)
     private val _isMonitorAudioOn: MutableLiveData<Boolean> = MutableLiveData(false)
     val isMonitorAudioOn: LiveData<Boolean> = _isMonitorAudioOn
+    // Flag to suppress passthrough observer updates during RTMP source switch
+    private var suppressPassthroughObserver = false
     private var rtmpBufferingStartTime = 0L
     private var bufferingCheckJob: kotlinx.coroutines.Job? = null
     private var isHandlingDisconnection = false // Guard flag to prevent duplicate disconnection handling
@@ -793,20 +795,38 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.w(TAG, "Failed to collect bitrate from service: ${t.message}")
                     }
                     // Observe passthrough running state so UI can reflect actual service state
+                    // Only sync when NOT on RTMP source (RTMP uses ExoPlayer volume, not passthrough)
                     try {
                         val svc = binder.getService()
                         // First set UI to current snapshot so UI matches service immediately
+                        // But only if not on RTMP source
                         try {
-                            val snapshot = svc.isPassthroughRunning.value
-                            _isMonitorAudioOn.postValue(snapshot)
-                            Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
+                            val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+                            val isRtmpSource = videoSource is RTMPVideoSource
+                            if (!isRtmpSource) {
+                                val snapshot = svc.isPassthroughRunning.value
+                                _isMonitorAudioOn.postValue(snapshot)
+                                Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
+                            } else {
+                                Log.i(TAG, "Skipping passthrough snapshot sync (RTMP source uses ExoPlayer volume)")
+                            }
                         } catch (_: Throwable) {}
 
-                        // Then observe for updates
+                        // Then observe for updates (only sync when not on RTMP and not during source switch)
                         viewModelScope.launch {
                             svc.isPassthroughRunning.collect { running ->
-                                _isMonitorAudioOn.postValue(running)
-                                Log.i(TAG, "Service passthrough running state observed: $running")
+                                if (suppressPassthroughObserver) {
+                                    Log.d(TAG, "Suppressing passthrough state change during source switch (running=$running)")
+                                    return@collect
+                                }
+                                val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+                                val isRtmpSource = videoSource is RTMPVideoSource
+                                if (!isRtmpSource) {
+                                    _isMonitorAudioOn.postValue(running)
+                                    Log.i(TAG, "Service passthrough running state observed: $running")
+                                } else {
+                                    Log.d(TAG, "Ignoring passthrough state change while on RTMP source (running=$running)")
+                                }
                             }
                         }
                     } catch (t: Throwable) {
@@ -2245,6 +2265,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         currentRtmpPlayer = player
         
+        // Clear the suppress flag now that RTMP switch is complete
+        suppressPassthroughObserver = false
+        
         // Reapply monitor audio state to the new player instance
         // This handles cases where ExoPlayer is recreated (e.g., after app resume when not streaming)
         if (_isMonitorAudioOn.value == true) {
@@ -2456,6 +2479,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _userToggledRtmp.postValue(true)
                     _userToggledUvc.postValue(false)
                     
+                    // Suppress passthrough observer updates during source switch
+                    // to prevent monitor toggle from resetting to OFF
+                    suppressPassthroughObserver = true
+                    
+                    // Stop mic passthrough when switching to RTMP (RTMP uses ExoPlayer for audio monitoring)
+                    // Keep monitor toggle state - it will control ExoPlayer volume instead
+                    if (_isMonitorAudioOn.value == true) {
+                        service?.stopAudioPassthrough()
+                        Log.i(TAG, "Stopped mic passthrough when switching to RTMP (will use ExoPlayer volume instead)")
+                    }
+                    
                     // Remember current camera ID before switching away
                     lastUsedCameraId = videoSource.cameraId
                     Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
@@ -2542,6 +2576,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     // Mark that user toggled RTMP OFF (back to camera)
                     _userToggledRtmp.postValue(false)
+                    
+                    // Clear suppress flag (in case it was set and RTMP never connected)
+                    suppressPassthroughObserver = false
 
                     // Clear RTMP status message FIRST before cancelling job
                     // (job might be in middle of delay showing error message)
