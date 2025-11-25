@@ -218,7 +218,8 @@
                 android:textColor="@android:color/white"
                 android:textSize="14sp"
                 android:text='@{viewmodel.scoStateLiveData != null ? ("SCO: " + viewmodel.scoStateLiveData) : "SCO: unknown"}'
-                android:paddingStart="6dp" />
+                android:paddingStart="6dp"
+                android:visibility="gone" />
 
         </LinearLayout>
 
