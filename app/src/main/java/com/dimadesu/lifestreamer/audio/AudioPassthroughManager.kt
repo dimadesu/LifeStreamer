@@ -106,22 +106,15 @@ class AudioPassthroughManager(
                 val record = builder.build()
                 
                 // Set preferred device on AudioRecord instance (API 23+)
-                // For BT: set BT device. For built-in: explicitly set built-in mic to override any cached BT routing
+                // For BT: set BT device. Otherwise: let system choose (will use USB if connected, else built-in)
                 try {
                     if (currentDevice != null) {
                         val success = record.setPreferredDevice(currentDevice)
                         Log.i(TAG, "Set preferred device on AudioRecord: ${currentDevice.productName}, success=$success")
                     } else {
-                        // Find built-in mic and set it explicitly to force away from BT
-                        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                        val devices = audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS)
-                        val builtInMic = devices?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
-                        if (builtInMic != null) {
-                            val success = record.setPreferredDevice(builtInMic)
-                            Log.i(TAG, "Set preferred device on AudioRecord: built-in mic (${builtInMic.productName}), success=$success")
-                        } else {
-                            Log.w(TAG, "Could not find built-in mic device")
-                        }
+                        // Don't set preferred device - let system routing decide
+                        // This allows USB audio to be used when connected
+                        Log.i(TAG, "No preferred device set - using system default audio routing")
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "Failed to set preferred device: ${e.javaClass.simpleName}: ${e.message}")
