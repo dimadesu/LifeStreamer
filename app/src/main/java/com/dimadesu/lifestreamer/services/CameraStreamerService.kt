@@ -860,6 +860,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             )
             Log.i(TAG, "Foreground service reinforced with all required service types")
             try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
+            
+            // Trigger BT mic connection if toggle is ON
+            bluetoothAudioManager.onStreamingStarted(streamer)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
             try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}

@@ -115,6 +115,32 @@ class BluetoothAudioManager(
     }
 
     /**
+     * Called when streaming starts. If BT toggle is ON, attempts to connect BT mic.
+     * If connection fails, reverts the toggle and caller should show a toast.
+     * 
+     * @param streamer The streamer instance
+     * @return true if BT is not enabled or connection succeeded, false if connection failed (toggle reverted)
+     */
+    fun onStreamingStarted(streamer: ISingleStreamer?) {
+        if (!BluetoothAudioConfig.isEnabled()) {
+            Log.i(TAG, "onStreamingStarted: BT toggle is OFF, skipping")
+            return
+        }
+        
+        if (streamer == null) {
+            Log.w(TAG, "onStreamingStarted: streamer is null")
+            return
+        }
+        
+        Log.i(TAG, "onStreamingStarted: BT toggle is ON, attempting SCO negotiation")
+        scoSwitchJob?.cancel()
+        scoSwitchJob = scope.launch(Dispatchers.Default) {
+            delay(200)
+            attemptScoNegotiationAndSwitch(streamer)
+        }
+    }
+
+    /**
      * Attempt SCO negotiation and switch streamer's audio source to Bluetooth.
      * This is the main orchestration flow for streaming scenarios.
      */
