@@ -2596,23 +2596,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     bufferingCheckJob = null
                     rtmpBufferingStartTime = 0L
                     
-                    // Reset monitor audio to OFF when switching away from RTMP
-                    // If the service is bound, prefer the service's passthrough state
-                    // to avoid overriding the UI after a rebind (e.g., when app is
-                    // restarted from notification while service continues running).
-                    try {
-                        val svc = streamerService
-                        if (svc != null) {
-                            val running = svc.isPassthroughRunning.value
-                            _isMonitorAudioOn.postValue(running)
-                            Log.i(TAG, "Preserving service passthrough state on source switch: $running")
-                        } else {
-                            _isMonitorAudioOn.postValue(false)
-                        }
-                    } catch (t: Throwable) {
-                        _isMonitorAudioOn.postValue(false)
-                    }
-                    
                     // Stop monitoring RTMP connection
                     rtmpDisconnectListener?.let { listener ->
                         try {
