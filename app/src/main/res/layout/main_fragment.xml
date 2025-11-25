@@ -134,9 +134,9 @@
                     android:id="@+id/bluetoothToggleButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:minWidth="50dp"
                     android:text="&#x1F3A4;"
                     android:drawableStart="@drawable/ic_bluetooth"
-                    android:drawablePadding="4dp"
                     android:onClick="@{() -> viewmodel.setUseBluetoothMic(!viewmodel.useBluetoothMic.getValue())}"
                     android:backgroundTint='@{viewmodel.useBluetoothMic.getValue() ? @color/active_button_green : @color/button_gray}'
                     android:visibility="@{viewmodel.showBluetoothToggle ? android.view.View.VISIBLE : android.view.View.GONE}" />
