@@ -33,7 +33,7 @@ import kotlin.coroutines.resume
  * when building `AudioRecord` by using reflection to call `setPreferredDevice` on the builder
  * when supported.
  */
-class AppBluetoothSource(private val context: Context, private val preferredDevice: AudioDeviceInfo?) :
+class BluetoothAudioSource(private val context: Context, private val preferredDevice: AudioDeviceInfo?) :
     IAudioSourceInternal, IAudioFrameSourceInternal, SuspendStreamable, SuspendConfigurable<AudioSourceConfig>, Releasable {
 
     private var audioRecord: AudioRecord? = null
@@ -121,14 +121,14 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                         val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
                         if (granted) {
-                            android.util.Log.i("AppBluetoothSource", "Calling startBluetoothSco() (with BLUETOOTH_CONNECT granted)")
+                            android.util.Log.i("BluetoothAudioSource", "Calling startBluetoothSco() (with BLUETOOTH_CONNECT granted)")
                             audioManager.startBluetoothSco()
                             scoStarted = true
                         } else {
-                            android.util.Log.w("AppBluetoothSource", "BLUETOOTH_CONNECT permission not granted; cannot start SCO on S+")
+                            android.util.Log.w("BluetoothAudioSource", "BLUETOOTH_CONNECT permission not granted; cannot start SCO on S+")
                         }
                     } else {
-                        android.util.Log.i("AppBluetoothSource", "Calling startBluetoothSco() (pre-S)")
+                        android.util.Log.i("BluetoothAudioSource", "Calling startBluetoothSco() (pre-S)")
                         audioManager.startBluetoothSco()
                         scoStarted = true
                     }
@@ -137,11 +137,11 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
                 // Try to set communication device reflectively (if available)
                 try {
                     val m = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
-                    android.util.Log.i("AppBluetoothSource", "Invoking AudioManager.setCommunicationDevice via reflection")
+                    android.util.Log.i("BluetoothAudioSource", "Invoking AudioManager.setCommunicationDevice via reflection")
                     m.invoke(audioManager, device)
-                    android.util.Log.i("AppBluetoothSource", "setCommunicationDevice invoked")
+                    android.util.Log.i("BluetoothAudioSource", "setCommunicationDevice invoked")
                 } catch (t: Throwable) {
-                    android.util.Log.w("AppBluetoothSource", "setCommunicationDevice reflection failed: ${t.message}")
+                    android.util.Log.w("BluetoothAudioSource", "setCommunicationDevice reflection failed: ${t.message}")
                 }
             }
         } catch (_: Throwable) {}
@@ -150,7 +150,7 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
             val connected = waitForScoConnected(context, 3000)
             if (!connected) {
                 // SCO didn't connect in time; still try to record but log.
-                try { android.util.Log.w("AppBluetoothSource", "SCO did not connect before timeout") } catch (_: Throwable) {}
+                try { android.util.Log.w("BluetoothAudioSource", "SCO did not connect before timeout") } catch (_: Throwable) {}
             }
         }
 
@@ -234,14 +234,14 @@ class AppBluetoothSource(private val context: Context, private val preferredDevi
 }
 
 /**
- * Factory for `AppBluetoothSource` that matches `IAudioSourceInternal.Factory`.
+ * Factory for `BluetoothAudioSource` that matches `IAudioSourceInternal.Factory`.
  */
-class AppBluetoothSourceFactory(private val device: AudioDeviceInfo?) : IAudioSourceInternal.Factory {
+class BluetoothAudioSourceFactory(private val device: AudioDeviceInfo?) : IAudioSourceInternal.Factory {
     override suspend fun create(context: Context): IAudioSourceInternal {
-        return AppBluetoothSource(context.applicationContext, device)
+        return BluetoothAudioSource(context.applicationContext, device)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        return source is AppBluetoothSource
+        return source is BluetoothAudioSource
     }
 }

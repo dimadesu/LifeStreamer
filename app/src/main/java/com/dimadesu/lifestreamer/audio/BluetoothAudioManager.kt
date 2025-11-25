@@ -197,7 +197,7 @@ class BluetoothAudioManager(
             // Switch to Bluetooth source
             try {
                 (streamerInstance as? IWithAudioSource)?.setAudioSource(
-                    AppBluetoothSourceFactory(preferred)
+                    BluetoothAudioSourceFactory(preferred)
                 )
                 Log.i(TAG, "SCO orchestration: setAudioSource called for Bluetooth factory")
             } catch (t: Throwable) {
