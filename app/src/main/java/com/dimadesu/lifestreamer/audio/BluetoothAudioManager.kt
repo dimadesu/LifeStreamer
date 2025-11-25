@@ -65,7 +65,7 @@ class BluetoothAudioManager(
 
     /**
      * Apply Bluetooth mic policy at runtime.
-     * When enabled: Starts monitoring for BT devices and attempts SCO negotiation if streaming.
+     * When enabled: Just saves preference. BT connection is deferred until streaming/monitoring starts.
      * When disabled: Stops SCO orchestration and reverts to built-in mic.
      * 
      * @param enabled Whether to enable Bluetooth mic preference
@@ -95,7 +95,7 @@ class BluetoothAudioManager(
                 return
             }
 
-            // If streaming, attempt SCO orchestration
+            // If streaming, attempt SCO orchestration immediately
             if (streamer != null && isStreaming) {
                 scoSwitchJob?.cancel()
                 scoSwitchJob = scope.launch(Dispatchers.Default) {
@@ -103,54 +103,14 @@ class BluetoothAudioManager(
                     attemptScoNegotiationAndSwitch(streamer)
                 }
             } else {
-                // Quick connectivity check for immediate UI feedback
-                performConnectivityCheck()
+                // Not streaming/monitoring yet - just keep toggle ON
+                // BT connection will be attempted when streaming/monitoring starts
+                Log.i(TAG, "applyPolicy: BT toggle ON, deferring connection until streaming/monitoring starts")
+                _scoStateFlow.tryEmit(ScoState.IDLE)
             }
             
             // Register device monitoring
             registerBtDeviceReceiver()
-        }
-    }
-
-    /**
-     * Performs a quick connectivity check to verify BT device availability.
-     * Updates state to USING_BT if successful, FAILED otherwise.
-     */
-    private fun performConnectivityCheck() {
-        scope.launch(Dispatchers.Default) {
-            try {
-                _scoStateFlow.tryEmit(ScoState.TRYING)
-                
-                val btDevice = scoOrchestrator.detectBtInputDevice()
-                if (btDevice == null) {
-                    Log.i(TAG, "Connectivity check: no BT input device detected")
-                    revertPolicy()
-                    return@launch
-                }
-
-                BluetoothAudioConfig.setPreferredDevice(btDevice)
-                
-                if (!scoOrchestrator.ensurePermission()) {
-                    Log.i(TAG, "Connectivity check: permission missing")
-                    revertPolicy()
-                    return@launch
-                }
-
-                val connected = scoOrchestrator.startScoAndWait(3000)
-                if (!connected) {
-                    Log.i(TAG, "Connectivity check: SCO did not connect")
-                    scoOrchestrator.stopScoQuietly()
-                    revertPolicy()
-                    return@launch
-                }
-
-                // Success - stop SCO and verify routing
-                scoOrchestrator.stopScoQuietly()
-                verifyAndEmitUsingBtOrFail(1500)
-            } catch (t: Throwable) {
-                Log.w(TAG, "Connectivity check failed: ${t.message}")
-                revertPolicy()
-            }
         }
     }
 
