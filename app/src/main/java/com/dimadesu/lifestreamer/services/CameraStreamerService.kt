@@ -1391,14 +1391,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                         if (audioManager != null) {
-                            // Stop any SCO that might be running
-                            try { audioManager.stopBluetoothSco() } catch (_: Exception) {}
-                            // Clear communication device
-                            try {
-                                val method = audioManager::class.java.getMethod("clearCommunicationDevice")
-                                method.invoke(audioManager)
-                                Log.i(TAG, "Cleared communication device (BT disabled)")
-                            } catch (_: Exception) {}
+                            // Stop any SCO that might be running - use API-appropriate method
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                // On Android S+, just clear communication device (no SCO to stop)
+                                try {
+                                    audioManager.clearCommunicationDevice()
+                                    Log.i(TAG, "Cleared communication device (BT disabled, S+)")
+                                } catch (_: Exception) {}
+                            } else {
+                                // On older versions, stop SCO explicitly
+                                try { 
+                                    @Suppress("DEPRECATION")
+                                    audioManager.stopBluetoothSco() 
+                                    Log.i(TAG, "Stopped Bluetooth SCO (BT disabled, pre-S)")
+                                } catch (_: Exception) {}
+                                // Also try to clear communication device via reflection
+                                try {
+                                    val method = audioManager::class.java.getMethod("clearCommunicationDevice")
+                                    method.invoke(audioManager)
+                                    Log.i(TAG, "Cleared communication device via reflection (BT disabled)")
+                                } catch (_: Exception) {}
+                            }
                             // Set mode to NORMAL
                             audioManager.mode = AudioManager.MODE_NORMAL
                             Log.i(TAG, "Set audio mode to NORMAL (BT disabled)")
