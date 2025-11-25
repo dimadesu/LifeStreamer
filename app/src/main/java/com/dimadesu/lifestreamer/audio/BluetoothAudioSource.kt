@@ -115,38 +115,33 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 // Do not change AudioManager.mode here; keep MODE_NORMAL to avoid residual routing issues
 
-                // Start SCO if available
+                // Start SCO - use modern API on Android S+, legacy on older versions
                 try {
-                    // On Android S+, ensure BLUETOOTH_CONNECT permission; guard calls if missing
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        // On Android S+, use setCommunicationDevice()
                         val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
                         if (granted) {
-                            android.util.Log.i("BluetoothAudioSource", "Calling startBluetoothSco() (with BLUETOOTH_CONNECT granted)")
-                            audioManager.startBluetoothSco()
-                            scoStarted = true
+                            val result = audioManager.setCommunicationDevice(device)
+                            android.util.Log.i("BluetoothAudioSource", "setCommunicationDevice result=$result for device=${device.productName}")
+                            scoStarted = result
                         } else {
-                            android.util.Log.w("BluetoothAudioSource", "BLUETOOTH_CONNECT permission not granted; cannot start SCO on S+")
+                            android.util.Log.w("BluetoothAudioSource", "BLUETOOTH_CONNECT permission not granted; cannot set communication device on S+")
                         }
                     } else {
+                        // On older versions, use deprecated startBluetoothSco()
                         android.util.Log.i("BluetoothAudioSource", "Calling startBluetoothSco() (pre-S)")
+                        @Suppress("DEPRECATION")
                         audioManager.startBluetoothSco()
                         scoStarted = true
                     }
-                } catch (_: Throwable) {}
-
-                // Try to set communication device reflectively (if available)
-                try {
-                    val m = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
-                    android.util.Log.i("BluetoothAudioSource", "Invoking AudioManager.setCommunicationDevice via reflection")
-                    m.invoke(audioManager, device)
-                    android.util.Log.i("BluetoothAudioSource", "setCommunicationDevice invoked")
-                } catch (t: Throwable) {
-                    android.util.Log.w("BluetoothAudioSource", "setCommunicationDevice reflection failed: ${t.message}")
+                } catch (e: Throwable) {
+                    android.util.Log.w("BluetoothAudioSource", "Failed to start SCO: ${e.message}")
                 }
             }
         } catch (_: Throwable) {}
-        // If we started SCO, wait for it to become connected before starting recording.
-        if (scoStarted) {
+        
+        // If we started SCO on pre-S, wait for it to become connected before starting recording.
+        if (scoStarted && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             val connected = waitForScoConnected(context, 3000)
             if (!connected) {
                 // SCO didn't connect in time; still try to record but log.
@@ -158,6 +153,11 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
         _isStreamingFlow.tryEmit(true)
     }
 
+    /**
+     * Wait for SCO to become connected (legacy API only, pre-Android S).
+     * Uses deprecated isBluetoothScoOn property which is only used on older Android versions.
+     */
+    @Suppress("DEPRECATION")
     private suspend fun waitForScoConnected(context: Context, timeoutMs: Long): Boolean {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -177,15 +177,7 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
         _isStreamingFlow.tryEmit(false)
 
         // Stop SCO if we started it
-        try {
-            if (scoStarted) {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                audioManager.stopBluetoothSco()
-                audioManager.isBluetoothScoOn = false
-                try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
-                scoStarted = false
-            }
-        } catch (_: Throwable) {}
+        stopScoIfNeeded()
     }
 
     override fun release() {
@@ -194,15 +186,33 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
         audioRecord = null
         currentConfig = null
         // Ensure SCO stopped on release
+        stopScoIfNeeded()
+    }
+
+    /**
+     * Stop SCO/communication device if we started it.
+     * Uses modern API on Android S+, legacy on older versions.
+     */
+    private fun stopScoIfNeeded() {
+        if (!scoStarted) return
+        
         try {
-            if (scoStarted) {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // On Android S+, use clearCommunicationDevice()
+                audioManager.clearCommunicationDevice()
+                android.util.Log.i("BluetoothAudioSource", "clearCommunicationDevice called")
+            } else {
+                // On older versions, use deprecated stopBluetoothSco()
+                @Suppress("DEPRECATION")
                 audioManager.stopBluetoothSco()
-                audioManager.isBluetoothScoOn = false
-                try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
-                scoStarted = false
+                android.util.Log.i("BluetoothAudioSource", "stopBluetoothSco called (pre-S)")
             }
-        } catch (_: Throwable) {}
+            try { audioManager.mode = AudioManager.MODE_NORMAL } catch (_: Throwable) {}
+            scoStarted = false
+        } catch (e: Throwable) {
+            android.util.Log.w("BluetoothAudioSource", "Failed to stop SCO: ${e.message}")
+        }
     }
 
     override fun fillAudioFrame(frame: RawFrame): RawFrame {

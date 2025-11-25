@@ -272,25 +272,24 @@ class BluetoothAudioManager(
 
     /**
      * Verify actual platform routing before emitting USING_BT state.
-     * Polls AudioManager.isBluetoothScoOn and device detection.
+     * Uses ScoOrchestrator.isScoActive() which handles API-level differences.
      * 
      * @param timeoutMs Maximum time to wait for verification
      * @param pollMs Polling interval
      * @return true if verification succeeded and USING_BT emitted, false if FAILED emitted
      */
     private suspend fun verifyAndEmitUsingBtOrFail(timeoutMs: Long = 2000, pollMs: Long = 250): Boolean {
-        val am = getAudioManager()
         val deadline = System.currentTimeMillis() + timeoutMs
         var attempt = 0
         
         while (System.currentTimeMillis() < deadline) {
             attempt++
-            val isScoOn = try { am?.isBluetoothScoOn ?: false } catch (_: Throwable) { false }
+            val isScoActive = try { scoOrchestrator.isScoActive() } catch (_: Throwable) { false }
             val btDevice = try { scoOrchestrator.detectBtInputDevice() } catch (_: Throwable) { null }
             
-            Log.d(TAG, "verifyAndEmitUsingBtOrFail: attempt=$attempt isBluetoothScoOn=$isScoOn btDeviceId=${btDevice?.id ?: -1}")
+            Log.d(TAG, "verifyAndEmitUsingBtOrFail: attempt=$attempt isScoActive=$isScoActive btDeviceId=${btDevice?.id ?: -1}")
             
-            if (isScoOn || btDevice != null) {
+            if (isScoActive || btDevice != null) {
                 _scoStateFlow.tryEmit(ScoState.USING_BT)
                 Log.i(TAG, "verifyAndEmitUsingBtOrFail: confirmed SCO routing - emitted USING_BT")
                 return true
@@ -483,28 +482,12 @@ class BluetoothAudioManager(
 
     /**
      * Stop SCO and restore normal audio routing.
+     * Uses ScoOrchestrator to handle API-level differences.
      */
     private fun stopScoAndResetAudio() {
-        val am = getAudioManager()
-        
-        // Stop SCO connection
-        try { 
-            @Suppress("DEPRECATION")
-            am?.stopBluetoothSco() 
-            Log.d(TAG, "stopBluetoothSco called")
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
-        }
-        
-        // Clear communication device on API 31+ to fully reset routing
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                am?.clearCommunicationDevice()
-                Log.d(TAG, "clearCommunicationDevice called")
-            } catch (e: Throwable) {
-                Log.w(TAG, "Failed to clear communication device: ${e.message}")
-            }
-        }
+        // Use ScoOrchestrator to stop SCO - handles API level differences
+        scoOrchestrator.stopScoQuietly()
+        Log.d(TAG, "stopScoQuietly called via ScoOrchestrator")
         
         // Reset audio mode to normal
         setAudioMode(AudioManager.MODE_NORMAL)

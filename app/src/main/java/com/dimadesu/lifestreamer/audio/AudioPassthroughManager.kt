@@ -173,24 +173,47 @@ class AudioPassthroughManager(
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                 if (audioManager != null) {
                     if (currentDevice != null) {
-                        val method = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
-                        method.invoke(audioManager, currentDevice)
-                        Log.i(TAG, "AudioManager.setCommunicationDevice set for: ${currentDevice.productName}")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            audioManager.setCommunicationDevice(currentDevice)
+                            Log.i(TAG, "AudioManager.setCommunicationDevice set for: ${currentDevice.productName}")
+                        } else {
+                            // On pre-S, use reflection as fallback
+                            try {
+                                val method = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
+                                method.invoke(audioManager, currentDevice)
+                                Log.i(TAG, "AudioManager.setCommunicationDevice set via reflection for: ${currentDevice.productName}")
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "setCommunicationDevice reflection failed: ${e.message}")
+                            }
+                        }
                     } else {
                         // Explicitly clear communication device to ensure built-in mic is used
-                        try {
-                            val clearMethod = audioManager::class.java.getMethod("clearCommunicationDevice")
-                            clearMethod.invoke(audioManager)
-                            Log.i(TAG, "AudioManager.clearCommunicationDevice called (ensuring built-in mic)")
-                        } catch (e: Throwable) {
-                            Log.w(TAG, "Failed to clear communication device: ${e.message}")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            try {
+                                audioManager.clearCommunicationDevice()
+                                Log.i(TAG, "AudioManager.clearCommunicationDevice called (ensuring built-in mic)")
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "Failed to clear communication device: ${e.message}")
+                            }
+                        } else {
+                            // On pre-S, use reflection as fallback
+                            try {
+                                val clearMethod = audioManager::class.java.getMethod("clearCommunicationDevice")
+                                clearMethod.invoke(audioManager)
+                                Log.i(TAG, "AudioManager.clearCommunicationDevice called via reflection (ensuring built-in mic)")
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "Failed to clear communication device via reflection: ${e.message}")
+                            }
                         }
-                        // Also ensure SCO is stopped
-                        try {
-                            audioManager.stopBluetoothSco()
-                            Log.i(TAG, "stopBluetoothSco called (ensuring built-in mic)")
-                        } catch (e: Throwable) {
-                            Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
+                        // Also ensure SCO is stopped (pre-S only)
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                            try {
+                                @Suppress("DEPRECATION")
+                                audioManager.stopBluetoothSco()
+                                Log.i(TAG, "stopBluetoothSco called (ensuring built-in mic, pre-S)")
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
+                            }
                         }
                         // Set mode to NORMAL
                         audioManager.mode = AudioManager.MODE_NORMAL

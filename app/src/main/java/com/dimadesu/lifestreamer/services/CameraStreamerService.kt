@@ -320,8 +320,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 .drop(1) // Skip initial emission to avoid replacing on startup
                 .collect { (config, mode) ->
                     // Only update if currently streaming with SRT endpoint
-                    if (_serviceStreamStatus.value == StreamStatus.STREAMING && 
-                        streamer is ISingleStreamer) {
+                    if (_serviceStreamStatus.value == StreamStatus.STREAMING) {
                         try {
                             val descriptor = storageRepository.endpointDescriptorFlow.first()
                             if (descriptor.type.sinkType == MediaSinkType.SRT) {
@@ -762,35 +761,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private fun getEffectiveServiceStatus(): StreamStatus {
         return try {
             val svcStatus = _serviceStreamStatus.value
-            val streamerInstance = streamer
             val reconnecting = _isReconnecting.value
+            val streamingNow = streamer.isStreamingFlow.value
             
-            if (streamerInstance != null) {
-                val streamingNow = streamerInstance.isStreamingFlow.value
-                
-                // If we're actively streaming, return STREAMING
-                if (streamingNow) return StreamStatus.STREAMING
-                
-                // If reconnecting, always show CONNECTING status
-                if (reconnecting) {
-                    return StreamStatus.CONNECTING
-                }
-                
-                // If not streaming but service status is CONNECTING, STARTING, or ERROR,
-                // respect the service status (e.g., during reconnection attempts)
-                if (svcStatus == StreamStatus.CONNECTING || 
-                    svcStatus == StreamStatus.STARTING ||
-                    svcStatus == StreamStatus.ERROR) {
-                    return svcStatus
-                }
-                
-                // Otherwise, not streaming and no special status
-                return StreamStatus.NOT_STREAMING
-            } else {
-                // Conservative: if streamer is null but service still reports STREAMING,
-                // treat as NOT_STREAMING to avoid flashing 'live' when no active streamer.
-                if (svcStatus == StreamStatus.STREAMING) StreamStatus.NOT_STREAMING else svcStatus
+            // If we're actively streaming, return STREAMING
+            if (streamingNow) return StreamStatus.STREAMING
+            
+            // If reconnecting, always show CONNECTING status
+            if (reconnecting) {
+                return StreamStatus.CONNECTING
             }
+            
+            // If not streaming but service status is CONNECTING, STARTING, or ERROR,
+            // respect the service status (e.g., during reconnection attempts)
+            if (svcStatus == StreamStatus.CONNECTING || 
+                svcStatus == StreamStatus.STARTING ||
+                svcStatus == StreamStatus.ERROR) {
+                return svcStatus
+            }
+            
+            // Otherwise, not streaming and no special status
+            return StreamStatus.NOT_STREAMING
         } catch (_: Throwable) {
             _serviceStreamStatus.value
         }
@@ -873,12 +864,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     private fun detectCurrentRotation() {
         try {
-            val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
             val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+                display?.rotation ?: Surface.ROTATION_0
             } else {
                 @Suppress("DEPRECATION")
-                windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+                (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.rotation ?: Surface.ROTATION_0
             }
             
             currentRotation = rotation
@@ -1039,21 +1029,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     private suspend fun startStreamFromConfiguredEndpoint() {
         try {
-            // Wait a short time for streamer to be available (service may be starting)
-            val currentStreamer = withTimeoutOrNull(5000) {
-                // Poll streamer until non-null or timeout
-                while (streamer == null) {
-                    delay(200)
-                }
-                streamer
-            } ?: run {
-                Log.w(TAG, "startStreamFromConfiguredEndpoint: streamer not available after waiting")
-                // Update notification to show error so user gets feedback
-                customNotificationUtils.notify(onErrorNotification(Throwable("Streamer not available")) ?: onCreateNotification())
-                // Surface critical error for UI dialogs
-                serviceScope.launch { _criticalErrors.emit("Streamer not available") }
-                return
-            }
+            // Streamer is guaranteed to be available (lazy initialized)
+            val currentStreamer = streamer
 
             // Check if sources are configured - wait for them to become available
             // Cast to IWithVideoSource and IWithAudioSource to access inputs
@@ -1391,14 +1368,27 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                         if (audioManager != null) {
-                            // Stop any SCO that might be running
-                            try { audioManager.stopBluetoothSco() } catch (_: Exception) {}
-                            // Clear communication device
-                            try {
-                                val method = audioManager::class.java.getMethod("clearCommunicationDevice")
-                                method.invoke(audioManager)
-                                Log.i(TAG, "Cleared communication device (BT disabled)")
-                            } catch (_: Exception) {}
+                            // Stop any SCO that might be running - use API-appropriate method
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                // On Android S+, just clear communication device (no SCO to stop)
+                                try {
+                                    audioManager.clearCommunicationDevice()
+                                    Log.i(TAG, "Cleared communication device (BT disabled, S+)")
+                                } catch (_: Exception) {}
+                            } else {
+                                // On older versions, stop SCO explicitly
+                                try { 
+                                    @Suppress("DEPRECATION")
+                                    audioManager.stopBluetoothSco() 
+                                    Log.i(TAG, "Stopped Bluetooth SCO (BT disabled, pre-S)")
+                                } catch (_: Exception) {}
+                                // Also try to clear communication device via reflection
+                                try {
+                                    val method = audioManager::class.java.getMethod("clearCommunicationDevice")
+                                    method.invoke(audioManager)
+                                    Log.i(TAG, "Cleared communication device via reflection (BT disabled)")
+                                } catch (_: Exception) {}
+                            }
                             // Set mode to NORMAL
                             audioManager.mode = AudioManager.MODE_NORMAL
                             Log.i(TAG, "Set audio mode to NORMAL (BT disabled)")
