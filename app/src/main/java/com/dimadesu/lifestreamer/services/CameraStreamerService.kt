@@ -860,9 +860,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             )
             Log.i(TAG, "Foreground service reinforced with all required service types")
             try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
-            
-            // Trigger BT mic connection if toggle is ON
-            bluetoothAudioManager.onStreamingStarted(streamer)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
             try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}
@@ -1257,9 +1254,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     /**
+     * Trigger Bluetooth mic activation if BT toggle is ON.
+     * Called from ViewModel when streaming starts with a camera source.
+     */
+    fun triggerBluetoothMicActivation() {
+        bluetoothAudioManager.onStreamingStarted(streamer)
+    }
+
+    /**
      * Apply Bluetooth mic policy at runtime.
      * Delegates to BluetoothAudioManager for all orchestration.
      * If audio passthrough is running, restarts it to switch audio source.
+     * 
+     * Note: BT mic only applies when using mic-based audio, not MediaProjection.
      * 
      * @param enabled true to enable Bluetooth mic, false to disable
      */
@@ -1267,7 +1274,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val isStreaming = streamer?.isStreamingFlow?.value == true
         val passthroughWasRunning = _isPassthroughRunning.value
         
-        bluetoothAudioManager.applyPolicy(enabled, streamer, isStreaming)
+        // Check if using mic-based audio (not MediaProjection) - BT mic only applies to mic-based audio
+        val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
+        val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
+        val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+        
+        // Only apply BT policy for streaming if using mic-based audio
+        val effectiveIsStreaming = isStreaming && isMicBasedAudio
+        bluetoothAudioManager.applyPolicy(enabled, streamer, effectiveIsStreaming)
+        
+        if (isStreaming && !isMicBasedAudio && enabled) {
+            Log.i(TAG, "applyBluetoothPolicy: BT toggle ON but using MediaProjection audio - BT mic won't be used for streaming")
+        }
         
         // If passthrough is running, restart it to switch between BT and built-in mic
         if (passthroughWasRunning) {

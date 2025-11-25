@@ -615,6 +615,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             Log.i(TAG, "doStartStream: Stream started successfully")
             
+            // Trigger BT mic activation if using mic-based audio (not MediaProjection)
+            // This covers Camera, UVC, and any fallback to mic scenarios
+            val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
+            val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+            if (isMicBasedAudio) {
+                Log.i(TAG, "doStartStream: Mic-based audio detected ($audioSourceName), triggering BT activation")
+                service?.triggerBluetoothMicActivation()
+            } else {
+                Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
+            }
+            
             // Add bitrate regulator for SRT streams
             if (descriptor.type.sinkType == MediaSinkType.SRT) {
                 val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
