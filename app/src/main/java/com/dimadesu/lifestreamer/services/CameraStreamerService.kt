@@ -106,8 +106,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var localRotationProvider: IRotationProvider? = null
     private var localRotationListener: IRotationProvider.Listener? = null
     
-    // Audio passthrough manager for monitoring microphone input
-    private val audioPassthroughManager = com.dimadesu.lifestreamer.audio.AudioPassthroughManager()
+    // Audio passthrough manager for monitoring microphone input (lazy init after context available)
+    private val audioPassthroughManager by lazy { 
+        com.dimadesu.lifestreamer.audio.AudioPassthroughManager(applicationContext)
+    }
     
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
@@ -1270,8 +1272,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Wait for cleanup
                     kotlinx.coroutines.delay(300)
                     
-                    // Start fresh with new BT config
-                    bluetoothAudioManager.startScoForPassthrough()
+                    // Start fresh with new BT config (this can take up to 6s for SCO + verification)
+                    val scoSuccess = bluetoothAudioManager.startScoForPassthrough()
+                    
+                    // Give Android extra time to fully update audio routing after SCO
+                    if (scoSuccess) {
+                        Log.i(TAG, "SCO established, waiting for audio routing to stabilize")
+                        kotlinx.coroutines.delay(500)
+                    }
                     
                     val audioConfig = storageRepository.audioConfigFlow.first()
                     if (audioConfig != null) {
@@ -1283,9 +1291,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         audioPassthroughManager.setConfig(passthroughConfig)
                     }
                     
+                    // Set preferred device for BT routing (or null for built-in mic)
+                    val preferredDevice = if (scoSuccess) {
+                        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.getPreferredDevice()
+                    } else {
+                        null
+                    }
+                    audioPassthroughManager.setPreferredDevice(preferredDevice)
+                    Log.i(TAG, "Passthrough preferred device: ${preferredDevice?.productName ?: "built-in"}")
+                    
                     audioPassthroughManager.start()
                     _isPassthroughRunning.tryEmit(true)
-                    Log.i(TAG, "Audio passthrough restarted after BT toggle")
+                    Log.i(TAG, "Audio passthrough restarted after BT toggle (using ${if (scoSuccess) "BT mic" else "built-in mic"})")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to restart passthrough after BT toggle: ${e.message}", e)
                     _isPassthroughRunning.tryEmit(false)
@@ -1330,7 +1347,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         serviceScope.launch(Dispatchers.Default) {
             try {
                 // Try SCO for passthrough if BT enabled
-                bluetoothAudioManager.startScoForPassthrough()
+                val scoSuccess = bluetoothAudioManager.startScoForPassthrough()
                 
                 // Configure passthrough with audio settings
                 val audioConfig = storageRepository.audioConfigFlow.first()
@@ -1344,7 +1361,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}")
                 }
 
-
+                // Set preferred device for BT routing (or null for built-in mic)
+                val preferredDevice = if (scoSuccess) {
+                    com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.getPreferredDevice()
+                } else {
+                    null
+                }
+                audioPassthroughManager.setPreferredDevice(preferredDevice)
+                Log.i(TAG, "Passthrough using: ${preferredDevice?.productName ?: "built-in mic"}")
                 
                 audioPassthroughManager.start()
                 _isPassthroughRunning.tryEmit(true)
