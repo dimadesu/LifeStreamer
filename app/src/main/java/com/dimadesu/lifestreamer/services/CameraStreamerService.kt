@@ -1301,8 +1301,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
     }
 
-    // Apply Bluetooth mic policy at runtime. When disabled, stop any ongoing SCO orchestration
-    // and clear preferred device so factories will not select Bluetooth.
+    /**
+     * Apply Bluetooth mic policy at runtime.
+     * 
+     * When enabled:
+     * - Ensures BLUETOOTH_CONNECT permission (requests from UI if needed)
+     * - If streaming: attempts SCO negotiation and switches audio source
+     * - If not streaming: performs quick connectivity check for UI feedback
+     * - Registers device monitoring to handle disconnects
+     * 
+     * When disabled:
+     * - Stops ongoing SCO orchestration
+     * - Reverts to built-in microphone source
+     * - Unregisters device monitoring
+     * 
+     * @param enabled true to enable Bluetooth mic, false to disable
+     */
     fun applyBluetoothPolicy(enabled: Boolean) {
         try {
             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
