@@ -849,7 +849,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                             // Inform the service via binder (best-effort)
                                             try { serviceBinder?.setUseBluetoothMic(false) } catch (_: Throwable) {}
                                             // Notify user
-                                            try { _toastMessageLiveData.postValue("Bluetooth mic unavailable — reverted to built-in mic") } catch (_: Throwable) {}
+                                            try { _toastMessageLiveData.postValue("Bluetooth mic unavailable") } catch (_: Throwable) {}
                                         }
                                     } catch (_: Throwable) {}
                                 }
