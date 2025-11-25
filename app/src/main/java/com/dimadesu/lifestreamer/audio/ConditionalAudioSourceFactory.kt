@@ -20,8 +20,13 @@ class ConditionalAudioSourceFactory : IAudioSourceInternal.Factory {
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        // We prefer to avoid live-swapping audio sources. Return true to indicate the
-        // currently configured source is acceptable (the service will handle routing).
-        return true
+        // If source is null, we need to create a new source
+        if (source == null) return false
+        
+        // If source is already a microphone/AudioRecord source, no need to recreate
+        // This allows BT switching to work since BT sources won't match
+        val sourceName = source.javaClass.simpleName
+        return sourceName.contains("AudioRecord", ignoreCase = true) ||
+               sourceName.contains("Microphone", ignoreCase = true)
     }
 }
