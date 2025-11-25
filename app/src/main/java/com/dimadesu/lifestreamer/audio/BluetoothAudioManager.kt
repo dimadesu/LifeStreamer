@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
+import android.os.Build
 import android.util.Log
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
@@ -499,8 +500,29 @@ class BluetoothAudioManager(
      */
     private fun stopScoAndResetAudio() {
         val am = getAudioManager()
-        try { am?.stopBluetoothSco() } catch (_: Throwable) {}
+        
+        // Stop SCO connection
+        try { 
+            @Suppress("DEPRECATION")
+            am?.stopBluetoothSco() 
+            Log.d(TAG, "stopBluetoothSco called")
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
+        }
+        
+        // Clear communication device on API 31+ to fully reset routing
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                am?.clearCommunicationDevice()
+                Log.d(TAG, "clearCommunicationDevice called")
+            } catch (e: Throwable) {
+                Log.w(TAG, "Failed to clear communication device: ${e.message}")
+            }
+        }
+        
+        // Reset audio mode to normal
         setAudioMode(AudioManager.MODE_NORMAL)
+        Log.d(TAG, "Audio mode set to NORMAL")
     }
 
     /**

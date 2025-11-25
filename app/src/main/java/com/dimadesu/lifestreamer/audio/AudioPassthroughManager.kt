@@ -103,18 +103,31 @@ class AudioPassthroughManager(
                     .setBufferSizeInBytes(bufferSize)
                     .setAudioSource(audioSource)
 
-                // Try to set preferred device reflectively (for BT routing)
+                val record = builder.build()
+                
+                // Set preferred device on AudioRecord instance (API 23+)
+                // For BT: set BT device. For built-in: explicitly set built-in mic to override any cached BT routing
                 try {
                     if (currentDevice != null) {
-                        val method = builder::class.java.getMethod("setPreferredDevice", AudioDeviceInfo::class.java)
-                        method.invoke(builder, currentDevice)
-                        Log.i(TAG, "Set preferred device on builder: ${currentDevice.productName}")
+                        val success = record.setPreferredDevice(currentDevice)
+                        Log.i(TAG, "Set preferred device on AudioRecord: ${currentDevice.productName}, success=$success")
+                    } else {
+                        // Find built-in mic and set it explicitly to force away from BT
+                        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                        val devices = audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                        val builtInMic = devices?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+                        if (builtInMic != null) {
+                            val success = record.setPreferredDevice(builtInMic)
+                            Log.i(TAG, "Set preferred device on AudioRecord: built-in mic (${builtInMic.productName}), success=$success")
+                        } else {
+                            Log.w(TAG, "Could not find built-in mic device")
+                        }
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "Failed to set preferred device: ${e.message}")
+                    Log.w(TAG, "Failed to set preferred device: ${e.javaClass.simpleName}: ${e.message}")
                 }
 
-                builder.build()
+                record
             } else {
                 // For older APIs, use MIC for built-in mic
                 val audioSource = if (preferredDevice != null) {
