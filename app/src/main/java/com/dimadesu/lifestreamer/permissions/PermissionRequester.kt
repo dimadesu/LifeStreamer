@@ -28,41 +28,22 @@ class PermissionRequester(private val activity: ComponentActivity) {
     private var permissionCallback: ((Boolean) -> Unit)? = null
 
     /**
-     * Request relevant permissions for audio + Bluetooth usage if not already granted.
+     * Request audio permission at startup if not already granted.
+     * Bluetooth permissions are requested on-demand when user taps the BT toggle.
      */
     fun requestPermissionsIfNeeded(callback: (Boolean) -> Unit) {
         permissionCallback = callback
 
         val needed = mutableListOf<String>()
 
-        // Always need audio
+        // Always need audio for microphone
         if (!isPermissionGranted(activity, Manifest.permission.RECORD_AUDIO)) {
             needed.add(Manifest.permission.RECORD_AUDIO)
         }
 
-        // Bluetooth permissions differ by SDK
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!isPermissionGranted(activity, Manifest.permission.BLUETOOTH_CONNECT)) {
-                needed.add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-            if (!isPermissionGranted(activity, Manifest.permission.BLUETOOTH_SCAN)) {
-                needed.add(Manifest.permission.BLUETOOTH_SCAN)
-            }
-        } else {
-            // Pre-Android 12: BLUETOOTH and BLUETOOTH_ADMIN are normal permissions declared in manifest
-            // but we still check for BLUETOOTH here for completeness.
-            if (!isPermissionGranted(activity, Manifest.permission.BLUETOOTH)) {
-                // BLUETOOTH is protection level "normal" and auto-granted, skip explicit request
-            }
-        }
-
-        // Android 13+ introduced NEARBY_DEVICES
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val nearby = "android.permission.NEARBY_DEVICES"
-            if (!isPermissionGranted(activity, nearby)) {
-                needed.add(nearby)
-            }
-        }
+        // Note: Bluetooth permissions (BLUETOOTH_CONNECT, BLUETOOTH_SCAN) are NOT requested here.
+        // They are requested on-demand when user taps the BT mic toggle, which provides
+        // better UX by not overwhelming users who don't need BT mic functionality.
 
         if (needed.isEmpty()) {
             callback(true)
@@ -75,7 +56,7 @@ class PermissionRequester(private val activity: ComponentActivity) {
         if (showRationale) {
             AlertDialog.Builder(activity)
                 .setTitle("Permissions required")
-                .setMessage("This app needs microphone and Bluetooth permissions to use a Bluetooth headset as the audio input.")
+                .setMessage("This app needs microphone permission to capture audio for streaming.")
                 .setPositiveButton("OK") { _, _ ->
                     permissionsLauncher.launch(needed.toTypedArray())
                 }

@@ -37,17 +37,8 @@ class MainActivity : AppCompatActivity() {
         binding = MainActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Request microphone + bluetooth permissions early so features depending on them
-        // (Bluetooth mic passthrough / detection) can run when needed.
-        val permissionRequester = PermissionRequester(this)
-        permissionRequester.requestPermissionsIfNeeded { granted ->
-            if (!granted) {
-                // Log, but do not block: user may grant later via settings
-                android.util.Log.w(TAG, "Required permissions not granted; Bluetooth mic may not work")
-            } else {
-                android.util.Log.i(TAG, "Required permissions granted")
-            }
-        }
+        // Note: Permissions (Camera, Microphone, Notifications) are requested by PreviewFragment.
+        // Bluetooth permissions are requested on-demand when user taps the BT mic toggle.
 
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()

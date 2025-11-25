@@ -90,9 +90,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             ActivityResultContracts.RequestPermission()
         ) { granted ->
             if (granted) {
-                Toast.makeText(requireContext(), "BLUETOOTH_CONNECT granted", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Bluetooth permission granted", Toast.LENGTH_SHORT).show()
+                // Now that permission is granted, enable the BT toggle
+                previewViewModel.setUseBluetoothMic(true)
             } else {
-                Toast.makeText(requireContext(), "BLUETOOTH_CONNECT denied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Bluetooth permission denied", Toast.LENGTH_SHORT).show()
             }
         }
     }

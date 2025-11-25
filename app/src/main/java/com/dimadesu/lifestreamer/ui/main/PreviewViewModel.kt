@@ -241,6 +241,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val showBluetoothToggle: LiveData<Boolean> get() = _showBluetoothToggle
 
     fun setUseBluetoothMic(enabled: Boolean) {
+        // If enabling BT, check permission first (Android 12+)
+        if (enabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                application, 
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                // Request permission via LiveData - UI will observe and show dialog
+                _bluetoothConnectRequestLiveData.postValue(Unit)
+                // Don't enable toggle until permission is granted
+                return
+            }
+        }
+        
         _useBluetoothMic.postValue(enabled)
         try {
             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
