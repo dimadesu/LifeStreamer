@@ -1323,8 +1323,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
     }
 
-
-
     /**
      * Set mute state centrally in the service. This updates the streamer audio
      * source (if available), emits the `isMuted` flow for observers, and
@@ -1638,7 +1636,4 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             openPending = openPendingIntent
         )
     }
-
-
-
 }
