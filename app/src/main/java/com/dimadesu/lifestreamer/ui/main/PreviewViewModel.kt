@@ -698,8 +698,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Determines and sets the appropriate audio source based on the current video source.
      * Audio follows video:
-     * - Camera video -> Microphone
+     * - Camera video -> Microphone (or BT mic if toggled ON via ConditionalAudioSourceFactory)
      * - RTMP/Bitmap video -> MediaProjection (if available), otherwise Microphone
+     * 
+     * Note: BT mic toggle only affects Camera sources, not RTMP/Bitmap which use MediaProjection.
      */
     private suspend fun setAudioSourceBasedOnVideoSource() {
         val currentStreamer = serviceStreamer ?: return
@@ -708,6 +710,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         if (isRtmpOrBitmap) {
             // RTMP or Bitmap source - try MediaProjection, fallback to microphone
+            // Note: BT mic toggle is ignored for RTMP/Bitmap - they always use MediaProjection or mic
             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 try {
@@ -722,9 +725,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.setAudioSource(MicrophoneSourceFactory())
             }
         } else {
-            // Camera source - use microphone
-            Log.i(TAG, "Camera video detected, using microphone audio")
-            currentStreamer.setAudioSource(MicrophoneSourceFactory())
+            // Camera source - use ConditionalAudioSourceFactory which respects BT mic toggle
+            // The factory creates mic source initially, and BluetoothAudioManager switches to BT if enabled
+            Log.i(TAG, "Camera video detected, using ConditionalAudioSourceFactory (BT-aware)")
+            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
         }
     }
 
