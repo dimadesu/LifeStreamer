@@ -45,6 +45,7 @@ class AudioPassthroughManager(
      * Must be called before start().
      */
     fun setPreferredDevice(device: AudioDeviceInfo?) {
+        Log.i(TAG, "setPreferredDevice called with: ${device?.productName ?: "null (built-in mic)"}")
         preferredDevice = device
     }
 
@@ -72,6 +73,10 @@ class AudioPassthroughManager(
             val channelConfig = config.channelConfig
             val audioFormat = config.audioFormat
             
+            // Capture current device preference at start (for consistent use throughout)
+            val currentDevice = preferredDevice
+            Log.i(TAG, "start() called - currentDevice: ${currentDevice?.productName ?: "null (built-in mic)"}")
+            
             // Calculate buffer size
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             val bufferSize = minBufferSize * 2 // Use double for safety
@@ -85,18 +90,25 @@ class AudioPassthroughManager(
                     .setChannelMask(channelConfig)
                     .build()
 
+                // Use VOICE_COMMUNICATION for BT (routes to SCO), MIC for built-in
+                val audioSource = if (currentDevice != null) {
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                } else {
+                    MediaRecorder.AudioSource.MIC
+                }
+                Log.i(TAG, "Using audio source: ${if (currentDevice != null) "VOICE_COMMUNICATION (BT)" else "MIC (built-in)"}")
+
                 val builder = AudioRecord.Builder()
                     .setAudioFormat(audioFormatObj)
                     .setBufferSizeInBytes(bufferSize)
-                    .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+                    .setAudioSource(audioSource)
 
                 // Try to set preferred device reflectively (for BT routing)
                 try {
-                    val device = preferredDevice
-                    if (device != null) {
+                    if (currentDevice != null) {
                         val method = builder::class.java.getMethod("setPreferredDevice", AudioDeviceInfo::class.java)
-                        method.invoke(builder, device)
-                        Log.i(TAG, "Set preferred device: ${device.productName}")
+                        method.invoke(builder, currentDevice)
+                        Log.i(TAG, "Set preferred device on builder: ${currentDevice.productName}")
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "Failed to set preferred device: ${e.message}")
@@ -104,8 +116,14 @@ class AudioPassthroughManager(
 
                 builder.build()
             } else {
+                // For older APIs, use MIC for built-in mic
+                val audioSource = if (preferredDevice != null) {
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                } else {
+                    MediaRecorder.AudioSource.MIC
+                }
                 AudioRecord(
-                    MediaRecorder.AudioSource.DEFAULT,
+                    audioSource,
                     sampleRate,
                     channelConfig,
                     audioFormat,
@@ -144,18 +162,37 @@ class AudioPassthroughManager(
             
             // If BT device is preferred, try to set it as communication device
             // This forces Android to route audio through BT
+            // If NOT using BT, explicitly clear communication device to ensure built-in mic is used
             try {
-                val device = preferredDevice
-                if (device != null) {
-                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                    if (audioManager != null) {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                if (audioManager != null) {
+                    if (currentDevice != null) {
                         val method = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
-                        method.invoke(audioManager, device)
-                        Log.i(TAG, "AudioManager.setCommunicationDevice set for: ${device.productName}")
+                        method.invoke(audioManager, currentDevice)
+                        Log.i(TAG, "AudioManager.setCommunicationDevice set for: ${currentDevice.productName}")
+                    } else {
+                        // Explicitly clear communication device to ensure built-in mic is used
+                        try {
+                            val clearMethod = audioManager::class.java.getMethod("clearCommunicationDevice")
+                            clearMethod.invoke(audioManager)
+                            Log.i(TAG, "AudioManager.clearCommunicationDevice called (ensuring built-in mic)")
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "Failed to clear communication device: ${e.message}")
+                        }
+                        // Also ensure SCO is stopped
+                        try {
+                            audioManager.stopBluetoothSco()
+                            Log.i(TAG, "stopBluetoothSco called (ensuring built-in mic)")
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
+                        }
+                        // Set mode to NORMAL
+                        audioManager.mode = AudioManager.MODE_NORMAL
+                        Log.i(TAG, "Audio mode set to NORMAL")
                     }
                 }
             } catch (e: Throwable) {
-                Log.w(TAG, "Failed to set communication device: ${e.message}")
+                Log.w(TAG, "Failed to configure communication device: ${e.message}")
             }
             
             // Start recording and playback

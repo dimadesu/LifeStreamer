@@ -111,6 +111,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         com.dimadesu.lifestreamer.audio.AudioPassthroughManager(applicationContext)
     }
     
+    // Track passthrough restart job to prevent concurrent restarts
+    private var passthroughRestartJob: kotlinx.coroutines.Job? = null
+    
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
@@ -198,6 +201,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // camera service only requests CAMERA|MICROPHONE types.
 
         // onCreate: perform lightweight initialization and promote service to foreground early
+
+        // Reset BT config to ensure clean state on service start
+        // This prevents stale config from affecting passthrough
+        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false)
+        com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setPreferredDevice(null)
+        Log.i(TAG, "Service onCreate: Reset BT config to default (disabled)")
 
         // Initialize power manager and other services
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -1259,18 +1268,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // If passthrough is running, restart it to switch between BT and built-in mic
         if (passthroughWasRunning) {
-            serviceScope.launch(Dispatchers.Default) {
+            // Cancel any ongoing restart to prevent race conditions
+            passthroughRestartJob?.cancel()
+            
+            passthroughRestartJob = serviceScope.launch(Dispatchers.Default) {
                 try {
                     Log.i(TAG, "Restarting passthrough for BT toggle change (enabled=$enabled)")
                     
-                    // Stop current passthrough
+                    // Stop current passthrough - ensure complete cleanup
                     audioPassthroughManager.stop()
                     _isPassthroughRunning.tryEmit(false)
                     bluetoothAudioManager.stopScoForPassthrough()
-                    Log.i(TAG, "Stopped passthrough")
+                    Log.i(TAG, "Stopped passthrough, waiting for complete cleanup")
                     
-                    // Wait for cleanup
-                    kotlinx.coroutines.delay(300)
+                    // Longer wait to ensure AudioRecord is fully released and communication device is cleared
+                    delay(500)
                     
                     // Start fresh with new BT config (this can take up to 6s for SCO + verification)
                     val scoSuccess = bluetoothAudioManager.startScoForPassthrough()
@@ -1278,7 +1290,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Give Android extra time to fully update audio routing after SCO
                     if (scoSuccess) {
                         Log.i(TAG, "SCO established, waiting for audio routing to stabilize")
-                        kotlinx.coroutines.delay(500)
+                        delay(500)
                     }
                     
                     val audioConfig = storageRepository.audioConfigFlow.first()
@@ -1342,12 +1354,41 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     /**
      * Start audio passthrough - monitors microphone input and plays through speakers.
      * Delegates Bluetooth/SCO handling to BluetoothAudioManager.
+     * Only uses BT if explicitly enabled via BluetoothAudioConfig.
      */
     fun startAudioPassthrough() {
         serviceScope.launch(Dispatchers.Default) {
             try {
-                // Try SCO for passthrough if BT enabled
-                val scoSuccess = bluetoothAudioManager.startScoForPassthrough()
+                // Only try SCO for passthrough if BT is explicitly enabled
+                // Check config state to ensure we don't accidentally use BT when toggle is off
+                val btEnabled = com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()
+                Log.i(TAG, "Starting audio passthrough (BT config enabled: $btEnabled)")
+                
+                val scoSuccess = if (btEnabled) {
+                    bluetoothAudioManager.startScoForPassthrough()
+                } else {
+                    // Ensure audio mode is NORMAL and communication device is cleared when not using BT
+                    // This prevents AudioRecord from routing to BT if mode/device was left set from previous operation
+                    try {
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                        if (audioManager != null) {
+                            // Stop any SCO that might be running
+                            try { audioManager.stopBluetoothSco() } catch (_: Exception) {}
+                            // Clear communication device
+                            try {
+                                val method = audioManager::class.java.getMethod("clearCommunicationDevice")
+                                method.invoke(audioManager)
+                                Log.i(TAG, "Cleared communication device (BT disabled)")
+                            } catch (_: Exception) {}
+                            // Set mode to NORMAL
+                            audioManager.mode = AudioManager.MODE_NORMAL
+                            Log.i(TAG, "Set audio mode to NORMAL (BT disabled)")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to reset audio routing: ${e.message}")
+                    }
+                    false
+                }
                 
                 // Configure passthrough with audio settings
                 val audioConfig = storageRepository.audioConfigFlow.first()
