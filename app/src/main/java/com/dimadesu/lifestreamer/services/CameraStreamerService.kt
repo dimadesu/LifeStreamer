@@ -1245,12 +1245,53 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     /**
      * Apply Bluetooth mic policy at runtime.
      * Delegates to BluetoothAudioManager for all orchestration.
+     * If audio passthrough is running, restarts it to switch audio source.
      * 
      * @param enabled true to enable Bluetooth mic, false to disable
      */
     fun applyBluetoothPolicy(enabled: Boolean) {
         val isStreaming = streamer?.isStreamingFlow?.value == true
+        val passthroughWasRunning = _isPassthroughRunning.value
+        
         bluetoothAudioManager.applyPolicy(enabled, streamer, isStreaming)
+        
+        // If passthrough is running, restart it to switch between BT and built-in mic
+        if (passthroughWasRunning) {
+            serviceScope.launch(Dispatchers.Default) {
+                try {
+                    Log.i(TAG, "Restarting passthrough for BT toggle change (enabled=$enabled)")
+                    
+                    // Stop current passthrough
+                    audioPassthroughManager.stop()
+                    _isPassthroughRunning.tryEmit(false)
+                    bluetoothAudioManager.stopScoForPassthrough()
+                    Log.i(TAG, "Stopped passthrough")
+                    
+                    // Wait for cleanup
+                    kotlinx.coroutines.delay(300)
+                    
+                    // Start fresh with new BT config
+                    bluetoothAudioManager.startScoForPassthrough()
+                    
+                    val audioConfig = storageRepository.audioConfigFlow.first()
+                    if (audioConfig != null) {
+                        val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
+                            sampleRate = audioConfig.sampleRate,
+                            channelConfig = audioConfig.channelConfig,
+                            audioFormat = audioConfig.byteFormat
+                        )
+                        audioPassthroughManager.setConfig(passthroughConfig)
+                    }
+                    
+                    audioPassthroughManager.start()
+                    _isPassthroughRunning.tryEmit(true)
+                    Log.i(TAG, "Audio passthrough restarted after BT toggle")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to restart passthrough after BT toggle: ${e.message}", e)
+                    _isPassthroughRunning.tryEmit(false)
+                }
+            }
+        }
     }
 
 

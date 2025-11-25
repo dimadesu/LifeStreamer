@@ -242,6 +242,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
         } catch (_: Throwable) {}
         // If we have a direct binder, call it. Otherwise rely on the config being applied
+        // The service will handle restarting passthrough if monitoring is active
         try {
             serviceBinder?.setUseBluetoothMic(enabled)
         } catch (_: Throwable) {
