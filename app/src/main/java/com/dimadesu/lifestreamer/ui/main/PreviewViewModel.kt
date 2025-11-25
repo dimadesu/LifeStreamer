@@ -118,6 +118,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     @SuppressLint("StaticFieldLeak")
     private var streamerService: CameraStreamerService? = null
 
+    // Direct service binder reference for invoking service APIs safely
+    private var serviceBinder: CameraStreamerService.CameraStreamerServiceBinder? = null
+
     /**
      * Public getter for the service for foreground recovery
      */
@@ -143,6 +146,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Expose current mute state to the UI
     private val _isMutedLiveData = MutableLiveData<Boolean>(false)
     val isMutedLiveData: LiveData<Boolean> get() = _isMutedLiveData
+    // SCO negotiation state exposed to UI
+    private val _scoStateLiveData = MutableLiveData<String>(null)
+    val scoStateLiveData: LiveData<String> get() = _scoStateLiveData
+    // LiveData event to notify UI to request BLUETOOTH_CONNECT permission
+    private val _bluetoothConnectRequestLiveData = MutableLiveData<Unit?>(null)
+    val bluetoothConnectRequestLiveData: LiveData<Unit?> get() = _bluetoothConnectRequestLiveData
+
+    fun clearBluetoothConnectRequest() {
+        _bluetoothConnectRequestLiveData.postValue(null)
+    }
     
     // Remember last used camera ID when switching to RTMP/bitmap sources
     private var lastUsedCameraId: String? = null
@@ -219,6 +232,47 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _streamerErrorLiveData: MutableLiveData<String?> = MutableLiveData()
     val streamerErrorLiveData: LiveData<String?> = _streamerErrorLiveData
 
+    // UI toggle: Use Bluetooth mic when available
+    private val _useBluetoothMic = MutableLiveData<Boolean>(com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled())
+    val useBluetoothMic: LiveData<Boolean> get() = _useBluetoothMic
+    
+    // BT toggle visibility - hide when using MediaProjection audio (RTMP/Bitmap sources)
+    private val _showBluetoothToggle = MutableLiveData<Boolean>(true)
+    val showBluetoothToggle: LiveData<Boolean> get() = _showBluetoothToggle
+
+    fun setUseBluetoothMic(enabled: Boolean) {
+        // If enabling BT, check permission first (Android 12+)
+        if (enabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                application, 
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                // Request permission via LiveData - UI will observe and show dialog
+                _bluetoothConnectRequestLiveData.postValue(Unit)
+                // Don't enable toggle until permission is granted
+                return
+            }
+        }
+        
+        _useBluetoothMic.postValue(enabled)
+        try {
+            com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
+        } catch (_: Throwable) {}
+        // If we have a direct binder, call it. Otherwise rely on the config being applied
+        // The service will handle restarting passthrough if monitoring is active
+        try {
+            serviceBinder?.setUseBluetoothMic(enabled)
+        } catch (_: Throwable) {
+            // Best-effort only: nothing to do if binder isn't available
+        }
+    }
+
+    // Data-binding getter expected by generated binding code
+    // Note: do not add a Java-style getter here; the Kotlin property `useBluetoothMic`
+    // already exposes `getUseBluetoothMic()` to data binding. Keeping another method
+    // with the same name causes an ambiguous reference during kapt/Java compilation.
+
     // Toast messages (nullable to support single-event pattern - cleared after observation)
     private val _toastMessageLiveData: MutableLiveData<String?> = MutableLiveData()
     val toastMessageLiveData: LiveData<String?> = _toastMessageLiveData
@@ -252,6 +306,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Monitor audio toggle for RTMP sources (OFF by default)
     private val _isMonitorAudioOn: MutableLiveData<Boolean> = MutableLiveData(false)
     val isMonitorAudioOn: LiveData<Boolean> = _isMonitorAudioOn
+    // Flag to suppress passthrough observer updates during RTMP source switch
+    private var suppressPassthroughObserver = false
     private var rtmpBufferingStartTime = 0L
     private var bufferingCheckJob: kotlinx.coroutines.Job? = null
     private var isHandlingDisconnection = false // Guard flag to prevent duplicate disconnection handling
@@ -579,6 +635,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             Log.i(TAG, "doStartStream: Stream started successfully")
             
+            // Trigger BT mic activation if using mic-based audio (not MediaProjection)
+            // This covers Camera, UVC, and any fallback to mic scenarios
+            val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
+            val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+            if (isMicBasedAudio) {
+                Log.i(TAG, "doStartStream: Mic-based audio detected ($audioSourceName), triggering BT activation")
+                service?.triggerBluetoothMicActivation()
+            } else {
+                Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
+            }
+            
             // Add bitrate regulator for SRT streams
             if (descriptor.type.sinkType == MediaSinkType.SRT) {
                 val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
@@ -662,8 +730,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Determines and sets the appropriate audio source based on the current video source.
      * Audio follows video:
-     * - Camera video -> Microphone
+     * - Camera video -> Microphone (or BT mic if toggled ON via ConditionalAudioSourceFactory)
      * - RTMP/Bitmap video -> MediaProjection (if available), otherwise Microphone
+     * 
+     * Note: BT mic toggle only affects Camera sources, not RTMP/Bitmap which use MediaProjection.
      */
     private suspend fun setAudioSourceBasedOnVideoSource() {
         val currentStreamer = serviceStreamer ?: return
@@ -672,23 +742,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         if (isRtmpOrBitmap) {
             // RTMP or Bitmap source - try MediaProjection, fallback to microphone
+            // Note: BT mic toggle is ignored for RTMP/Bitmap - they always use MediaProjection or mic
             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 try {
                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
                     Log.i(TAG, "Set MediaProjection audio for RTMP/Bitmap video")
                 } catch (e: Exception) {
-                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
-                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                    Log.w(TAG, "MediaProjection audio failed, using conditional source: ${e.message}")
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                 }
             } else {
-                Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using microphone")
-                currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using conditional source")
+                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
-            // Camera source - use microphone
-            Log.i(TAG, "Camera video detected, using microphone audio")
-            currentStreamer.setAudioSource(MicrophoneSourceFactory())
+            // Camera source - use ConditionalAudioSourceFactory which respects BT mic toggle
+            // The factory creates mic source initially, and BluetoothAudioManager switches to BT if enabled
+            Log.i(TAG, "Camera video detected, using ConditionalAudioSourceFactory (BT-aware)")
+            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
         }
     }
 
@@ -711,6 +783,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 if (binder is CameraStreamerService.CameraStreamerServiceBinder) {
                     streamerService = binder.getService()
+                    // Keep direct binder reference for quick API calls
+                    serviceBinder = binder
                     serviceStreamer = binder.streamer as SingleStreamer
                     
                     // Observe centralized reconnection status message from service
@@ -739,20 +813,38 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.w(TAG, "Failed to collect bitrate from service: ${t.message}")
                     }
                     // Observe passthrough running state so UI can reflect actual service state
+                    // Only sync when NOT on RTMP source (RTMP uses ExoPlayer volume, not passthrough)
                     try {
                         val svc = binder.getService()
                         // First set UI to current snapshot so UI matches service immediately
+                        // But only if not on RTMP source
                         try {
-                            val snapshot = svc.isPassthroughRunning.value
-                            _isMonitorAudioOn.postValue(snapshot)
-                            Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
+                            val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+                            val isRtmpSource = videoSource is RTMPVideoSource
+                            if (!isRtmpSource) {
+                                val snapshot = svc.isPassthroughRunning.value
+                                _isMonitorAudioOn.postValue(snapshot)
+                                Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
+                            } else {
+                                Log.i(TAG, "Skipping passthrough snapshot sync (RTMP source uses ExoPlayer volume)")
+                            }
                         } catch (_: Throwable) {}
 
-                        // Then observe for updates
+                        // Then observe for updates (only sync when not on RTMP and not during source switch)
                         viewModelScope.launch {
                             svc.isPassthroughRunning.collect { running ->
-                                _isMonitorAudioOn.postValue(running)
-                                Log.i(TAG, "Service passthrough running state observed: $running")
+                                if (suppressPassthroughObserver) {
+                                    Log.d(TAG, "Suppressing passthrough state change during source switch (running=$running)")
+                                    return@collect
+                                }
+                                val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+                                val isRtmpSource = videoSource is RTMPVideoSource
+                                if (!isRtmpSource) {
+                                    _isMonitorAudioOn.postValue(running)
+                                    Log.i(TAG, "Service passthrough running state observed: $running")
+                                } else {
+                                    Log.d(TAG, "Ignoring passthrough state change while on RTMP source (running=$running)")
+                                }
                             }
                         }
                     } catch (t: Throwable) {
@@ -796,6 +888,41 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         } catch (t: Throwable) {
                             Log.w(TAG, "Failed to collect isMuted flow from service: ${t.message}")
                         }
+                        // Collect SCO state flow if provided by binder
+                        try {
+                            val scoFlow = binder.scoStateFlow()
+                            viewModelScope.launch {
+                                scoFlow.collect { state ->
+                                    try { _scoStateLiveData.postValue(state.name) } catch (_: Throwable) {}
+
+                                    // If SCO negotiation failed, revert user toggle and notify UI
+                                    try {
+                                        val failedEnum = com.dimadesu.lifestreamer.audio.BluetoothAudioManager.ScoState.FAILED
+                                        if (state == failedEnum) {
+                                            // Update UI toggle
+                                            _useBluetoothMic.postValue(false)
+                                            // Inform the service via binder (best-effort)
+                                            try { serviceBinder?.setUseBluetoothMic(false) } catch (_: Throwable) {}
+                                            // Notify user
+                                            try { _toastMessageLiveData.postValue("Bluetooth mic unavailable") } catch (_: Throwable) {}
+                                        }
+                                    } catch (_: Throwable) {}
+                                }
+                            }
+                            // Collect BLUETOOTH_CONNECT permission requests from service
+                            try {
+                                val permFlow = binder.bluetoothConnectPermissionRequests()
+                                viewModelScope.launch {
+                                    permFlow.collect {
+                                        try { _bluetoothConnectRequestLiveData.postValue(Unit) } catch (_: Throwable) {}
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to collect BLUETOOTH_CONNECT requests: ${t.message}")
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Failed to collect SCO state flow from service: ${t.message}")
+                        }
                             // Collect uptime flow to display runtime in UI
                             try {
                                 val uptimeFlow = binder.uptimeFlow()
@@ -819,6 +946,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.w(TAG, "CameraStreamerService disconnected: $name")
                 serviceStreamer = null
                 streamerService = null
+                serviceBinder = null
                 streamerFlow.value = null
                 _serviceReady.value = false
                 // Ensure UI status is cleared when the service disconnects
@@ -1749,11 +1877,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 if (isRtmpOrBitmap && hasMediaProjectionAudio) {
                     try {
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         needsMediaProjectionAudioRestore = true
-                        Log.d(TAG, "Switched to microphone before reconnection (will restore MediaProjection after)")
+                        Log.d(TAG, "Switched to conditional source before reconnection (will restore MediaProjection after)")
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to switch to microphone before reconnection: ${e.message}")
+                        Log.w(TAG, "Failed to switch audio source before reconnection: ${e.message}")
                         needsMediaProjectionAudioRestore = false
                     }
                 }
@@ -2155,6 +2283,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         currentRtmpPlayer = player
         
+        // Clear the suppress flag now that RTMP switch is complete
+        suppressPassthroughObserver = false
+        
         // Reapply monitor audio state to the new player instance
         // This handles cases where ExoPlayer is recreated (e.g., after app resume when not streaming)
         if (_isMonitorAudioOn.value == true) {
@@ -2366,6 +2497,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _userToggledRtmp.postValue(true)
                     _userToggledUvc.postValue(false)
                     
+                    // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
+                    _showBluetoothToggle.postValue(false)
+                    
+                    // Suppress passthrough observer updates during source switch
+                    // to prevent monitor toggle from resetting to OFF
+                    suppressPassthroughObserver = true
+                    
+                    // Stop mic passthrough when switching to RTMP (RTMP uses ExoPlayer for audio monitoring)
+                    // Keep monitor toggle state - it will control ExoPlayer volume instead
+                    if (_isMonitorAudioOn.value == true) {
+                        service?.stopAudioPassthrough()
+                        Log.i(TAG, "Stopped mic passthrough when switching to RTMP (will use ExoPlayer volume instead)")
+                    }
+                    
                     // Remember current camera ID before switching away
                     lastUsedCameraId = videoSource.cameraId
                     Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
@@ -2452,6 +2597,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     // Mark that user toggled RTMP OFF (back to camera)
                     _userToggledRtmp.postValue(false)
+                    
+                    // Show BT toggle - Camera uses microphone audio
+                    _showBluetoothToggle.postValue(true)
+                    
+                    // Clear suppress flag (in case it was set and RTMP never connected)
+                    suppressPassthroughObserver = false
 
                     // Clear RTMP status message FIRST before cancelling job
                     // (job might be in middle of delay showing error message)
@@ -2468,23 +2619,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     bufferingCheckJob?.cancel()
                     bufferingCheckJob = null
                     rtmpBufferingStartTime = 0L
-                    
-                    // Reset monitor audio to OFF when switching away from RTMP
-                    // If the service is bound, prefer the service's passthrough state
-                    // to avoid overriding the UI after a rebind (e.g., when app is
-                    // restarted from notification while service continues running).
-                    try {
-                        val svc = streamerService
-                        if (svc != null) {
-                            val running = svc.isPassthroughRunning.value
-                            _isMonitorAudioOn.postValue(running)
-                            Log.i(TAG, "Preserving service passthrough state on source switch: $running")
-                        } else {
-                            _isMonitorAudioOn.postValue(false)
-                        }
-                    } catch (t: Throwable) {
-                        _isMonitorAudioOn.postValue(false)
-                    }
                     
                     // Stop monitoring RTMP connection
                     rtmpDisconnectListener?.let { listener ->
@@ -2513,11 +2647,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Switch to camera sources - restore last used camera if available
                     val cameraId = lastUsedCameraId
                     currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
-                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                     if (cameraId != null) {
-                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) and microphone audio")
+                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) with BT-aware audio")
                     } else {
-                        Log.i(TAG, "Switched to camera video (default camera) and microphone audio")
+                        Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
                     }
                     
                     // Re-add bitrate regulator if streaming with SRT
@@ -2629,7 +2763,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch back to camera
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2639,7 +2773,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             applyMonitorAudioState()
                         }
                         
-                        Log.i(TAG, "Switched to camera source")
+                        Log.i(TAG, "Switched to camera source with BT-aware audio")
                     }
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
@@ -2686,7 +2820,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 // Switch to UVC source
                                                 delay(300)
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
-                                                currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                                                 
                                                 // Re-add bitrate regulator if streaming with SRT
                                                 readdBitrateRegulatorIfNeeded()
@@ -2696,7 +2830,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                     applyMonitorAudioState()
                                                 }
                                                 
-                                                Log.i(TAG, "Switched to UVC source after permission grant")
+                                                Log.i(TAG, "Switched to UVC source after permission grant with BT-aware audio")
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
@@ -2800,7 +2934,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch to UVC source first
                         delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2813,7 +2947,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Then select the device (this will trigger onDeviceOpen -> onCameraOpen)
                         helper.selectDevice(device)
                         
-                        Log.i(TAG, "Switched to UVC source")
+                        Log.i(TAG, "Switched to UVC source with BT-aware audio")
                     }
                     else -> {
                         // We're on bitmap or other source (likely bitmap fallback from disconnected UVC)
@@ -2828,7 +2962,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()

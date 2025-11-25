@@ -28,6 +28,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICame
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import android.app.AppOpsManager
 import android.content.Context
+import android.media.AudioManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -75,6 +76,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
+    // BLUETOOTH_CONNECT permission launcher
+    private lateinit var bluetoothConnectLauncher: ActivityResultLauncher<String>
     // UI messages from service (notification-start feedback)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +85,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
         // Initialize MediaProjection launcher with helper
         mediaProjectionLauncher = previewViewModel.mediaProjectionHelper.registerLauncher(this)
+        // Initialize BLUETOOTH_CONNECT launcher
+        bluetoothConnectLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted) {
+                Toast.makeText(requireContext(), "Bluetooth permission granted", Toast.LENGTH_SHORT).show()
+                // Now that permission is granted, enable the BT toggle
+                previewViewModel.setUseBluetoothMic(true)
+            } else {
+                Toast.makeText(requireContext(), "Bluetooth permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun onCreateView(
@@ -160,6 +175,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 previewViewModel.clearToastMessage() // Clear after showing to prevent re-show on rotation
             }
         }
+
+        // Observe service requests to ask BLUETOOTH_CONNECT permission
+        previewViewModel.bluetoothConnectRequestLiveData.observe(viewLifecycleOwner) { req ->
+            req?.let {
+                // Launch permission request only if we don't already have it
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val granted = ContextCompat.checkSelfPermission(requireContext(), android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        bluetoothConnectLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+                    }
+                }
+                // Clear the event by posting null so it doesn't retrigger
+                previewViewModel.clearBluetoothConnectRequest()
+            }
+        }
+
+        // SCO negotiation state is provided by the Service and exposed via ViewModel.scoStateLiveData
+        // It will update the bound `audioScoStatusText` through data binding.
 
         // Reconnection status is now displayed via data binding in the layout XML
         // No need for manual observer - the TextView will automatically show/hide

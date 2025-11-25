@@ -12,7 +12,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import android.graphics.Bitmap
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
-import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
@@ -127,12 +126,12 @@ internal object RtmpSourceSwitchHelper {
                     Log.i(TAG, "Switched to bitmap fallback with MediaProjection audio")
                 } catch (e: Exception) {
                     Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
-                    streamer.setAudioSource(MicrophoneSourceFactory())
+                    streamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                     Log.i(TAG, "Switched to bitmap fallback with microphone audio")
                 }
             } else {
                 // No MediaProjection available - use microphone
-                streamer.setAudioSource(MicrophoneSourceFactory())
+                streamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                 Log.i(TAG, "Switched to bitmap fallback with microphone audio (no MediaProjection)")
             }
         } catch (e: Exception) {
@@ -248,20 +247,20 @@ internal object RtmpSourceSwitchHelper {
                                         currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
                                         Log.i(TAG, "Set MediaProjection audio for RTMP")
                                     } catch (ae: Exception) {
-                                        Log.w(TAG, "MediaProjection audio failed, using microphone: ${ae.message}")
+                                        Log.w(TAG, "MediaProjection audio failed, using conditional source: ${ae.message}")
                                         try {
-                                            currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                                         } catch (micEx: Exception) {
-                                            Log.w(TAG, "Microphone fallback failed: ${micEx.message}")
+                                            Log.w(TAG, "Conditional source fallback failed: ${micEx.message}")
                                         }
                                     }
                                 }
                             } else {
-                                // Use microphone when not streaming or MediaProjection unavailable
+                                // Use conditional source when not streaming or MediaProjection unavailable
                                 try {
-                                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                                 } catch (ae: Exception) {
-                                    Log.w(TAG, "Failed to set microphone audio: ${ae.message}")
+                                    Log.w(TAG, "Failed to set conditional audio source: ${ae.message}")
                                 }
                                 
                                 // Launch background task to upgrade to MediaProjection if streaming starts
