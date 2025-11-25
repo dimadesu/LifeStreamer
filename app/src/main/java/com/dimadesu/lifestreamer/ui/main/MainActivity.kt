@@ -27,7 +27,6 @@ import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
 import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
 import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
-import com.dimadesu.lifestreamer.permissions.PermissionRequester
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: MainActivityBinding
