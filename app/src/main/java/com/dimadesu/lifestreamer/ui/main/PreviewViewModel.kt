@@ -717,12 +717,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
                     Log.i(TAG, "Set MediaProjection audio for RTMP/Bitmap video")
                 } catch (e: Exception) {
-                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
-                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                    Log.w(TAG, "MediaProjection audio failed, using conditional source: ${e.message}")
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                 }
             } else {
-                Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using microphone")
-                currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using conditional source")
+                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
             // Camera source - use ConditionalAudioSourceFactory which respects BT mic toggle
@@ -1827,11 +1827,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 if (isRtmpOrBitmap && hasMediaProjectionAudio) {
                     try {
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         needsMediaProjectionAudioRestore = true
-                        Log.d(TAG, "Switched to microphone before reconnection (will restore MediaProjection after)")
+                        Log.d(TAG, "Switched to conditional source before reconnection (will restore MediaProjection after)")
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to switch to microphone before reconnection: ${e.message}")
+                        Log.w(TAG, "Failed to switch audio source before reconnection: ${e.message}")
                         needsMediaProjectionAudioRestore = false
                     }
                 }
@@ -2591,11 +2591,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Switch to camera sources - restore last used camera if available
                     val cameraId = lastUsedCameraId
                     currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
-                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                     if (cameraId != null) {
-                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) and microphone audio")
+                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) with BT-aware audio")
                     } else {
-                        Log.i(TAG, "Switched to camera video (default camera) and microphone audio")
+                        Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
                     }
                     
                     // Re-add bitrate regulator if streaming with SRT
@@ -2707,7 +2707,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch back to camera
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2717,7 +2717,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             applyMonitorAudioState()
                         }
                         
-                        Log.i(TAG, "Switched to camera source")
+                        Log.i(TAG, "Switched to camera source with BT-aware audio")
                     }
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
@@ -2764,7 +2764,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 // Switch to UVC source
                                                 delay(300)
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
-                                                currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                                                 
                                                 // Re-add bitrate regulator if streaming with SRT
                                                 readdBitrateRegulatorIfNeeded()
@@ -2774,7 +2774,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                     applyMonitorAudioState()
                                                 }
                                                 
-                                                Log.i(TAG, "Switched to UVC source after permission grant")
+                                                Log.i(TAG, "Switched to UVC source after permission grant with BT-aware audio")
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
@@ -2878,7 +2878,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch to UVC source first
                         delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2891,7 +2891,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Then select the device (this will trigger onDeviceOpen -> onCameraOpen)
                         helper.selectDevice(device)
                         
-                        Log.i(TAG, "Switched to UVC source")
+                        Log.i(TAG, "Switched to UVC source with BT-aware audio")
                     }
                     else -> {
                         // We're on bitmap or other source (likely bitmap fallback from disconnected UVC)
@@ -2906,7 +2906,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
