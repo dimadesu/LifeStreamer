@@ -90,13 +90,13 @@ class AudioPassthroughManager(
                     .setChannelMask(channelConfig)
                     .build()
 
-                // Use VOICE_COMMUNICATION for BT (routes to SCO), MIC for built-in
+                // Use VOICE_COMMUNICATION for BT (routes to SCO), DEFAULT for built-in (matches streaming)
                 val audioSource = if (currentDevice != null) {
                     MediaRecorder.AudioSource.VOICE_COMMUNICATION
                 } else {
-                    MediaRecorder.AudioSource.MIC
+                    MediaRecorder.AudioSource.DEFAULT
                 }
-                Log.i(TAG, "Using audio source: ${if (currentDevice != null) "VOICE_COMMUNICATION (BT)" else "MIC (built-in)"}")
+                Log.i(TAG, "Using audio source: ${if (currentDevice != null) "VOICE_COMMUNICATION (BT)" else "DEFAULT (built-in)"}")
 
                 val builder = AudioRecord.Builder()
                     .setAudioFormat(audioFormatObj)
@@ -129,11 +129,11 @@ class AudioPassthroughManager(
 
                 record
             } else {
-                // For older APIs, use MIC for built-in mic
+                // For older APIs, use DEFAULT for built-in mic (matches streaming)
                 val audioSource = if (preferredDevice != null) {
                     MediaRecorder.AudioSource.VOICE_COMMUNICATION
                 } else {
-                    MediaRecorder.AudioSource.MIC
+                    MediaRecorder.AudioSource.DEFAULT
                 }
                 AudioRecord(
                     audioSource,
