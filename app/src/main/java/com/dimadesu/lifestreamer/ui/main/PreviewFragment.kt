@@ -657,8 +657,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     }
                 }
             } else {
-                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
-                // Not streaming, start preview immediately
+                Log.d(TAG, "App returned to foreground - not streaming, ensuring orientation unlocked")
+                // Not streaming - ensure orientation is unlocked
+                // This handles the case where stream was stopped from notification while app was in background
+                if (rememberedLockedOrientation != null) {
+                    unlockOrientation()
+                    Log.d(TAG, "Unlocked orientation that was locked from previous streaming session")
+                }
+                // Start preview immediately
                 try {
                     inflateStreamerPreview()
                 } catch (e: Exception) {

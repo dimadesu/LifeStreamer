@@ -489,6 +489,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             
                             streamer?.stopStream()
                             
+                            // Unlock stream rotation since streaming has stopped
+                            unlockStreamRotation()
+                            
                             // Close the endpoint to allow fresh connection on next start
                             try {
                                 withTimeout(3000) {
