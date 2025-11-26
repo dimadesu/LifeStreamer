@@ -166,7 +166,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="LifeStreamer shows the default audio input as 'Microphone' in the top right corner of the main screen. This can be either the built-in microphone of the phone, USB audio or 3.5mm if you still have that."
+      android:text="LifeStreamer shows the default audio input as 'Microphone' in the top right corner of the main screen. This can be either the built-in microphone of the phone, USB audio, Bluetooth mic or 3.5mm if you still have that. Only for RTMP source app will say 'Media Projection Audio' in the top right corner."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
