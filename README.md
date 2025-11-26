@@ -4,18 +4,35 @@ Live streaming app for Android designed for IRL streaming based on [StreamPack S
 
 ## Features
 
-- Restream RTMP feed or USB video/audio (UVC/UAC) from action cameras as SRT HEVC/H.265 with amazing dynamic/adaptive bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
+- Restream RTMP feed or USB video/audio (UVC) from action camera like DJI Osmo Action 4 as SRT HEVC/H.265 with amazing dynamic/adaptive bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
 - Can use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
-- Can use any RTMP server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android.
-- USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: it seems phones lower USB audio quality when USB video is used.
+- Can use any RTMP server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
+- USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: phones can lower USB audio quality when USB video is used.
 - Background mode (foreground service) allows streaming with app in background, phone locked and screen off. (Phone limits access to resources in this mode, so performance is worse. Test first and consider lowering video encoder settings and bitrate.)
 - Aggressive infinite reconnect when app loses connection.
-- Audio monitoring for all sources.
+- Audio monitoring for all audio sources.
+- Switch between all video and audio sources while streaming.
 - A lot of features come from StreamPack by default, check the list [here](https://github.com/ThibaultBee/StreamPack?tab=readme-ov-file#features).
 
 ![LifeStreamer screenshot](docs/LifeStreamer-screenshot.png)
 
 Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create Git issues.
+
+## Sources
+
+### Video
+
+- Phone cameras.
+- RTMP video.
+- USB Video (UVC).
+
+### Audio
+
+- Built-in phone microphones.
+- USB audio: USB headphones, USB audio interfaces, wireless mic receivers, etc.
+  - With USB video LifeStreamer is using USB audio from USB camera if available.
+- Mics from Bluetooth headphones, earbuds, etc.
+- For RTMP source app uses Media Projection Audio to record RTMP player audio - kind of like phone screen recorder.
 
 ## Apps that can work together
 
@@ -50,7 +67,7 @@ Stretch goal: USB/UVC as video/audio source.
 
 I've started with original camera demo from StreamPack. I'm tweaking it and adding new features on top of it.
 
-### Main implemented features
+### Details about main implemented features
 
 - [x] Dynamic/adaptive bitrate. I added [Belabox](https://github.com/BELABOX/belacoder) and [Moblin](https://github.com/eerimoq/moblin) algorithms. Can be changed via Settings.
 - [x] Background mode (foreground service) to allow streaming with app in background, phone locked and screen off.
@@ -67,6 +84,7 @@ I've started with original camera demo from StreamPack. I'm tweaking it and addi
 - [x] Audio monitoring for all sources.
 
 ### Planning to implement next
+
 - Polish existing functionality and user flows.
 
 ## Why StreamPack
@@ -169,3 +187,17 @@ Use recommended workarounds if you encounter issues.
 - [BELABOX](https://belabox.net/)
 - [Moblin](https://github.com/eerimoq/moblin)
 - [Moblink](https://github.com/eerimoq/moblink)
+
+## FAQ
+
+### Chat?
+
+There are existing chat apps for Android like [Stream Buddy](https://play.google.com/store/apps/details?id=com.streamomation.streamerchat). I suggest you do side-by-side view with LifeStramer and chat app if your phone has this feature or use 2nd phone for chat.
+
+### Overlays?
+
+I highly recommend adding overlays in OBS that restreams SRT.
+
+### Can LifeStreamer be combined with Bond Bunny and MediaSrvr?
+
+In theory yes, but there are many benefits to having them separate, so no plans to combine. In general, I'm not a big fan of idea of having everything in one app. I'd rather have different focused apps each doing particular thing really well.
