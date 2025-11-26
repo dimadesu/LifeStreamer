@@ -418,10 +418,28 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     /**
      * Helper to check if we should lock orientation for a NEW stream.
      * Returns true if orientation should be locked (no saved state exists).
+     * If Service has a saved orientation but Fragment doesn't, restores UI to match Service.
      * Logs appropriate message if orientation is already saved.
      */
     private fun shouldLockOrientation(context: String): Boolean {
         val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+        
+        // If Service has saved orientation but Fragment doesn't have it yet, restore UI now
+        if (savedRotation != null && rememberedLockedOrientation == null) {
+            val orientation = when (savedRotation) {
+                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            requireActivity().requestedOrientation = orientation
+            rememberedLockedOrientation = orientation
+            rememberedRotation = savedRotation
+            Log.d(TAG, "$context: Restored UI orientation from Service saved rotation: $orientation (rotation: $savedRotation)")
+            return false // Already handled, don't call lockOrientation()
+        }
+        
         return if (savedRotation == null && rememberedLockedOrientation == null) {
             true // No saved orientation, proceed with lock
         } else {
@@ -474,6 +492,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         rememberedRotation = null  // Clear rotation too
         requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
         Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
+    }
+
+    /**
+     * Sync button state to match the current stream status.
+     * This is needed because StateFlow won't re-emit if the value hasn't changed,
+     * which can happen when returning from background after starting from notification.
+     */
+    private fun syncButtonState(status: StreamStatus?) {
+        val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
+        val shouldBeChecked = when (status) {
+            StreamStatus.STARTING, StreamStatus.CONNECTING, StreamStatus.STREAMING -> true
+            StreamStatus.ERROR, StreamStatus.NOT_STREAMING, null -> isReconnecting
+        }
+        
+        if (binding.liveButton.isChecked != shouldBeChecked) {
+            Log.d(TAG, "syncButtonState: Updating button from ${binding.liveButton.isChecked} to $shouldBeChecked (status: $status, reconnecting: $isReconnecting)")
+            binding.liveButton.isChecked = shouldBeChecked
+        }
     }
 
     private fun startStream() {
@@ -583,6 +619,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
             
+            // Sync button state immediately - StateFlow won't re-emit if value hasn't changed
+            // This handles returning from background after starting from notification
+            syncButtonState(currentStatus)
+            
             if (isInStreamingProcess) {
                 Log.d(TAG, "onResume: Secondary check - restoring orientation from Service (status: $currentStatus)")
                 
@@ -617,8 +657,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     }
                 }
             } else {
-                Log.d(TAG, "App returned to foreground - not streaming, orientation remains unlocked")
-                // Not streaming, start preview immediately
+                Log.d(TAG, "App returned to foreground - not streaming, ensuring orientation unlocked")
+                // Not streaming - ensure orientation is unlocked
+                // This handles the case where stream was stopped from notification while app was in background
+                if (rememberedLockedOrientation != null) {
+                    unlockOrientation()
+                    Log.d(TAG, "Unlocked orientation that was locked from previous streaming session")
+                }
+                // Start preview immediately
                 try {
                     inflateStreamerPreview()
                 } catch (e: Exception) {

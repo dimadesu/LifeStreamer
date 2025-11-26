@@ -489,6 +489,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             
                             streamer?.stopStream()
                             
+                            // Unlock stream rotation since streaming has stopped
+                            unlockStreamRotation()
+                            
                             // Close the endpoint to allow fresh connection on next start
                             try {
                                 withTimeout(3000) {
@@ -1029,6 +1032,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     private suspend fun startStreamFromConfiguredEndpoint() {
         try {
+            // Lock stream rotation BEFORE starting to ensure consistent orientation
+            // Detect current rotation and lock to it (same as PreviewViewModel.startStream())
+            detectCurrentRotation()
+            lockStreamRotation(currentRotation)
+            Log.i(TAG, "startStreamFromConfiguredEndpoint: Pre-locked stream rotation to ${rotationToString(currentRotation)}")
+            
             // Streamer is guaranteed to be available (lazy initialized)
             val currentStreamer = streamer
 
