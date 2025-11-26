@@ -494,6 +494,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
     }
 
+    /**
+     * Sync button state to match the current stream status.
+     * This is needed because StateFlow won't re-emit if the value hasn't changed,
+     * which can happen when returning from background after starting from notification.
+     */
+    private fun syncButtonState(status: StreamStatus?) {
+        val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
+        val shouldBeChecked = when (status) {
+            StreamStatus.STARTING, StreamStatus.CONNECTING, StreamStatus.STREAMING -> true
+            StreamStatus.ERROR, StreamStatus.NOT_STREAMING, null -> isReconnecting
+        }
+        
+        if (binding.liveButton.isChecked != shouldBeChecked) {
+            Log.d(TAG, "syncButtonState: Updating button from ${binding.liveButton.isChecked} to $shouldBeChecked (status: $status, reconnecting: $isReconnecting)")
+            binding.liveButton.isChecked = shouldBeChecked
+        }
+    }
+
     private fun startStream() {
         Log.d(TAG, "startStream() called - checking if MediaProjection is required")
 
@@ -600,6 +618,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             val isInStreamingProcess = currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
                                        currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
+            
+            // Sync button state immediately - StateFlow won't re-emit if value hasn't changed
+            // This handles returning from background after starting from notification
+            syncButtonState(currentStatus)
             
             if (isInStreamingProcess) {
                 Log.d(TAG, "onResume: Secondary check - restoring orientation from Service (status: $currentStatus)")
