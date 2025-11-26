@@ -51,14 +51,6 @@ internal object RtmpSourceSwitchHelper {
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.volume = 0f
             
-            // Disable audio focus handling to prevent Android from ducking/muting
-            // the audio when app goes to background. This is crucial for background
-            // streaming where we need consistent audio levels.
-            exoPlayer.setAudioAttributes(
-                androidx.media3.common.AudioAttributes.DEFAULT,
-                false // Don't handle audio focus
-            )
-            
             // Add a lightweight error listener so callers can observe failures in logs
             exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
