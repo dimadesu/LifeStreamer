@@ -49,7 +49,32 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
+      android:text="Elagato Cam Link and similar capture cards"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
       android:text="Elgato Cam Link can be used with GoPro via Media Mod or Sony X3000 (as it has HDMI out). I already have these devices, so I can test if they work."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="With some phones Elgato Cam Link or similar might not have audio. If you publish stream with audio state like this stream might be unplayable in OBS. I've added Bluetooth audio toggle that can add Bluetooth audio as a source for this case. Alternatively, if capture card can work via USB hub you can use some other USB audio device. Make sure to connect it after you connect capture card. Last UBS audio device connected becomes the default audio input."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="I also recommend monitoring USB source with Bluetooth headphones. When both USB audio device and Bluetooth headphones are connected phones usually use USB audio as input and Bluetooth as output. On my phone I can choose where to output audio, so I can force Bluetooth if needed. That way you can hear audio from USB device via Bluetooth."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -75,6 +100,23 @@
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:text="I tested Elgato HD60 S+ and HD60 X. Elgato HD60 S+ can sort of work without audio. You can try using USB hub and connect some other USB audio device and use that as an audio source. With HD60 X I mostly get black screen."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="24dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Disable HDCP to capture PS5, Xbox, etc."
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Sometimes I forget this too when I test capture cards with PS5 - if HDCP is enabled they can't capture video. You have to disable HDCP in console settings to make it work."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="24dp" />
