@@ -25,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
+import com.dimadesu.lifestreamer.ui.help.FaqHelpActivity
 import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
 import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
 
@@ -108,6 +109,10 @@ class MainActivity : AppCompatActivity() {
                     goToUvcHelpActivity()
                     true
                 }
+                R.id.action_faq -> {
+                    goToFaqHelpActivity()
+                    true
+                }
                 else -> {
                     Log.e(TAG, "Unknown menu item ${it.itemId}")
                     false
@@ -128,6 +133,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun goToUvcHelpActivity() {
         val intent = Intent(this, UvcHelpActivity::class.java)
+        startActivity(intent)
+    }
+
+    private fun goToFaqHelpActivity() {
+        val intent = Intent(this, FaqHelpActivity::class.java)
         startActivity(intent)
     }
 
