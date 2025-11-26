@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:app="http://schemas.android.com/apk/res-auto"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:fillViewport="true"
+  android:fitsSystemWindows="true">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:paddingBottom="48dp">
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Frequently Asked Questions"
+      android:textSize="28sp"
+      android:textStyle="bold"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Chat?"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="There are existing chat apps for Android like Stream Buddy. I suggest you do side-by-side view with LifeStramer and chat app if your phone has this feature or use 2nd phone for chat."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Overlays?"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="I highly recommend adding overlays in OBS that restreams SRT."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Can LifeStreamer be combined with Bond Bunny and MediaSrvr?"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="In theory yes, but there are many benefits to having them separate, so no plans to combine. In general, I'm not a big fan of idea of having everything in one app. I'd rather have different focused apps each doing particular thing really well."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+  </LinearLayout>
+
+</ScrollView>
