@@ -418,10 +418,28 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     /**
      * Helper to check if we should lock orientation for a NEW stream.
      * Returns true if orientation should be locked (no saved state exists).
+     * If Service has a saved orientation but Fragment doesn't, restores UI to match Service.
      * Logs appropriate message if orientation is already saved.
      */
     private fun shouldLockOrientation(context: String): Boolean {
         val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+        
+        // If Service has saved orientation but Fragment doesn't have it yet, restore UI now
+        if (savedRotation != null && rememberedLockedOrientation == null) {
+            val orientation = when (savedRotation) {
+                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            requireActivity().requestedOrientation = orientation
+            rememberedLockedOrientation = orientation
+            rememberedRotation = savedRotation
+            Log.d(TAG, "$context: Restored UI orientation from Service saved rotation: $orientation (rotation: $savedRotation)")
+            return false // Already handled, don't call lockOrientation()
+        }
+        
         return if (savedRotation == null && rememberedLockedOrientation == null) {
             true // No saved orientation, proceed with lock
         } else {
