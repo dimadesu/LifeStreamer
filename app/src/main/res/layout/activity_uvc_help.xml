@@ -99,7 +99,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="I tested Elgato HD60 S+ and HD60 X. Elgato HD60 S+ can sort of work without audio. You can try using USB hub and connect some other USB audio device and use that as an audio source. With HD60 X I mostly get black screen."
+      android:text="I tested Elgato HD60 S+ and HD60 X. Elgato HD60 S+ can sort of work without audio. With HD60 X I mostly get black screen."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="24dp" />
