@@ -152,6 +152,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // LiveData event to notify UI to request BLUETOOTH_CONNECT permission
     private val _bluetoothConnectRequestLiveData = MutableLiveData<Unit?>(null)
     val bluetoothConnectRequestLiveData: LiveData<Unit?> get() = _bluetoothConnectRequestLiveData
+    
+    // Audio level monitoring
+    private val _audioLevelFlow = MutableStateFlow(com.dimadesu.lifestreamer.audio.AudioLevel.SILENT)
+    val audioLevelFlow: StateFlow<com.dimadesu.lifestreamer.audio.AudioLevel> = _audioLevelFlow.asStateFlow()
 
     fun clearBluetoothConnectRequest() {
         _bluetoothConnectRequestLiveData.postValue(null)
@@ -938,6 +942,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             } catch (t: Throwable) {
                                 Log.w(TAG, "Failed to collect uptime flow from service: ${t.message}")
                             }
+                            
+                            // Set up audio level monitoring callback
+                            setupAudioLevelMonitoring()
+                            
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }
             }
@@ -2090,6 +2098,37 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return@launch
             }
         }
+    }
+    
+    /**
+     * Set up audio level monitoring on the streamer's audio processor.
+     * This works for ALL audio sources (mic, Bluetooth, ExoPlayer/MediaProjection).
+     */
+    private fun setupAudioLevelMonitoring() {
+        try {
+            val audioProcessor = serviceStreamer?.audioInput?.processor
+            if (audioProcessor != null) {
+                audioProcessor.audioLevelCallback = { rms, peak ->
+                    // Update the flow (this is called from audio thread, so be efficient)
+                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(rms, peak)
+                }
+                Log.i(TAG, "Audio level monitoring enabled")
+            } else {
+                Log.w(TAG, "Audio processor not available for level monitoring")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to set up audio level monitoring: ${t.message}")
+        }
+    }
+    
+    /**
+     * Disable audio level monitoring (e.g., when not streaming to save CPU).
+     */
+    private fun disableAudioLevelMonitoring() {
+        try {
+            serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
+            _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
+        } catch (_: Throwable) {}
     }
 
     fun setMute(isMuted: Boolean) {

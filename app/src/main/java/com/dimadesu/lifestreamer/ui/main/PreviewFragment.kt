@@ -413,6 +413,17 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.w(TAG, "Failed to update bitrate text: ${t.message}")
             }
         }
+        
+        // Collect audio level flow and update the VU meter
+        lifecycleScope.launch {
+            previewViewModel.audioLevelFlow.collect { level ->
+                try {
+                    binding.audioLevelMeter.setAudioLevel(level)
+                } catch (t: Throwable) {
+                    // View might not be attached yet
+                }
+            }
+        }
     }
 
     /**

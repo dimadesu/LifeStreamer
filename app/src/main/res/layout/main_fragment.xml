@@ -223,6 +223,13 @@
                 android:paddingStart="6dp"
                 android:visibility="gone" />
 
+            <!-- Audio Level Meter -->
+            <com.dimadesu.lifestreamer.ui.components.AudioLevelMeterView
+                android:id="@+id/audioLevelMeter"
+                android:layout_width="120dp"
+                android:layout_height="8dp"
+                android:layout_marginTop="4dp" />
+
         </LinearLayout>
 
         <ToggleButton
