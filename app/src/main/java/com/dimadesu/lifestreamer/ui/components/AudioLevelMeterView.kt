@@ -146,6 +146,7 @@ class AudioLevelMeterView @JvmOverloads constructor(
     
     /**
      * Reset the meter to silent state.
+     * Preserves the stereo/mono mode so the bar layout doesn't change.
      */
     fun reset() {
         currentLevelLeft = 0f
@@ -162,7 +163,7 @@ class AudioLevelMeterView @JvmOverloads constructor(
         peakHoldTimeRight = 0L
         isClippingRight = false
         
-        isStereo = false
+        // Don't reset isStereo - keep the same bar layout
         invalidate()
     }
     
