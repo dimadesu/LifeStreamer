@@ -150,7 +150,14 @@ class BluetoothAudioManager(
             return
         }
 
-        // Detect or use cached preferred device
+        // Ensure permission FIRST - on Android 12+ we need BLUETOOTH_CONNECT to detect devices
+        if (!scoOrchestrator.ensurePermission()) {
+            Log.w(TAG, "SCO orchestration: BLUETOOTH_CONNECT permission missing - requesting")
+            _scoStateFlow.tryEmit(ScoState.FAILED)
+            return
+        }
+
+        // Detect or use cached preferred device (now safe to call after permission check)
         var preferred = BluetoothAudioConfig.getPreferredDevice()
         if (preferred == null) {
             val btDevice = scoOrchestrator.detectBtInputDevice()
@@ -176,12 +183,6 @@ class BluetoothAudioManager(
             }
 
             Log.i(TAG, "SCO orchestration: starting negotiation for device id=${preferred?.id ?: -1}")
-
-            if (!scoOrchestrator.ensurePermission()) {
-                Log.w(TAG, "SCO orchestration: permission missing")
-                _scoStateFlow.tryEmit(ScoState.FAILED)
-                return
-            }
 
             val connected = scoOrchestrator.startScoAndWait(4000)
             if (!connected) {
@@ -219,8 +220,16 @@ class BluetoothAudioManager(
     suspend fun startScoForPassthrough(): Boolean {
         if (!BluetoothAudioConfig.isEnabled()) return false
         
+        // Ensure permission FIRST - on Android 12+ we need BLUETOOTH_CONNECT to detect devices
+        if (!scoOrchestrator.ensurePermission()) {
+            Log.w(TAG, "Passthrough SCO: BLUETOOTH_CONNECT permission missing - requesting")
+            _scoStateFlow.tryEmit(ScoState.FAILED)
+            return false
+        }
+        
         _scoStateFlow.tryEmit(ScoState.TRYING)
         
+        // Now safe to detect device after permission check
         val btDevice = scoOrchestrator.detectBtInputDevice()
         if (btDevice == null) {
             Log.i(TAG, "Passthrough SCO: no BT input device detected")
@@ -230,13 +239,6 @@ class BluetoothAudioManager(
         }
 
         BluetoothAudioConfig.setPreferredDevice(btDevice)
-        
-        if (!scoOrchestrator.ensurePermission()) {
-            Log.w(TAG, "Passthrough SCO: permission missing")
-            BluetoothAudioConfig.setPreferredDevice(null)
-            _scoStateFlow.tryEmit(ScoState.FAILED)
-            return false
-        }
 
         val connected = scoOrchestrator.startScoAndWait(4000)
         if (!connected) {
