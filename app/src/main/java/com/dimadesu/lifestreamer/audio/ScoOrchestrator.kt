@@ -129,7 +129,14 @@ class ScoOrchestrator(
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
         
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            startScoModern(audioManager)
+            // Try modern API first, fallback to legacy if it fails
+            val modernResult = startScoModern(audioManager)
+            if (modernResult) {
+                true
+            } else {
+                Log.i(TAG, "startScoAndWait: modern API failed, falling back to legacy")
+                startScoLegacy(audioManager, timeoutMs)
+            }
         } else {
             startScoLegacy(audioManager, timeoutMs)
         }
@@ -141,6 +148,17 @@ class ScoOrchestrator(
         if (btDevice == null) {
             Log.w(TAG, "startScoModern: No BT SCO device found")
             return false
+        }
+        
+        // Set audio mode to communication BEFORE setting communication device
+        // Some Samsung devices require this order
+        if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+            try {
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                Log.i(TAG, "startScoModern: set audio mode to MODE_IN_COMMUNICATION")
+            } catch (e: Throwable) {
+                Log.w(TAG, "startScoModern: failed to set audio mode: ${e.message}")
+            }
         }
         
         return try {
