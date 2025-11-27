@@ -24,7 +24,14 @@ class AudioLevelMeterView @JvmOverloads constructor(
     private var currentLevel: Float = 0f
     private var targetLevel: Float = 0f
     private var peakLevel: Float = 0f
+    private var peakHoldLevel: Float = 0f  // The displayed peak (with hold/decay)
+    private var peakHoldTime: Long = 0L    // When the peak was last updated
     private var isClipping: Boolean = false
+    
+    // Peak hold duration in milliseconds before decay starts
+    private val peakHoldDurationMs = 500L
+    // Peak decay rate per frame (0-1, how much to reduce per update)
+    private val peakDecayRate = 0.05f
     
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#333333")
@@ -57,10 +64,26 @@ class AudioLevelMeterView @JvmOverloads constructor(
      */
     fun setAudioLevel(audioLevel: AudioLevel) {
         targetLevel = audioLevel.normalizedLevel
-        peakLevel = if (audioLevel.peak > 0.0001f) {
+        
+        // Calculate incoming peak level
+        val incomingPeak = if (audioLevel.peak > 0.0001f) {
             val peakDb = audioLevel.peakDb.coerceIn(-60f, 0f)
             (peakDb + 60f) / 60f
         } else 0f
+        
+        // Update peak hold: if new peak is higher, capture it
+        val now = System.currentTimeMillis()
+        if (incomingPeak >= peakHoldLevel) {
+            peakHoldLevel = incomingPeak
+            peakHoldTime = now
+        } else {
+            // Decay peak after hold duration
+            if (now - peakHoldTime > peakHoldDurationMs) {
+                peakHoldLevel = (peakHoldLevel - peakDecayRate).coerceAtLeast(0f)
+            }
+        }
+        
+        peakLevel = peakHoldLevel
         isClipping = audioLevel.isClipping
         
         // Animate towards target
@@ -76,6 +99,8 @@ class AudioLevelMeterView @JvmOverloads constructor(
         currentLevel = 0f
         targetLevel = 0f
         peakLevel = 0f
+        peakHoldLevel = 0f
+        peakHoldTime = 0L
         isClipping = false
         invalidate()
     }
