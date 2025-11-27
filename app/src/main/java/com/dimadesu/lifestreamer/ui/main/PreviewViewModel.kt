@@ -952,6 +952,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             override fun onServiceDisconnected(name: ComponentName?) {
                 Log.w(TAG, "CameraStreamerService disconnected: $name")
+                disableAudioLevelMonitoring()
                 serviceStreamer = null
                 streamerService = null
                 serviceBinder = null
@@ -3386,6 +3387,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     override fun onCleared() {
         super.onCleared()
+        
+        // Clean up audio level monitoring
+        disableAudioLevelMonitoring()
         
         // Cancel any pending reconnection attempts
         reconnectTimer.stop()
