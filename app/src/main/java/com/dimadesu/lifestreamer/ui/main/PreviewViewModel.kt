@@ -2100,8 +2100,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
     
-    // Job for observing audio config changes
+    // Job for observing audio config changes and streaming state
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
+    private var streamingStateObserverJob: kotlinx.coroutines.Job? = null
     
     /**
      * Set up audio level monitoring on the streamer's audio processor.
@@ -2131,6 +2132,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
+        // Observe streaming state to reset meter when stream stops
+        streamingStateObserverJob?.cancel()
+        streamingStateObserverJob = viewModelScope.launch {
+            streamer.isStreamingFlow.collect { isStreaming ->
+                if (!isStreaming) {
+                    // Reset the meter to silent when streaming stops
+                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
+                    Log.d(TAG, "Audio level meter reset (streaming stopped)")
+                }
+            }
+        }
+        
         audioProcessor.audioLevelCallback = { levels ->
             // Update the flow (this is called from audio thread, so be efficient)
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(
@@ -2152,6 +2165,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         try {
             audioConfigObserverJob?.cancel()
             audioConfigObserverJob = null
+            streamingStateObserverJob?.cancel()
+            streamingStateObserverJob = null
             serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
         } catch (_: Throwable) {}
