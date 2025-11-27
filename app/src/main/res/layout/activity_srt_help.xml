@@ -67,7 +67,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="The LifeStreamer app connects to SRT servers in caller mode only. This means the SRT server must be running and listening for connections before you try to connect from LifeStreamer.\n\nCommon SRT server setups:\n• OBS Studio streaming to an SRT listener\n• srt-live-transmit tool\n• Any SRT-capable encoder or relay"
+      android:text="The LifeStreamer app connects to SRT servers in caller mode only. This means the SRT server must be running and listening for connections before you try to connect from LifeStreamer."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
