@@ -2100,6 +2100,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
     
+    // Job for observing audio config changes
+    private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
+    
     /**
      * Set up audio level monitoring on the streamer's audio processor.
      * This works for ALL audio sources (mic, Bluetooth, ExoPlayer/MediaProjection).
@@ -2132,6 +2135,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             isStereo = levels.isStereo
                         )
                     }
+                    
+                    // Observe audio config changes to update channel count dynamically
+                    audioConfigObserverJob?.cancel()
+                    audioConfigObserverJob = viewModelScope.launch {
+                        storageRepository.audioConfigFlow
+                            .drop(1) // Skip the first emission (already handled above)
+                            .collect { audioConfig ->
+                                if (audioConfig != null) {
+                                    try {
+                                        val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
+                                        audioProcessor.channelCount = channelCount
+                                        Log.i(TAG, "Audio level monitoring: channelCount updated to $channelCount")
+                                    } catch (t: Throwable) {
+                                        Log.w(TAG, "Failed to update channel count: ${t.message}")
+                                    }
+                                }
+                            }
+                    }
+                    
                     Log.i(TAG, "Audio level monitoring enabled")
                 } else {
                     Log.w(TAG, "Audio processor not available for level monitoring")
@@ -2147,6 +2169,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private fun disableAudioLevelMonitoring() {
         try {
+            audioConfigObserverJob?.cancel()
+            audioConfigObserverJob = null
             serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
         } catch (_: Throwable) {}
