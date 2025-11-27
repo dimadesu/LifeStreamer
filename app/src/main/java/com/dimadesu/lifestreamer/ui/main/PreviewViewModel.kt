@@ -2108,60 +2108,41 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * This works for ALL audio sources (mic, Bluetooth, ExoPlayer/MediaProjection).
      */
     private fun setupAudioLevelMonitoring() {
-        viewModelScope.launch {
-            try {
-                val audioProcessor = serviceStreamer?.audioInput?.processor
-                if (audioProcessor != null) {
-                    // Set channel count from current audio config BEFORE enabling callback
+        val streamer = serviceStreamer ?: return
+        val audioProcessor = streamer.audioInput?.processor ?: run {
+            Log.w(TAG, "Audio processor not available for level monitoring")
+            return
+        }
+        
+        // Observe the streamer's audioConfigFlow for channel count changes
+        audioConfigObserverJob?.cancel()
+        audioConfigObserverJob = viewModelScope.launch {
+            streamer.audioConfigFlow.collect { audioConfig ->
+                if (audioConfig != null) {
                     try {
-                        val audioConfig = storageRepository.audioConfigFlow.first()
-                        if (audioConfig != null) {
-                            val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
-                            audioProcessor.channelCount = channelCount
-                            Log.i(TAG, "Audio level monitoring: channelCount=$channelCount")
-                        }
+                        val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
+                        audioProcessor.channelCount = channelCount
+                        Log.i(TAG, "Audio level monitoring: channelCount=$channelCount")
                     } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to get channel count, defaulting to mono: ${t.message}")
+                        Log.w(TAG, "Failed to get channel count: ${t.message}")
                         audioProcessor.channelCount = 1
                     }
-                    
-                    audioProcessor.audioLevelCallback = { levels ->
-                        // Update the flow (this is called from audio thread, so be efficient)
-                        _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(
-                            rms = levels.rmsLeft,
-                            peak = levels.peakLeft,
-                            rmsRight = levels.rmsRight,
-                            peakRight = levels.peakRight,
-                            isStereo = levels.isStereo
-                        )
-                    }
-                    
-                    // Observe audio config changes to update channel count dynamically
-                    audioConfigObserverJob?.cancel()
-                    audioConfigObserverJob = viewModelScope.launch {
-                        storageRepository.audioConfigFlow
-                            .drop(1) // Skip the first emission (already handled above)
-                            .collect { audioConfig ->
-                                if (audioConfig != null) {
-                                    try {
-                                        val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
-                                        audioProcessor.channelCount = channelCount
-                                        Log.i(TAG, "Audio level monitoring: channelCount updated to $channelCount")
-                                    } catch (t: Throwable) {
-                                        Log.w(TAG, "Failed to update channel count: ${t.message}")
-                                    }
-                                }
-                            }
-                    }
-                    
-                    Log.i(TAG, "Audio level monitoring enabled")
-                } else {
-                    Log.w(TAG, "Audio processor not available for level monitoring")
                 }
-            } catch (t: Throwable) {
-                Log.w(TAG, "Failed to set up audio level monitoring: ${t.message}")
             }
         }
+        
+        audioProcessor.audioLevelCallback = { levels ->
+            // Update the flow (this is called from audio thread, so be efficient)
+            _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(
+                rms = levels.rmsLeft,
+                peak = levels.peakLeft,
+                rmsRight = levels.rmsRight,
+                peakRight = levels.peakRight,
+                isStereo = levels.isStereo
+            )
+        }
+        
+        Log.i(TAG, "Audio level monitoring enabled")
     }
     
     /**
