@@ -50,7 +50,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="You can enter an SRT URL in the same Settings field used for RTMP source. The app will automatically detect that it is an SRT URL and use the SRT protocol.\n\nSRT URL format:\nsrt://hostname:port?streamid=your_stream_id\n\nExample:\nsrt://192.168.1.100:9998?streamid=mystream"
+      android:text="You can enter an SRT URL in the same Settings field used for RTMP source. The app will automatically detect that it is an SRT URL and use the SRT protocol.\n\nSRT URL format:\nsrt://hostname:port?streamid=your_stream_id\n\nExample (MediaMTX server):\nsrt://192.168.1.100:8890?streamid=read:mystream"
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -87,6 +87,42 @@
       android:text="SRT audio capture works the same way as RTMP audio capture. The app uses Media Projection API to capture the audio from the SRT player. When prompted, allow the app to record screen and audio."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="SRT source UI = RTMP source UI"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="For now SRT source will use the same UI as RTMP source. So it will say RTMP in place of SRT everywhere."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="How to run SRT server on Android?"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="You can run a server like MediaMTX in Termux. It's a bit advanced. Check the video how to set it up here: https://youtu.be/5H0AZca3nk4?si=yaAxqQ5-FW5GnKpq&amp;t=310"
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:autoLink="web"
+      android:linksClickable="true"
       android:paddingBottom="16dp" />
 
   </LinearLayout>
