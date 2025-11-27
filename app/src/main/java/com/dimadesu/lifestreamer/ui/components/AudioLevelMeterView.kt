@@ -14,6 +14,7 @@ import com.dimadesu.lifestreamer.audio.AudioLevel
 /**
  * A horizontal audio level meter (VU meter) custom View.
  * Displays RMS level with color gradient from green to yellow to red.
+ * Automatically shows 1 bar for mono or 2 bars for stereo audio.
  */
 class AudioLevelMeterView @JvmOverloads constructor(
     context: Context,
@@ -21,13 +22,26 @@ class AudioLevelMeterView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private var currentLevel: Float = 0f
-    private var targetLevel: Float = 0f
-    private var peakLevel: Float = 0f
-    private var peakHoldLevel: Float = 0f  // The displayed peak (with hold/decay)
-    private var peakHoldTime: Long = 0L    // When the peak was last updated
+    // Left/mono channel state
+    private var currentLevelLeft: Float = 0f
+    private var targetLevelLeft: Float = 0f
+    private var peakLevelLeft: Float = 0f
+    private var peakHoldLevelLeft: Float = 0f
+    private var peakHoldTimeLeft: Long = 0L
+    private var isClippingLeft: Boolean = false
+    
+    // Right channel state (for stereo)
+    private var currentLevelRight: Float = 0f
+    private var targetLevelRight: Float = 0f
+    private var peakLevelRight: Float = 0f
+    private var peakHoldLevelRight: Float = 0f
+    private var peakHoldTimeRight: Long = 0L
+    private var isClippingRight: Boolean = false
+    
+    // Stereo mode
+    private var isStereo: Boolean = false
+    
     private var lastUpdateTime: Long = 0L  // Throttle UI updates
-    private var isClipping: Boolean = false
     
     // Minimum interval between UI updates (in ms) - ~30fps is plenty for a VU meter
     private val minUpdateIntervalMs = 33L
@@ -35,6 +49,8 @@ class AudioLevelMeterView @JvmOverloads constructor(
     private val peakHoldDurationMs = 500L
     // Peak decay rate per frame (0-1, how much to reduce per update)
     private val peakDecayRate = 0.05f
+    // Gap between stereo bars (in dp)
+    private val stereoGapDp = 2f
     
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#333333")
@@ -57,7 +73,7 @@ class AudioLevelMeterView @JvmOverloads constructor(
     
     init {
         // Set a default minimum size
-        minimumHeight = (8 * resources.displayMetrics.density).toInt()
+        minimumHeight = (10 * resources.displayMetrics.density).toInt()
     }
     
     /**
@@ -66,24 +82,42 @@ class AudioLevelMeterView @JvmOverloads constructor(
      * @param audioLevel The current audio level from the processor
      */
     fun setAudioLevel(audioLevel: AudioLevel) {
-        // Always update target level and peak tracking (even if we skip redraw)
-        targetLevel = audioLevel.normalizedLevel
+        val now = System.currentTimeMillis()
         
-        // Calculate incoming peak level
-        val incomingPeak = if (audioLevel.peak > 0.0001f) {
+        // Update stereo mode
+        isStereo = audioLevel.isStereo
+        
+        // Always update target levels and peak tracking (even if we skip redraw)
+        targetLevelLeft = audioLevel.normalizedLevel
+        
+        // Calculate incoming peak level for left channel
+        val incomingPeakLeft = if (audioLevel.peak > 0.0001f) {
             val peakDb = audioLevel.peakDb.coerceIn(-60f, 0f)
             (peakDb + 60f) / 60f
         } else 0f
         
-        // Update peak hold: if new peak is higher, capture it
-        val now = System.currentTimeMillis()
-        if (incomingPeak >= peakHoldLevel) {
-            peakHoldLevel = incomingPeak
-            peakHoldTime = now
-        } else {
-            // Decay peak after hold duration
-            if (now - peakHoldTime > peakHoldDurationMs) {
-                peakHoldLevel = (peakHoldLevel - peakDecayRate).coerceAtLeast(0f)
+        // Update left peak hold
+        if (incomingPeakLeft >= peakHoldLevelLeft) {
+            peakHoldLevelLeft = incomingPeakLeft
+            peakHoldTimeLeft = now
+        } else if (now - peakHoldTimeLeft > peakHoldDurationMs) {
+            peakHoldLevelLeft = (peakHoldLevelLeft - peakDecayRate).coerceAtLeast(0f)
+        }
+        
+        // Handle right channel for stereo
+        if (isStereo) {
+            targetLevelRight = audioLevel.normalizedLevelRight
+            
+            val incomingPeakRight = if (audioLevel.peakRight > 0.0001f) {
+                val peakDb = audioLevel.peakDbRight.coerceIn(-60f, 0f)
+                (peakDb + 60f) / 60f
+            } else 0f
+            
+            if (incomingPeakRight >= peakHoldLevelRight) {
+                peakHoldLevelRight = incomingPeakRight
+                peakHoldTimeRight = now
+            } else if (now - peakHoldTimeRight > peakHoldDurationMs) {
+                peakHoldLevelRight = (peakHoldLevelRight - peakDecayRate).coerceAtLeast(0f)
             }
         }
         
@@ -93,11 +127,19 @@ class AudioLevelMeterView @JvmOverloads constructor(
         }
         lastUpdateTime = now
         
-        peakLevel = peakHoldLevel
-        isClipping = audioLevel.isClipping
+        peakLevelLeft = peakHoldLevelLeft
+        isClippingLeft = audioLevel.isClipping
+        
+        if (isStereo) {
+            peakLevelRight = peakHoldLevelRight
+            isClippingRight = audioLevel.isClippingRight
+        }
         
         // Animate towards target
-        currentLevel += (targetLevel - currentLevel) * smoothingFactor
+        currentLevelLeft += (targetLevelLeft - currentLevelLeft) * smoothingFactor
+        if (isStereo) {
+            currentLevelRight += (targetLevelRight - currentLevelRight) * smoothingFactor
+        }
         
         invalidate()
     }
@@ -106,12 +148,21 @@ class AudioLevelMeterView @JvmOverloads constructor(
      * Reset the meter to silent state.
      */
     fun reset() {
-        currentLevel = 0f
-        targetLevel = 0f
-        peakLevel = 0f
-        peakHoldLevel = 0f
-        peakHoldTime = 0L
-        isClipping = false
+        currentLevelLeft = 0f
+        targetLevelLeft = 0f
+        peakLevelLeft = 0f
+        peakHoldLevelLeft = 0f
+        peakHoldTimeLeft = 0L
+        isClippingLeft = false
+        
+        currentLevelRight = 0f
+        targetLevelRight = 0f
+        peakLevelRight = 0f
+        peakHoldLevelRight = 0f
+        peakHoldTimeRight = 0L
+        isClippingRight = false
+        
+        isStereo = false
         invalidate()
     }
     
@@ -142,6 +193,15 @@ class AudioLevelMeterView @JvmOverloads constructor(
         
         val w = width.toFloat()
         val h = height.toFloat()
+        
+        if (isStereo) {
+            drawStereoMeters(canvas, w, h)
+        } else {
+            drawMonoMeter(canvas, w, h)
+        }
+    }
+    
+    private fun drawMonoMeter(canvas: Canvas, w: Float, h: Float) {
         val cornerRadius = h / 2
         
         // Draw background
@@ -149,22 +209,72 @@ class AudioLevelMeterView @JvmOverloads constructor(
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, backgroundPaint)
         
         // Draw level bar
-        val levelWidth = (w * currentLevel.coerceIn(0f, 1f))
+        val levelWidth = (w * currentLevelLeft.coerceIn(0f, 1f))
         if (levelWidth > 0) {
             levelRect.set(0f, 0f, levelWidth, h)
             canvas.drawRoundRect(levelRect, cornerRadius, cornerRadius, levelPaint)
         }
         
         // Draw peak indicator
-        if (peakLevel > 0.01f) {
-            val peakX = (w * peakLevel.coerceIn(0f, 0.98f))
-            peakPaint.color = if (isClipping) Color.RED else Color.WHITE
+        if (peakLevelLeft > 0.01f) {
+            val peakX = (w * peakLevelLeft.coerceIn(0f, 0.98f))
+            peakPaint.color = if (isClippingLeft) Color.RED else Color.WHITE
             canvas.drawRect(peakX - 1f, 0f, peakX + 1f, h, peakPaint)
         }
     }
     
+    private fun drawStereoMeters(canvas: Canvas, w: Float, h: Float) {
+        val gap = stereoGapDp * resources.displayMetrics.density
+        val barHeight = (h - gap) / 2
+        val cornerRadius = barHeight / 2
+        
+        // Left channel (top bar)
+        val topBarTop = 0f
+        val topBarBottom = barHeight
+        
+        // Background
+        rect.set(0f, topBarTop, w, topBarBottom)
+        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, backgroundPaint)
+        
+        // Level bar
+        val levelWidthLeft = (w * currentLevelLeft.coerceIn(0f, 1f))
+        if (levelWidthLeft > 0) {
+            levelRect.set(0f, topBarTop, levelWidthLeft, topBarBottom)
+            canvas.drawRoundRect(levelRect, cornerRadius, cornerRadius, levelPaint)
+        }
+        
+        // Peak indicator
+        if (peakLevelLeft > 0.01f) {
+            val peakX = (w * peakLevelLeft.coerceIn(0f, 0.98f))
+            peakPaint.color = if (isClippingLeft) Color.RED else Color.WHITE
+            canvas.drawRect(peakX - 1f, topBarTop, peakX + 1f, topBarBottom, peakPaint)
+        }
+        
+        // Right channel (bottom bar)
+        val bottomBarTop = barHeight + gap
+        val bottomBarBottom = h
+        
+        // Background
+        rect.set(0f, bottomBarTop, w, bottomBarBottom)
+        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, backgroundPaint)
+        
+        // Level bar
+        val levelWidthRight = (w * currentLevelRight.coerceIn(0f, 1f))
+        if (levelWidthRight > 0) {
+            levelRect.set(0f, bottomBarTop, levelWidthRight, bottomBarBottom)
+            canvas.drawRoundRect(levelRect, cornerRadius, cornerRadius, levelPaint)
+        }
+        
+        // Peak indicator
+        if (peakLevelRight > 0.01f) {
+            val peakX = (w * peakLevelRight.coerceIn(0f, 0.98f))
+            peakPaint.color = if (isClippingRight) Color.RED else Color.WHITE
+            canvas.drawRect(peakX - 1f, bottomBarTop, peakX + 1f, bottomBarBottom, peakPaint)
+        }
+    }
+    
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (8 * resources.displayMetrics.density).toInt()
+        val desiredHeight = (10 * resources.displayMetrics.density).toInt()
         
         val heightMode = MeasureSpec.getMode(heightMeasureSpec)
         val heightSize = MeasureSpec.getSize(heightMeasureSpec)

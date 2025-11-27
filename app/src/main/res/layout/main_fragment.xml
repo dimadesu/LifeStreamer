@@ -240,7 +240,7 @@
             <com.dimadesu.lifestreamer.ui.components.AudioLevelMeterView
                 android:id="@+id/audioLevelMeter"
                 android:layout_width="100dp"
-                android:layout_height="10dp" />
+                android:layout_height="14dp" />
 
         </LinearLayout>
 

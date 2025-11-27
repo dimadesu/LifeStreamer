@@ -2108,9 +2108,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         try {
             val audioProcessor = serviceStreamer?.audioInput?.processor
             if (audioProcessor != null) {
-                audioProcessor.audioLevelCallback = { rms, peak ->
+                // Set channel count from current audio config
+                viewModelScope.launch {
+                    try {
+                        val audioConfig = storageRepository.audioConfigFlow.first()
+                        if (audioConfig != null) {
+                            val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
+                            audioProcessor.channelCount = channelCount
+                            Log.i(TAG, "Audio level monitoring: channelCount=$channelCount")
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to get channel count: ${t.message}")
+                    }
+                }
+                
+                audioProcessor.audioLevelCallback = { levels ->
                     // Update the flow (this is called from audio thread, so be efficient)
-                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(rms, peak)
+                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(
+                        rms = levels.rmsLeft,
+                        peak = levels.peakLeft,
+                        rmsRight = levels.rmsRight,
+                        peakRight = levels.peakRight,
+                        isStereo = levels.isStereo
+                    )
                 }
                 Log.i(TAG, "Audio level monitoring enabled")
             } else {
