@@ -205,11 +205,11 @@ class AudioLevelMeterView @JvmOverloads constructor(
     private fun drawMonoMeter(canvas: Canvas, w: Float, h: Float) {
         val cornerRadius = h / 2
         
-        // Draw background
+        // Draw background (same size as level bar)
         rect.set(0f, 0f, w, h)
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, backgroundPaint)
         
-        // Draw level bar
+        // Draw level bar (same bounds as background)
         val levelWidth = (w * currentLevelLeft.coerceIn(0f, 1f))
         if (levelWidth > 0) {
             levelRect.set(0f, 0f, levelWidth, h)

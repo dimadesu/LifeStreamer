@@ -228,20 +228,20 @@
         <!-- Audio Level Meter Container -->
         <LinearLayout
             android:id="@+id/audioLevelContainer"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingVertical="3dp"
             android:paddingHorizontal="5dp"
-            android:layout_marginEnd="20dp"
             android:background="#80000000"
             app:layout_constraintTop_toBottomOf="@+id/audioSourceLayout"
-            app:layout_constraintEnd_toEndOf="parent">
+            app:layout_constraintStart_toStartOf="@+id/audioSourceLayout"
+            app:layout_constraintEnd_toEndOf="@+id/audioSourceLayout">
 
             <com.dimadesu.lifestreamer.ui.components.AudioLevelMeterView
                 android:id="@+id/audioLevelMeter"
-                android:layout_width="100dp"
+                android:layout_width="match_parent"
                 android:layout_height="14dp" />
 
         </LinearLayout>
