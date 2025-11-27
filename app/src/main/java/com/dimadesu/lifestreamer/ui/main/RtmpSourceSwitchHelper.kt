@@ -3,9 +3,11 @@ package com.dimadesu.lifestreamer.ui.main
 import android.app.Application
 import android.util.Log
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.extractor.DefaultExtractorsFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -23,11 +25,21 @@ import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
+import com.dimadesu.lifestreamer.player.SrtDataSourceFactory
+import com.dimadesu.lifestreamer.player.TsOnlyExtractorFactory
 import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
 
+    /**
+     * Check if the URL is an SRT URL.
+     */
+    private fun isSrtUrl(url: String): Boolean {
+        return url.lowercase().startsWith("srt://")
+    }
+
+    @androidx.annotation.OptIn(UnstableApi::class)
     suspend fun createExoPlayer(application: Application, url: String): ExoPlayer =
         withContext(Dispatchers.Main) {
             val loadControl = DefaultLoadControl.Builder()
@@ -44,9 +56,21 @@ internal object RtmpSourceSwitchHelper {
                 .build()
 
             val mediaItem = MediaItem.fromUri(url)
-            val mediaSource = androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
-                DefaultDataSource.Factory(application)
-            ).createMediaSource(mediaItem)
+            
+            // Use SRT data source for srt:// URLs, otherwise use default (supports RTMP, etc.)
+            val mediaSource = if (isSrtUrl(url)) {
+                Log.i(TAG, "Creating SRT media source for: $url")
+                androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
+                    SrtDataSourceFactory(),
+                    TsOnlyExtractorFactory()
+                ).createMediaSource(mediaItem)
+            } else {
+                Log.i(TAG, "Creating default media source for: $url")
+                androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
+                    DefaultDataSource.Factory(application),
+                    DefaultExtractorsFactory()
+                ).createMediaSource(mediaItem)
+            }
 
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.volume = 0f
@@ -54,7 +78,8 @@ internal object RtmpSourceSwitchHelper {
             // Add a lightweight error listener so callers can observe failures in logs
             exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    Log.w(TAG, "ExoPlayer RTMP error: ${error.message}")
+                    val protocol = if (isSrtUrl(url)) "SRT" else "RTMP"
+                    Log.w(TAG, "ExoPlayer $protocol error: ${error.message}")
                 }
             })
             exoPlayer
