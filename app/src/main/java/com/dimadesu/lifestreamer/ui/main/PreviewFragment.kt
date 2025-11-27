@@ -413,6 +413,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.w(TAG, "Failed to update bitrate text: ${t.message}")
             }
         }
+        
+        // Collect audio level flow and update the VU meter
+        lifecycleScope.launch {
+            previewViewModel.audioLevelFlow.collect { level ->
+                try {
+                    if (level == com.dimadesu.lifestreamer.audio.AudioLevel.SILENT) {
+                        binding.audioLevelMeter.reset()
+                        // Hide meter but keep space allocated (INVISIBLE, not GONE)
+                        binding.audioLevelContainer.visibility = android.view.View.INVISIBLE
+                    } else {
+                        binding.audioLevelContainer.visibility = android.view.View.VISIBLE
+                        binding.audioLevelMeter.setAudioLevel(level)
+                    }
+                } catch (t: Throwable) {
+                    // View might not be attached yet
+                }
+            }
+        }
     }
 
     /**
