@@ -191,7 +191,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="I test mostly with Samsung phones. I've noticed phone lowers audio quality of USB audio when USB video is used. It seems to happen on the low level, that I can't control from the app side. So I can't make the phone give highter quality audio. Just something to be aware of."
+      android:text="I test mostly with Samsung phones. I've noticed phone lowers audio quality of USB audio when USB video is used. It seems to happen on the low level, that I can't control from the app side. So I can't make the phone give higher quality audio. Just something to be aware of."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
