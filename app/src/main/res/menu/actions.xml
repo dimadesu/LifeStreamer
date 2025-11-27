@@ -12,13 +12,18 @@
         android:title="@string/action_rtmp_help"
         app:showAsAction="never" />
     <item
-        android:id="@+id/action_uvc_help"
+        android:id="@+id/action_srt_help"
         android:orderInCategory="102"
+        android:title="@string/action_srt_help"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_uvc_help"
+        android:orderInCategory="103"
         android:title="@string/action_uvc_help"
         app:showAsAction="never" />
     <item
         android:id="@+id/action_faq"
-        android:orderInCategory="103"
+        android:orderInCategory="104"
         android:title="@string/action_faq"
         app:showAsAction="never" />
 </menu>

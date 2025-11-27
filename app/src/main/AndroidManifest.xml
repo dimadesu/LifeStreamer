@@ -52,6 +52,7 @@
         </activity>
         <activity android:name=".ui.settings.SettingsActivity" />
         <activity android:name=".ui.help.RtmpHelpActivity" />
+        <activity android:name=".ui.help.SrtHelpActivity" />
         <activity android:name=".ui.help.UvcHelpActivity" />
         <activity android:name=".ui.help.FaqHelpActivity" />
 
