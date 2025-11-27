@@ -26,8 +26,11 @@ class AudioLevelMeterView @JvmOverloads constructor(
     private var peakLevel: Float = 0f
     private var peakHoldLevel: Float = 0f  // The displayed peak (with hold/decay)
     private var peakHoldTime: Long = 0L    // When the peak was last updated
+    private var lastUpdateTime: Long = 0L  // Throttle UI updates
     private var isClipping: Boolean = false
     
+    // Minimum interval between UI updates (in ms) - ~30fps is plenty for a VU meter
+    private val minUpdateIntervalMs = 33L
     // Peak hold duration in milliseconds before decay starts
     private val peakHoldDurationMs = 500L
     // Peak decay rate per frame (0-1, how much to reduce per update)
@@ -63,6 +66,7 @@ class AudioLevelMeterView @JvmOverloads constructor(
      * @param audioLevel The current audio level from the processor
      */
     fun setAudioLevel(audioLevel: AudioLevel) {
+        // Always update target level and peak tracking (even if we skip redraw)
         targetLevel = audioLevel.normalizedLevel
         
         // Calculate incoming peak level
@@ -82,6 +86,12 @@ class AudioLevelMeterView @JvmOverloads constructor(
                 peakHoldLevel = (peakHoldLevel - peakDecayRate).coerceAtLeast(0f)
             }
         }
+        
+        // Throttle UI updates to reduce resource usage
+        if (now - lastUpdateTime < minUpdateIntervalMs) {
+            return
+        }
+        lastUpdateTime = now
         
         peakLevel = peakHoldLevel
         isClipping = audioLevel.isClipping
