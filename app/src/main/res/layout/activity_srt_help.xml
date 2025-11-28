@@ -50,7 +50,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="You can enter an SRT URL in the same Settings field used for RTMP source. The app will automatically detect that it is an SRT URL and use the SRT protocol.\n\nSRT URL format:\nsrt://hostname:port?streamid=your_stream_id\n\nExample (MediaMTX server):\nsrt://192.168.1.100:8890?streamid=read:mystream"
+      android:text="You can enter an SRT URL on the settings screen into RTMP source URL field. The app will automatically detect that it is an SRT URL and use the SRT protocol.\n\nSRT URL format:\nsrt://hostname:port?streamid=your_stream_id\n\nMediaMTX server example:\nsrt://localhost:8890?streamid=read:mystream\n\nsrt-live-transmit example:\nsrt://localhost:10000"
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -109,7 +109,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="How to run SRT server on Android?"
+      android:text="How to run SRT server on Android"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -123,6 +123,14 @@
       android:lineSpacingMultiplier="1.2"
       android:autoLink="web"
       android:linksClickable="true"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="You can also try using srt-live-transmit tool in Termux. Research how to install it. Run this in Termux when you have it installed:\n\n# Receive SRT on port 9000 and output on port 10000\nsrt-live-transmit &quot;srt://:9000&quot; &quot;srt://:10000&quot;"
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
 
   </LinearLayout>
