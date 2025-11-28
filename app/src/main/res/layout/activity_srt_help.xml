@@ -128,7 +128,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="You can also try using srt-live-transmit tool in Termux. Research how to install it. Run this in Termux when you have it installed:\n\n# Receive SRT on port 9000 and output on port 10000\nsrt-live-transmit &quot;srt://:9000&quot; &quot;srt://:10000&quot;"
+      android:text="You can also try using srt-live-transmit tool in Termux. Research how to install it. Run this in Termux when you have it installed:\n\n# Receive SRT on port 9000 and output on port 10000\nsrt-live-transmit srt://:9000 srt://:10000"
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
