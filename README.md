@@ -6,7 +6,7 @@ Live streaming app for Android designed for IRL streaming based on [StreamPack S
 
 - Restream RTMP feed or USB video/audio (UVC) from action camera like DJI Osmo Action 4 as SRT HEVC/H.265 with amazing dynamic/adaptive bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
 - Can use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
-- Can use any RTMP server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
+- Can use feed from any RTMP or SRT server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
 - USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: phones can lower USB audio quality when USB video is used.
 - Background mode (foreground service) allows streaming with app in background, phone locked and screen off. (Phone limits access to resources in this mode, so performance is worse. Test first and consider lowering video encoder settings and bitrate.)
 - Aggressive infinite reconnect when app loses connection.
@@ -24,6 +24,7 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 
 - Phone cameras.
 - RTMP video.
+- SRT video.
 - USB Video (UVC).
 
 ### Audio
@@ -32,7 +33,7 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 - USB audio: USB headphones, USB audio interfaces, wireless mic receivers, etc.
   - With USB video LifeStreamer is using USB audio from USB camera if available.
 - Mics from Bluetooth headphones, earbuds, etc.
-- For RTMP source app uses Media Projection Audio to record RTMP player audio - kind of like phone screen recorder.
+- For RTMP and SRT sources app uses Media Projection Audio to record RTMP/SRT player audio - kind of like phone screen recorder.
 
 ## Apps that can work together
 
