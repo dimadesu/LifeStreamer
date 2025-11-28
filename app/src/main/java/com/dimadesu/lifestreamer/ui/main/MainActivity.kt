@@ -27,6 +27,7 @@ import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
 import com.dimadesu.lifestreamer.ui.help.FaqHelpActivity
 import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
+import com.dimadesu.lifestreamer.ui.help.SrtHelpActivity
 import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
 
 class MainActivity : AppCompatActivity() {
@@ -105,6 +106,10 @@ class MainActivity : AppCompatActivity() {
                     goToRtmpHelpActivity()
                     true
                 }
+                R.id.action_srt_help -> {
+                    goToSrtHelpActivity()
+                    true
+                }
                 R.id.action_uvc_help -> {
                     goToUvcHelpActivity()
                     true
@@ -128,6 +133,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun goToRtmpHelpActivity() {
         val intent = Intent(this, RtmpHelpActivity::class.java)
+        startActivity(intent)
+    }
+
+    private fun goToSrtHelpActivity() {
+        val intent = Intent(this, SrtHelpActivity::class.java)
         startActivity(intent)
     }
 
