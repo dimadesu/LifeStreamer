@@ -2919,8 +2919,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         }
                                     }
                                     
-                                    // Open the camera after device is opened
-                                    openCamera()
+                                    // Open the camera after device is opened - use saved video config if available
+                                    // (includes format type, resolution, and frame rate)
+                                    val savedVideoConfig = getSavedUvcVideoConfig(device)
+                                    openCamera(savedVideoConfig)
                                 }
                                 
                                 override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
@@ -3459,6 +3461,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         streamingMediaProjection = null
         mediaProjectionHelper.release()
         Log.i(TAG, "PreviewViewModel cleared but service continues running for background streaming")
+    }
+
+    /**
+     * Retrieves the saved video config for a specific USB device from SharedPreferences.
+     * The Size object contains format type (YUV/MJPEG), resolution (width x height), and frame rate (fps).
+     * This matches the key format used in UvcTestActivity.setSavedPreviewSize().
+     */
+    private fun getSavedUvcVideoConfig(device: android.hardware.usb.UsbDevice): com.serenegiant.usb.Size? {
+        val key = "saved_preview_size_" + com.serenegiant.usb.USBMonitor.getProductKey(device)
+        val prefs = application.getSharedPreferences("uvc_camera_prefs", Context.MODE_PRIVATE)
+        val formatJson = prefs.getString(key, null)
+        if (formatJson.isNullOrEmpty()) {
+            Log.d(TAG, "No saved video format found for device: ${device.deviceName}")
+            return null
+        }
+        return try {
+            val gson = com.google.gson.Gson()
+            val format = gson.fromJson(formatJson, com.serenegiant.usb.Size::class.java)
+            Log.d(TAG, "Loaded saved video format: type=${format.type}, ${format.width}x${format.height}@${format.fps}fps for device: ${device.deviceName}")
+            format
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse saved video format: ${e.message}")
+            null
+        }
     }
 
     companion object {
