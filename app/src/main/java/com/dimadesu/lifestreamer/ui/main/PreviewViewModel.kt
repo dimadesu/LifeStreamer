@@ -2919,8 +2919,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         }
                                     }
                                     
-                                    // Open the camera after device is opened
-                                    openCamera()
+                                    // Open the camera after device is opened - use saved preview size if available
+                                    val savedSize = getSavedUvcPreviewSize(device)
+                                    openCamera(savedSize)
                                 }
                                 
                                 override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
@@ -3459,6 +3460,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         streamingMediaProjection = null
         mediaProjectionHelper.release()
         Log.i(TAG, "PreviewViewModel cleared but service continues running for background streaming")
+    }
+
+    /**
+     * Retrieves the saved preview size for a specific USB device from SharedPreferences.
+     * This matches the key format used in UvcTestActivity.setSavedPreviewSize().
+     */
+    private fun getSavedUvcPreviewSize(device: android.hardware.usb.UsbDevice): com.serenegiant.usb.Size? {
+        val key = "saved_preview_size_" + com.serenegiant.usb.USBMonitor.getProductKey(device)
+        val prefs = application.getSharedPreferences("uvc_camera_prefs", Context.MODE_PRIVATE)
+        val sizeStr = prefs.getString(key, null)
+        if (sizeStr.isNullOrEmpty()) {
+            Log.d(TAG, "No saved preview size found for device: ${device.deviceName}")
+            return null
+        }
+        return try {
+            val gson = com.google.gson.Gson()
+            val size = gson.fromJson(sizeStr, com.serenegiant.usb.Size::class.java)
+            Log.d(TAG, "Loaded saved preview size: ${size.width}x${size.height} for device: ${device.deviceName}")
+            size
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse saved preview size: ${e.message}")
+            null
+        }
     }
 
     companion object {
