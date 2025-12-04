@@ -2919,9 +2919,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         }
                                     }
                                     
-                                    // Open the camera after device is opened - use saved preview size if available
-                                    val savedSize = getSavedUvcPreviewSize(device)
-                                    openCamera(savedSize)
+                                    // Open the camera after device is opened - use saved video config if available
+                                    // (includes format type, resolution, and frame rate)
+                                    val savedVideoConfig = getSavedUvcVideoConfig(device)
+                                    openCamera(savedVideoConfig)
                                 }
                                 
                                 override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
@@ -3463,24 +3464,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
-     * Retrieves the saved preview size for a specific USB device from SharedPreferences.
+     * Retrieves the saved video config for a specific USB device from SharedPreferences.
+     * The Size object contains format type (YUV/MJPEG), resolution (width x height), and frame rate (fps).
      * This matches the key format used in UvcTestActivity.setSavedPreviewSize().
      */
-    private fun getSavedUvcPreviewSize(device: android.hardware.usb.UsbDevice): com.serenegiant.usb.Size? {
+    private fun getSavedUvcVideoConfig(device: android.hardware.usb.UsbDevice): com.serenegiant.usb.Size? {
         val key = "saved_preview_size_" + com.serenegiant.usb.USBMonitor.getProductKey(device)
         val prefs = application.getSharedPreferences("uvc_camera_prefs", Context.MODE_PRIVATE)
-        val sizeStr = prefs.getString(key, null)
-        if (sizeStr.isNullOrEmpty()) {
-            Log.d(TAG, "No saved preview size found for device: ${device.deviceName}")
+        val formatJson = prefs.getString(key, null)
+        if (formatJson.isNullOrEmpty()) {
+            Log.d(TAG, "No saved video format found for device: ${device.deviceName}")
             return null
         }
         return try {
             val gson = com.google.gson.Gson()
-            val size = gson.fromJson(sizeStr, com.serenegiant.usb.Size::class.java)
-            Log.d(TAG, "Loaded saved preview size: ${size.width}x${size.height} for device: ${device.deviceName}")
-            size
+            val format = gson.fromJson(formatJson, com.serenegiant.usb.Size::class.java)
+            Log.d(TAG, "Loaded saved video format: type=${format.type}, ${format.width}x${format.height}@${format.fps}fps for device: ${device.deviceName}")
+            format
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse saved preview size: ${e.message}")
+            Log.w(TAG, "Failed to parse saved video format: ${e.message}")
             null
         }
     }
