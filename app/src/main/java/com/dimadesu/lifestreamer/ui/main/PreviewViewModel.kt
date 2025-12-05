@@ -157,6 +157,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _audioLevelFlow = MutableStateFlow(com.dimadesu.lifestreamer.audio.AudioLevel.SILENT)
     val audioLevelFlow: StateFlow<com.dimadesu.lifestreamer.audio.AudioLevel> = _audioLevelFlow.asStateFlow()
 
+    // Encoder stats display
+    private val _encoderStatsLiveData = MutableLiveData<String?>(null)
+    val encoderStatsLiveData: LiveData<String?> get() = _encoderStatsLiveData
+
     fun clearBluetoothConnectRequest() {
         _bluetoothConnectRequestLiveData.postValue(null)
     }
@@ -815,6 +819,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to collect bitrate from service: ${t.message}")
+                    }
+                    // Collect encoder stats flow from service
+                    try {
+                        val svc = binder.getService()
+                        viewModelScope.launch {
+                            svc.encoderStatsFlow.collect { statsText ->
+                                _encoderStatsLiveData.postValue(statsText)
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to collect encoder stats from service: ${t.message}")
                     }
                     // Observe passthrough running state so UI can reflect actual service state
                     // Only sync when NOT on RTMP source (RTMP uses ExoPlayer volume, not passthrough)

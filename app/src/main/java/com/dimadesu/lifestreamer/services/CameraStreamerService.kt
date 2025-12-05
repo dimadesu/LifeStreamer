@@ -151,6 +151,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
+    // Encoder stats flow for UI display
+    private val _encoderStatsFlow = MutableStateFlow<String?>(null)
+    val encoderStatsFlow = _encoderStatsFlow.asStateFlow()
     // Current audio mute state exposed as a StateFlow for UI synchronization
     private val _isMutedFlow = MutableStateFlow(false)
     val isMutedFlow = _isMutedFlow.asStateFlow()
@@ -552,6 +555,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
         // Clear bitrate flow so UI shows cleared state immediately
         try { _currentBitrateFlow.tryEmit(null) } catch (_: Throwable) {}
+        // Clear encoder stats flow so UI shows cleared state immediately
+        try { _encoderStatsFlow.tryEmit(null) } catch (_: Throwable) {}
         // Update service-side status
         try { _serviceStreamStatus.tryEmit(StreamStatus.NOT_STREAMING) } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
@@ -633,14 +638,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Determine mute/unmute state before building the notification key
                     val isMuted = isCurrentlyMuted()
 
-                    // Only read/emit current encoder bitrate when streaming; otherwise clear it
+                    // Only read/emit current encoder bitrate and stats when streaming; otherwise clear them
                     val isStreamingNow = serviceStatus == StreamStatus.STREAMING
+                    val videoEncoderRef = (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder
                     val videoBitrate = if (isStreamingNow) {
-                        (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
+                        videoEncoderRef?.bitrate
                     } else null
                     // Emit bitrate (or null when not streaming) to flow for UI consumers
                     try { _currentBitrateFlow.emit(videoBitrate) } catch (_: Throwable) {}
-
+                    
+                    // Emit encoder stats (or null when not streaming) to flow for UI consumers
+                    val encoderStatsText = if (isStreamingNow) {
+                        try {
+                            val stats = videoEncoderRef?.getStats()
+                            stats?.let { s -> "%.1f fps".format(java.util.Locale.US, s.outputFps) }
+                        } catch (_: Throwable) { null }
+                    } else null
+                    try { _encoderStatsFlow.emit(encoderStatsText) } catch (_: Throwable) {}
                     val bitrateText = videoBitrate?.let { b ->
                         if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000)
                     } ?: ""
@@ -716,19 +730,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                       status == StreamStatus.CONNECTING || 
                       status == StreamStatus.STARTING
 
-        // Only read bitrate when streaming
-        val videoBitrate = if (status == StreamStatus.STREAMING) {
-            (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate
+        // Only read bitrate and FPS when streaming
+        val videoEncoderRef = if (status == StreamStatus.STREAMING) {
+            (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder
         } else null
+        val videoBitrate = videoEncoderRef?.bitrate
+        val fpsText = try {
+            videoEncoderRef?.getStats()?.let { s -> "%.1f fps".format(java.util.Locale.US, s.outputFps) }
+        } catch (_: Throwable) { null }
 
         val bitrateText = videoBitrate?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
 
         val contentWithBitrate = if (status == StreamStatus.STREAMING) {
             val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
             // content already contains statusLabel when streaming (e.g., "Live • 00:01:23"),
-            // so avoid appending the statusLabel again. Just add bitrate after whatever
+            // so avoid appending the statusLabel again. Just add bitrate and FPS after whatever
             // content we've computed.
-            "$content • $vb"
+            val fpsAppend = fpsText?.let { " • $it" } ?: ""
+            "$content • $vb$fpsAppend"
         } else content
 
         // Avoid duplicating the status label. Use contentWithBitrate directly as the
@@ -754,7 +773,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             openPending = openPendingIntent
         )
 
-        val key = listOf(status.name, isCurrentlyMuted(), content, bitrateText, statusLabel).joinToString("|")
+        val key = listOf(status.name, isCurrentlyMuted(), content, bitrateText, fpsText ?: "", statusLabel).joinToString("|")
         return Pair(notification, key)
     }
 
