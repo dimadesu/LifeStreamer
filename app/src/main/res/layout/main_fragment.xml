@@ -246,6 +246,31 @@
 
         </LinearLayout>
 
+        <!-- Encoder Stats Display -->
+        <LinearLayout
+            android:id="@+id/encoderStatsLayout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingVertical="3dp"
+            android:paddingHorizontal="5dp"
+            android:layout_marginEnd="20dp"
+            android:background="#80000000"
+            app:layout_constraintTop_toBottomOf="@+id/audioLevelContainer"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:goneUnless='@{viewmodel.encoderStatsLiveData != null}'>
+
+            <TextView
+                android:id="@+id/encoderStatsText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:text='@{viewmodel.encoderStatsLiveData}' />
+
+        </LinearLayout>
+
         <ToggleButton
             android:id="@+id/liveButton"
             android:layout_width="wrap_content"
