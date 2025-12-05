@@ -161,6 +161,16 @@
             app:layout_constraintEnd_toEndOf="parent">
 
             <TextView
+                android:id="@+id/fpsText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:layout_marginEnd="16dp"
+                android:text='@{viewmodel.encoderStatsLiveData}'
+                app:goneUnless='@{viewmodel.encoderStatsLiveData != null}' />
+
+            <TextView
                 android:id="@+id/uptimeText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -243,31 +253,6 @@
                 android:id="@+id/audioLevelMeter"
                 android:layout_width="match_parent"
                 android:layout_height="14dp" />
-
-        </LinearLayout>
-
-        <!-- Encoder Stats Display -->
-        <LinearLayout
-            android:id="@+id/encoderStatsLayout"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingVertical="3dp"
-            android:paddingHorizontal="5dp"
-            android:layout_marginEnd="20dp"
-            android:background="#80000000"
-            app:layout_constraintTop_toBottomOf="@+id/audioLevelContainer"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:goneUnless='@{viewmodel.encoderStatsLiveData != null}'>
-
-            <TextView
-                android:id="@+id/encoderStatsText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="12sp"
-                android:fontFamily="monospace"
-                android:text='@{viewmodel.encoderStatsLiveData}' />
 
         </LinearLayout>
 

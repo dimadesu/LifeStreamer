@@ -651,7 +651,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val encoderStatsText = if (isStreamingNow) {
                         try {
                             val stats = videoEncoderRef?.getStats()
-                            stats?.let { s -> "Enc: %.1f fps".format(java.util.Locale.US, s.outputFps) }
+                            stats?.let { s -> "%.1f fps".format(java.util.Locale.US, s.outputFps) }
                         } catch (_: Throwable) { null }
                     } else null
                     try { _encoderStatsFlow.emit(encoderStatsText) } catch (_: Throwable) {}
