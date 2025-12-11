@@ -2856,10 +2856,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
                         
-                        // Switch back to camera
+                        // Switch back to camera (audio source unchanged - Android handles USB audio routing)
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2869,7 +2868,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             applyMonitorAudioState()
                         }
                         
-                        Log.i(TAG, "Switched to camera source with BT-aware audio")
+                        Log.i(TAG, "Switched to camera source (audio unchanged)")
                     }
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
@@ -2913,10 +2912,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 // Remove bitrate regulator if streaming with SRT
                                                 removeBitrateRegulatorIfNeeded()
                                                 
-                                                // Switch to UVC source
+                                                // Switch to UVC source (audio source unchanged - Android handles USB audio routing)
                                                 delay(300)
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
-                                                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                                                 
                                                 // Re-add bitrate regulator if streaming with SRT
                                                 readdBitrateRegulatorIfNeeded()
@@ -2926,7 +2924,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                     applyMonitorAudioState()
                                                 }
                                                 
-                                                Log.i(TAG, "Switched to UVC source after permission grant with BT-aware audio")
+                                                Log.i(TAG, "Switched to UVC source after permission grant (audio unchanged)")
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
