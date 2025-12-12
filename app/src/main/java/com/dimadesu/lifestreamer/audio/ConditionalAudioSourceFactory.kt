@@ -1,16 +1,23 @@
 package com.dimadesu.lifestreamer.audio
 
 import android.content.Context
-import android.media.MediaRecorder
 import android.util.Log
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 
 /**
  * Audio source factory that handles mic-based audio with USB awareness.
  * 
- * @param forceUnprocessed When true, forces UNPROCESSED mode regardless of USB detection.
+ * @param forceUnprocessed When true, forces UnprocessedAudioSource regardless of USB detection.
  *                         Use this when switching to USB video to force audio reinitialization.
  *                         When false (default), auto-detects USB audio and chooses appropriately.
+ * 
+ * Sources used:
+ * - forceUnprocessed=true → UnprocessedAudioSource (our custom, UNPROCESSED mode)
+ * - forceUnprocessed=false + USB detected → UnprocessedAudioSource
+ * - forceUnprocessed=false + no USB → MicrophoneSource (StreamPack, DEFAULT mode)
+ * 
+ * SCO/Bluetooth is negotiated asynchronously by the service and will call
+ * `setAudioSource(...)` to switch to BluetoothAudioSource only after SCO is confirmed.
  */
 class ConditionalAudioSourceFactory(
     private val forceUnprocessed: Boolean = false
@@ -18,22 +25,13 @@ class ConditionalAudioSourceFactory(
     private val TAG = "ConditionalAudioSourceFactory"
 
     override suspend fun create(context: Context): IAudioSourceInternal {
-        // Use SmartMicrophoneSource which automatically detects USB audio and selects
-        // the optimal audio source type:
-        // - USB audio → UNPROCESSED (raw capture, no DSP)
-        // - Built-in mic → DEFAULT (with system noise cancellation)
-        // 
-        // When forceUnprocessed=true, bypasses auto-detection and forces UNPROCESSED.
-        // This is needed when switching to USB video to force audio reinitialization.
-        // 
-        // SCO/Bluetooth is negotiated asynchronously by the service and will call
-        // `setAudioSource(...)` to switch to BluetoothAudioSource only after SCO is confirmed.
         return if (forceUnprocessed) {
-            Log.i(TAG, "Creating SmartMicrophoneSource with FORCED UNPROCESSED (USB video mode)")
-            SmartMicrophoneSource(context, MediaRecorder.AudioSource.UNPROCESSED)
+            Log.i(TAG, "Forced UNPROCESSED mode → creating UnprocessedAudioSource")
+            UnprocessedAudioSourceFactory().create(context)
         } else {
-            Log.i(TAG, "Creating SmartMicrophoneSource (auto-detect mode, deferred BT switch)")
-            SmartMicrophoneSource(context)
+            // Delegate to SmartMicrophoneSourceFactory which auto-detects USB
+            Log.i(TAG, "Auto-detect mode → delegating to SmartMicrophoneSourceFactory")
+            SmartMicrophoneSourceFactory().create(context)
         }
     }
 
@@ -41,20 +39,17 @@ class ConditionalAudioSourceFactory(
         // If source is null, we need to create a new source
         if (source == null) return false
         
-        // Check if source is SmartMicrophoneSource and matches our mode
-        if (source is SmartMicrophoneSource) {
-            // Forced mode only matches forced sources, auto-detect only matches auto-detect
-            return source.isForced == forceUnprocessed
+        if (forceUnprocessed) {
+            // Forced mode only matches UnprocessedAudioSource
+            return source is UnprocessedAudioSource
+        } else {
+            // Auto-detect mode matches either MicrophoneSource (StreamPack) or UnprocessedAudioSource
+            // MicrophoneSource is internal in StreamPack, so check by class name
+            val className = source.javaClass.simpleName
+            return source is UnprocessedAudioSource || 
+                   className == "MicrophoneSource" ||
+                   className.contains("AudioRecord", ignoreCase = true)
         }
-        
-        // For backward compatibility with other mic sources (only in auto-detect mode)
-        if (!forceUnprocessed) {
-            val sourceName = source.javaClass.simpleName
-            return sourceName.contains("AudioRecord", ignoreCase = true) ||
-                   sourceName.contains("Microphone", ignoreCase = true)
-        }
-        
-        return false
     }
     
     override fun toString(): String {
