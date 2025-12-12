@@ -2925,6 +2925,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 }
                                                 
                                                 Log.i(TAG, "Switched to UVC source after permission grant (audio unchanged)")
+                                                
+                                                // EXPERIMENTAL: Force UNPROCESSED audio source after delay
+                                                // First switch to MicrophoneSource to force a real change,
+                                                // then switch to ForcedUnprocessed
+                                                Log.i(TAG, "UVC: Switching to MicrophoneSource first (to force real change)")
+                                                try {
+                                                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
+                                                    Log.i(TAG, "UVC: Switched to MicrophoneSource")
+                                                    Log.i(TAG, "UVC: Now forcing UNPROCESSED audio source")
+                                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ForcedUnprocessedAudioSourceFactory())
+                                                    Log.i(TAG, "UVC: Forced UNPROCESSED audio source successfully")
+                                                } catch (audioEx: Exception) {
+                                                    Log.w(TAG, "UVC: Failed to force UNPROCESSED audio: ${audioEx.message}")
+                                                }
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")

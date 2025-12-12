@@ -27,8 +27,14 @@ import kotlinx.coroutines.flow.asStateFlow
  * This provides the best audio quality for each scenario:
  * - USB audio interfaces typically have their own high-quality preamps and don't need processing
  * - Built-in phone mics benefit from noise cancellation and echo suppression
+ * 
+ * @param context Android context
+ * @param forceAudioSource Optional audio source type to force (e.g., UNPROCESSED). If null, auto-detects.
  */
-class SmartMicrophoneSource(private val context: Context) : IAudioSourceInternal {
+class SmartMicrophoneSource(
+    private val context: Context,
+    private val forceAudioSource: Int? = null
+) : IAudioSourceInternal {
     
     companion object {
         private const val TAG = "SmartMicrophoneSource"
@@ -76,13 +82,18 @@ class SmartMicrophoneSource(private val context: Context) : IAudioSourceInternal
     
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun buildAudioRecord(config: AudioSourceConfig, bufferSize: Int): AudioRecord {
-        val hasUsbAudio = hasUsbAudioInput()
-        val audioSourceType = if (hasUsbAudio) {
-            Log.i(TAG, "USB audio input detected - using UNPROCESSED audio source for raw capture")
-            MediaRecorder.AudioSource.UNPROCESSED
+        val audioSourceType = if (forceAudioSource != null) {
+            Log.i(TAG, "Forced audio source type: ${audioSourceName(forceAudioSource)}")
+            forceAudioSource
         } else {
-            Log.i(TAG, "No USB audio input - using DEFAULT audio source (with system processing)")
-            MediaRecorder.AudioSource.DEFAULT
+            val hasUsbAudio = hasUsbAudioInput()
+            if (hasUsbAudio) {
+                Log.i(TAG, "USB audio input detected - using UNPROCESSED audio source for raw capture")
+                MediaRecorder.AudioSource.UNPROCESSED
+            } else {
+                Log.i(TAG, "No USB audio input - using DEFAULT audio source (with system processing)")
+                MediaRecorder.AudioSource.DEFAULT
+            }
         }
         
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -213,6 +224,18 @@ class SmartMicrophoneSource(private val context: Context) : IAudioSourceInternal
         
         return timestamp
     }
+    
+    private fun audioSourceName(source: Int): String {
+        return when (source) {
+            MediaRecorder.AudioSource.DEFAULT -> "DEFAULT"
+            MediaRecorder.AudioSource.MIC -> "MIC"
+            MediaRecorder.AudioSource.CAMCORDER -> "CAMCORDER"
+            MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
+            MediaRecorder.AudioSource.UNPROCESSED -> "UNPROCESSED"
+            else -> "UNKNOWN($source)"
+        }
+    }
 }
 
 /**
@@ -233,5 +256,26 @@ class SmartMicrophoneSourceFactory : IAudioSourceInternal.Factory {
 
     override fun toString(): String {
         return "SmartMicrophoneSourceFactory()"
+    }
+}
+
+/**
+ * Factory to create a [SmartMicrophoneSource] with forced UNPROCESSED audio source.
+ * 
+ * This bypasses auto-detection and always uses UNPROCESSED mode,
+ * which can be useful for forcing raw audio capture after USB video is activated.
+ */
+class ForcedUnprocessedAudioSourceFactory : IAudioSourceInternal.Factory {
+    
+    override suspend fun create(context: Context): IAudioSourceInternal {
+        return SmartMicrophoneSource(context, MediaRecorder.AudioSource.UNPROCESSED)
+    }
+
+    override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
+        return source is SmartMicrophoneSource
+    }
+
+    override fun toString(): String {
+        return "ForcedUnprocessedAudioSourceFactory()"
     }
 }
