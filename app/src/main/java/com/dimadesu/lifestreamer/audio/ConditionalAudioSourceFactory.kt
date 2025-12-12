@@ -1,8 +1,12 @@
 package com.dimadesu.lifestreamer.audio
 
 import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.util.Log
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
+import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 
 /**
  * Audio source factory that handles mic-based audio with USB awareness.
@@ -22,16 +26,50 @@ import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSource
 class ConditionalAudioSourceFactory(
     private val forceUnprocessed: Boolean = false
 ) : IAudioSourceInternal.Factory {
-    private val TAG = "ConditionalAudioSourceFactory"
+    
+    companion object {
+        private const val TAG = "ConditionalAudioSrcFact"
+        
+        /**
+         * Check if a USB audio input device is currently connected.
+         */
+        fun hasUsbAudioInput(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                return false
+            }
+            
+            return try {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val inputDevices = audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS) ?: emptyArray()
+                
+                val usbDevice = inputDevices.firstOrNull { device ->
+                    device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                    device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+                }
+                
+                if (usbDevice != null) {
+                    Log.d(TAG, "Found USB audio input: ${usbDevice.productName ?: "Unknown"} (type=${usbDevice.type})")
+                }
+                
+                usbDevice != null
+            } catch (e: Exception) {
+                Log.w(TAG, "Error checking for USB audio: ${e.message}")
+                false
+            }
+        }
+    }
 
     override suspend fun create(context: Context): IAudioSourceInternal {
         return if (forceUnprocessed) {
             Log.i(TAG, "Forced UNPROCESSED mode → creating UnprocessedAudioSource")
             UnprocessedAudioSourceFactory().create(context)
+        } else if (hasUsbAudioInput(context)) {
+            Log.i(TAG, "USB audio detected → creating UnprocessedAudioSource")
+            UnprocessedAudioSourceFactory().create(context)
         } else {
-            // Delegate to SmartMicrophoneSourceFactory which auto-detects USB
-            Log.i(TAG, "Auto-detect mode → delegating to SmartMicrophoneSourceFactory")
-            SmartMicrophoneSourceFactory().create(context)
+            Log.i(TAG, "No USB audio → creating MicrophoneSource (StreamPack)")
+            MicrophoneSourceFactory().create(context)
         }
     }
 

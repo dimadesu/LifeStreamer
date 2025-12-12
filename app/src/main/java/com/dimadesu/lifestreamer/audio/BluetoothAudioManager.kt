@@ -518,7 +518,7 @@ class BluetoothAudioManager(
 
     /**
      * Recreate microphone audio source to ensure clean session.
-     * Uses SmartMicrophoneSourceFactory which will auto-detect USB audio
+     * Uses ConditionalAudioSourceFactory which will auto-detect USB audio
      * and select the appropriate source (UNPROCESSED for USB, DEFAULT for built-in).
      */
     private fun recreateMicSource(streamerInstance: ISingleStreamer?) {
@@ -527,9 +527,9 @@ class BluetoothAudioManager(
             scope.launch(Dispatchers.Default) {
                 try {
                     (streamerInstance as? IWithAudioSource)?.setAudioSource(
-                        SmartMicrophoneSourceFactory()
+                        ConditionalAudioSourceFactory()
                     )
-                    Log.i(TAG, "Recreate mic source: used SmartMicrophoneSourceFactory (USB-aware)")
+                    Log.i(TAG, "Recreate mic source: used ConditionalAudioSourceFactory (USB-aware)")
                 } catch (t: Throwable) {
                     Log.w(TAG, "Recreate mic source failed: ${t.message}")
                 }
