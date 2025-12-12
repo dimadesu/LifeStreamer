@@ -518,8 +518,8 @@ class BluetoothAudioManager(
 
     /**
      * Recreate microphone audio source to ensure clean session.
-     * Uses MicrophoneSourceFactory directly since this is called when BT is disabled/disconnected
-     * and we explicitly want the built-in mic.
+     * Uses SmartMicrophoneSourceFactory which will auto-detect USB audio
+     * and select the appropriate source (UNPROCESSED for USB, DEFAULT for built-in).
      */
     private fun recreateMicSource(streamerInstance: ISingleStreamer?) {
         try {
@@ -527,9 +527,9 @@ class BluetoothAudioManager(
             scope.launch(Dispatchers.Default) {
                 try {
                     (streamerInstance as? IWithAudioSource)?.setAudioSource(
-                        MicrophoneSourceFactory()
+                        SmartMicrophoneSourceFactory()
                     )
-                    Log.i(TAG, "Recreate mic source: used MicrophoneSourceFactory for built-in mic")
+                    Log.i(TAG, "Recreate mic source: used SmartMicrophoneSourceFactory (USB-aware)")
                 } catch (t: Throwable) {
                     Log.w(TAG, "Recreate mic source failed: ${t.message}")
                 }
