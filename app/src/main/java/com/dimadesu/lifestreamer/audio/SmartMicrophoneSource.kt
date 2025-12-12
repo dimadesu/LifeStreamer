@@ -36,6 +36,9 @@ class SmartMicrophoneSource(
     private val forceAudioSource: Int? = null
 ) : IAudioSourceInternal {
     
+    /** True if this source was created with a forced audio source type (not auto-detected) */
+    val isForced: Boolean = forceAudioSource != null
+    
     companion object {
         private const val TAG = "SmartMicrophoneSource"
         
@@ -251,31 +254,11 @@ class SmartMicrophoneSourceFactory : IAudioSourceInternal.Factory {
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        return source is SmartMicrophoneSource
+        // Only matches SmartMicrophoneSource that was NOT forced (auto-detect mode)
+        return source is SmartMicrophoneSource && !source.isForced
     }
 
     override fun toString(): String {
         return "SmartMicrophoneSourceFactory()"
-    }
-}
-
-/**
- * Factory to create a [SmartMicrophoneSource] with forced UNPROCESSED audio source.
- * 
- * This bypasses auto-detection and always uses UNPROCESSED mode,
- * which can be useful for forcing raw audio capture after USB video is activated.
- */
-class ForcedUnprocessedAudioSourceFactory : IAudioSourceInternal.Factory {
-    
-    override suspend fun create(context: Context): IAudioSourceInternal {
-        return SmartMicrophoneSource(context, MediaRecorder.AudioSource.UNPROCESSED)
-    }
-
-    override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        return source is SmartMicrophoneSource
-    }
-
-    override fun toString(): String {
-        return "ForcedUnprocessedAudioSourceFactory()"
     }
 }

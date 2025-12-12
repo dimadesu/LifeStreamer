@@ -2926,18 +2926,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 
                                                 Log.i(TAG, "Switched to UVC source after permission grant (audio unchanged)")
                                                 
-                                                // EXPERIMENTAL: Force UNPROCESSED audio source after delay
-                                                // First switch to MicrophoneSource to force a real change,
-                                                // then switch to ForcedUnprocessed
-                                                Log.i(TAG, "UVC: Switching to MicrophoneSource first (to force real change)")
+                                                // Force UNPROCESSED audio for USB video
+                                                // This forces audio reinitialization to better quality mode
+                                                Log.i(TAG, "UVC: Forcing UNPROCESSED audio for USB video")
                                                 try {
-                                                    currentStreamer.setAudioSource(MicrophoneSourceFactory())
-                                                    Log.i(TAG, "UVC: Switched to MicrophoneSource")
-                                                    Log.i(TAG, "UVC: Now forcing UNPROCESSED audio source")
-                                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ForcedUnprocessedAudioSourceFactory())
-                                                    Log.i(TAG, "UVC: Forced UNPROCESSED audio source successfully")
+                                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory(forceUnprocessed = true))
+                                                    Log.i(TAG, "UVC: UNPROCESSED audio source set successfully")
                                                 } catch (audioEx: Exception) {
-                                                    Log.w(TAG, "UVC: Failed to force UNPROCESSED audio: ${audioEx.message}")
+                                                    Log.w(TAG, "UVC: Failed to set UNPROCESSED audio: ${audioEx.message}")
                                                 }
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
