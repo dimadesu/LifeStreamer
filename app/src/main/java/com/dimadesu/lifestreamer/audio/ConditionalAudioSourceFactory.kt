@@ -76,6 +76,14 @@ class ConditionalAudioSourceFactory(
         // If source is null, we need to create a new source
         if (source == null) return false
         
+        // When forceUnprocessed=true, always recreate the audio source.
+        // This handles the case where USB video is toggled and Android may have
+        // degraded audio quality - we need to force a fresh AudioRecord.
+        if (forceUnprocessed) {
+            Log.d(TAG, "forceUnprocessed=true → forcing audio source recreation")
+            return false
+        }
+        
         // MicrophoneSource is internal in StreamPack, so check by class name
         val className = source.javaClass.simpleName
         return className == "MicrophoneSource"
