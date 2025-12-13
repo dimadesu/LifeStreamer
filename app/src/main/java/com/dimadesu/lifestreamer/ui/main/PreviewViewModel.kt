@@ -2593,9 +2593,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _userToggledRtmp.postValue(true)
                     _userToggledUvc.postValue(false)
                     
-                    // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
-                    _showBluetoothToggle.postValue(false)
-                    
                     // Suppress passthrough observer updates during source switch
                     // to prevent monitor toggle from resetting to OFF
                     suppressPassthroughObserver = true
@@ -2633,11 +2630,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 viewModelScope.launch {
                                     streamingMediaProjection = projection
                                     if (projection == null) {
-                                        // Permission denied - turn off RTMP toggle
+                                        // Permission denied - turn off RTMP toggle (BT toggle stays visible)
                                         _userToggledRtmp.postValue(false)
                                         _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
                                         return@launch
                                     }
+                                    
+                                    // Permission granted - now hide BT toggle (RTMP uses MediaProjection audio)
+                                    _showBluetoothToggle.postValue(false)
 
                                     // Now that we have projection, perform the RTMP source switch
                                     // Cancel any existing retry job first
@@ -2666,6 +2666,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (!isCurrentlyStreaming) {
                             Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
                         }
+                        
+                        // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
+                        _showBluetoothToggle.postValue(false)
 
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
