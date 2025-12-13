@@ -62,31 +62,22 @@ class ConditionalAudioSourceFactory(
 
     override suspend fun create(context: Context): IAudioSourceInternal {
         val useUnprocessed = forceUnprocessed || hasUsbAudioInput(context)
-        
-        return if (useUnprocessed) {
-            Log.i(TAG, "Using UNPROCESSED mode (forced=$forceUnprocessed, usbDetected=${!forceUnprocessed})")
-            MicrophoneSourceFactory(unprocessed = true).create(context)
-        } else {
-            Log.i(TAG, "Using DEFAULT mode with AEC+NS effects")
-            MicrophoneSourceFactory(unprocessed = false).create(context)
-        }
+        Log.i(TAG, "Creating microphone source (unprocessed=$useUnprocessed, forced=$forceUnprocessed)")
+        return MicrophoneSourceFactory(unprocessed = useUnprocessed).create(context)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
         // If source is null, we need to create a new source
         if (source == null) return false
         
-        // When forceUnprocessed=true, always recreate the audio source.
-        // This handles the case where USB video is toggled and Android may have
-        // degraded audio quality - we need to force a fresh AudioRecord.
-        if (forceUnprocessed) {
-            Log.d(TAG, "forceUnprocessed=true → forcing audio source recreation")
-            return false
-        }
+        // When forced, always recreate to get fresh AudioRecord
+        if (forceUnprocessed) return false
         
-        // MicrophoneSource is internal in StreamPack, so check by class name
-        val className = source.javaClass.simpleName
-        return className == "MicrophoneSource"
+        // If source is already a microphone/AudioRecord source, no need to recreate
+        // This allows BT switching to work since BT sources won't match
+        val sourceName = source.javaClass.simpleName
+        return sourceName.contains("AudioRecord", ignoreCase = true) ||
+               sourceName.contains("Microphone", ignoreCase = true)
     }
     
     override fun toString(): String {
