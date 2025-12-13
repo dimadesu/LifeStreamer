@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
+import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 import kotlinx.coroutines.*
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
@@ -903,10 +904,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (streamer.isStreamingFlow.value) {
                     // Check if using mic-based audio - don't switch if using MediaProjection
                     val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
-                    val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
-                    val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+                    val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
                     
-                    if (isMicBasedAudio) {
+                    if (!isMediaProjectionAudio) {
                         Log.i(TAG, "Reconfiguring mic-based audio source for USB change")
                         usbAudioManager.reconfigureAudioSource(streamer)
                     } else {
@@ -1323,14 +1323,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         // Check if using mic-based audio (not MediaProjection) - BT mic only applies to mic-based audio
         val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
-        val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
-        val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+        val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
         
         // Only apply BT policy for streaming if using mic-based audio
-        val effectiveIsStreaming = isStreaming && isMicBasedAudio
+        val effectiveIsStreaming = isStreaming && !isMediaProjectionAudio
         bluetoothAudioManager.applyPolicy(enabled, streamer, effectiveIsStreaming)
         
-        if (isStreaming && !isMicBasedAudio && enabled) {
+        if (isStreaming && isMediaProjectionAudio && enabled) {
             Log.i(TAG, "applyBluetoothPolicy: BT toggle ON but using MediaProjection audio - BT mic won't be used for streaming")
         }
         
