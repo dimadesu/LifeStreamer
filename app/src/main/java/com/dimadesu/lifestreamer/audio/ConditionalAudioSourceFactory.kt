@@ -5,28 +5,50 @@ import android.util.Log
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 
-class ConditionalAudioSourceFactory : IAudioSourceInternal.Factory {
-    private val TAG = "ConditionalAudioSourceFactory"
+/**
+ * Audio source factory that handles mic-based audio with USB awareness.
+ * 
+ * @param forceUnprocessed When true, forces UNPROCESSED audio source regardless of USB detection.
+ *                         Use this when switching to USB video to force audio reinitialization.
+ *                         When false (default), auto-detects USB audio and chooses appropriately.
+ * 
+ * Sources used:
+ * - forceUnprocessed=true → MicrophoneSource(unprocessed=true) with no effects
+ * - forceUnprocessed=false + USB detected → MicrophoneSource(unprocessed=true) with no effects
+ * - forceUnprocessed=false + no USB → MicrophoneSource(unprocessed=false) with AEC+NS effects
+ * 
+ * SCO/Bluetooth is negotiated asynchronously by the service and will call
+ * `setAudioSource(...)` to switch to BluetoothAudioSource only after SCO is confirmed.
+ */
+class ConditionalAudioSourceFactory(
+    private val forceUnprocessed: Boolean = false
+) : IAudioSourceInternal.Factory {
+    
+    companion object {
+        private const val TAG = "ConditionalAudioSrcFact"
+    }
 
     override suspend fun create(context: Context): IAudioSourceInternal {
-        // Always create the system microphone source at streamer creation time.
-        // SCO is negotiated asynchronously by the service and the service will
-        // call `setAudioSource(...)` to switch to the Bluetooth source only after
-        // SCO is confirmed. Choosing Bluetooth at creation time can produce
-        // degraded audio if SCO is not yet connected (some devices expose
-        // output-only A2DP devices or the SCO path isn't established yet).
-        Log.i(TAG, "Conditional factory invoked: creating system microphone source (deferred BT switch)")
-        return MicrophoneSourceFactory().create(context)
+        val useUnprocessed = forceUnprocessed || UsbAudioManager.hasUsbAudioInput(context)
+        Log.i(TAG, "Creating microphone source (unprocessed=$useUnprocessed, forced=$forceUnprocessed)")
+        return MicrophoneSourceFactory(unprocessed = useUnprocessed).create(context)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
         // If source is null, we need to create a new source
         if (source == null) return false
         
+        // When forced, always recreate to get fresh AudioRecord
+        if (forceUnprocessed) return false
+        
         // If source is already a microphone/AudioRecord source, no need to recreate
         // This allows BT switching to work since BT sources won't match
         val sourceName = source.javaClass.simpleName
         return sourceName.contains("AudioRecord", ignoreCase = true) ||
                sourceName.contains("Microphone", ignoreCase = true)
+    }
+    
+    override fun toString(): String {
+        return "ConditionalAudioSourceFactory(forceUnprocessed=$forceUnprocessed)"
     }
 }

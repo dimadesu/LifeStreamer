@@ -2860,6 +2860,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
                         
+                        // Reset audio source to auto-detect mode (not forced)
+                        // This allows proper USB detection on next toggle
+                        Log.i(TAG, "UVC OFF: Resetting audio to auto-detect mode")
+                        try {
+                            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory(forceUnprocessed = false))
+                            Log.i(TAG, "UVC OFF: Audio reset to auto-detect mode")
+                        } catch (audioEx: Exception) {
+                            Log.w(TAG, "UVC OFF: Failed to reset audio: ${audioEx.message}")
+                        }
+                        
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
                         
@@ -2868,7 +2878,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             applyMonitorAudioState()
                         }
                         
-                        Log.i(TAG, "Switched to camera source (audio unchanged)")
+                        Log.i(TAG, "Switched to camera source")
                     }
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
@@ -2925,6 +2935,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 }
                                                 
                                                 Log.i(TAG, "Switched to UVC source after permission grant (audio unchanged)")
+                                                
+                                                // Force UNPROCESSED audio for USB video
+                                                // This forces audio reinitialization to better quality mode
+                                                Log.i(TAG, "UVC: Forcing UNPROCESSED audio for USB video")
+                                                try {
+                                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory(forceUnprocessed = true))
+                                                    Log.i(TAG, "UVC: UNPROCESSED audio source set successfully")
+                                                } catch (audioEx: Exception) {
+                                                    Log.w(TAG, "UVC: Failed to set UNPROCESSED audio: ${audioEx.message}")
+                                                }
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
