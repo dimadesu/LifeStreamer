@@ -1,9 +1,6 @@
 package com.dimadesu.lifestreamer.audio
 
 import android.content.Context
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
-import android.os.Build
 import android.util.Log
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
@@ -29,39 +26,10 @@ class ConditionalAudioSourceFactory(
     
     companion object {
         private const val TAG = "ConditionalAudioSrcFact"
-        
-        /**
-         * Check if a USB audio input device is currently connected.
-         */
-        fun hasUsbAudioInput(context: Context): Boolean {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-                return false
-            }
-            
-            return try {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                val inputDevices = audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS) ?: emptyArray()
-                
-                val usbDevice = inputDevices.firstOrNull { device ->
-                    device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-                    device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-                    device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
-                }
-                
-                if (usbDevice != null) {
-                    Log.d(TAG, "Found USB audio input: ${usbDevice.productName ?: "Unknown"} (type=${usbDevice.type})")
-                }
-                
-                usbDevice != null
-            } catch (e: Exception) {
-                Log.w(TAG, "Error checking for USB audio: ${e.message}")
-                false
-            }
-        }
     }
 
     override suspend fun create(context: Context): IAudioSourceInternal {
-        val useUnprocessed = forceUnprocessed || hasUsbAudioInput(context)
+        val useUnprocessed = forceUnprocessed || UsbAudioManager.hasUsbAudioInput(context)
         Log.i(TAG, "Creating microphone source (unprocessed=$useUnprocessed, forced=$forceUnprocessed)")
         return MicrophoneSourceFactory(unprocessed = useUnprocessed).create(context)
     }

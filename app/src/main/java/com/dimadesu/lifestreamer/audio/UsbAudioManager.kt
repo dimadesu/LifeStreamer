@@ -31,6 +31,44 @@ class UsbAudioManager(
         private const val TAG = "UsbAudioManager"
         // Debounce delay to avoid rapid reconnections
         private const val DEBOUNCE_DELAY_MS = 500L
+        
+        /**
+         * Check if a USB audio input device is currently connected.
+         * Static method for use without an instance.
+         */
+        fun hasUsbAudioInput(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                return false
+            }
+            
+            return try {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val inputDevices = audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS) ?: emptyArray()
+                
+                val usbDevice = inputDevices.firstOrNull { device ->
+                    device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                    device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+                }
+                
+                if (usbDevice != null) {
+                    Log.d(TAG, "Found USB audio input: ${usbDevice.productName ?: "Unknown"} (type=${usbDevice.type})")
+                }
+                
+                usbDevice != null
+            } catch (e: Exception) {
+                Log.w(TAG, "Error checking for USB audio: ${e.message}")
+                false
+            }
+        }
+        
+        private fun isUsbAudioInput(device: AudioDeviceInfo): Boolean {
+            if (!device.isSource) return false
+            
+            return device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                   device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                   device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+        }
     }
     
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -113,19 +151,7 @@ class UsbAudioManager(
     /**
      * Check if a USB audio input device is currently connected.
      */
-    fun hasUsbAudioInput(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return false
-        }
-        
-        return try {
-            val inputDevices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            inputDevices.any { isUsbAudioInput(it) }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error checking USB audio: ${e.message}")
-            false
-        }
-    }
+    fun hasUsbAudioInput(): Boolean = Companion.hasUsbAudioInput(context)
     
     /**
      * Reconfigure audio source on the streamer based on current USB audio state.
@@ -156,14 +182,6 @@ class UsbAudioManager(
                 Log.e(TAG, "Failed to reconfigure audio source: ${e.message}", e)
             }
         }
-    }
-    
-    private fun isUsbAudioInput(device: AudioDeviceInfo): Boolean {
-        if (!device.isSource) return false
-        
-        return device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-               device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-               device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
     }
     
     private fun notifyUsbAudioChanged(hasUsbAudio: Boolean) {
