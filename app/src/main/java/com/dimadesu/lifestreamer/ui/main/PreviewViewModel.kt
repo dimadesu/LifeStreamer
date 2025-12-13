@@ -2860,6 +2860,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
                         
+                        // Reset audio source to auto-detect mode (not forced)
+                        // This allows proper USB detection on next toggle
+                        Log.i(TAG, "UVC OFF: Resetting audio to auto-detect mode")
+                        try {
+                            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory(forceUnprocessed = false))
+                            Log.i(TAG, "UVC OFF: Audio reset to auto-detect mode")
+                        } catch (audioEx: Exception) {
+                            Log.w(TAG, "UVC OFF: Failed to reset audio: ${audioEx.message}")
+                        }
+                        
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
                         
@@ -2868,7 +2878,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             applyMonitorAudioState()
                         }
                         
-                        Log.i(TAG, "Switched to camera source (audio unchanged)")
+                        Log.i(TAG, "Switched to camera source")
                     }
                     is ICameraSource -> {
                         Log.i(TAG, "Switching from Camera to UVC source")
