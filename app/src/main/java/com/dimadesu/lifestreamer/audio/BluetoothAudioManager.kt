@@ -78,14 +78,49 @@ class BluetoothAudioManager(
         if (!enabled) {
             // Cancel SCO orchestration and cleanup
             scoSwitchJob?.cancel()
-            stopScoAndResetAudio()
-            BluetoothAudioConfig.setPreferredDevice(null)
             
-            // Recreate microphone source to switch back to built-in mic
-            recreateMicSource(streamer)
-            
-            _scoStateFlow.tryEmit(ScoState.IDLE)
+            // Unregister SCO disconnect receiver BEFORE stopping SCO to prevent
+            // duplicate recreateMicSource calls from the broadcast
+            unregisterScoDisconnectReceiver()
             unregisterBtDeviceReceiver()
+            
+            // CRITICAL: Switch to UNPROCESSED (no effects) BEFORE stopping SCO
+            // This seems to prevent Samsung's audio processing from getting into a bad state.
+            // The theory is that the AEC/NS effects interact badly with the SCO->normal transition.
+            scope.launch(Dispatchers.Default) {
+                try {
+                    // Step 1: Switch to UNPROCESSED while still on SCO
+                    // This releases any AEC/NS effects cleanly before the routing change
+                    Log.i(TAG, "applyPolicy disable: Step 1 - switch to UNPROCESSED before SCO stop")
+                    (streamer as? IWithAudioSource)?.setAudioSource(
+                        ConditionalAudioSourceFactory(forceUnprocessed = true)
+                    )
+                    delay(200)
+                    
+                    // Step 2: Now stop SCO and reset audio mode
+                    Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
+                    stopScoAndResetAudio()
+                    BluetoothAudioConfig.setPreferredDevice(null)
+                    delay(300)
+                    
+                    // Step 3: Switch to DEFAULT with effects (only if no USB connected)
+                    // If USB is connected, we stay on UNPROCESSED which is correct
+                    if (!UsbAudioManager.hasUsbAudioInput(context)) {
+                        Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
+                        (streamer as? IWithAudioSource)?.setAudioSource(
+                            ConditionalAudioSourceFactory(forceDefault = true)
+                        )
+                    } else {
+                        Log.i(TAG, "applyPolicy disable: Step 3 skipped - USB connected, staying on UNPROCESSED")
+                    }
+                    
+                    delay(150)
+                    _scoStateFlow.tryEmit(ScoState.IDLE)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "applyPolicy disable failed: ${t.message}")
+                    _scoStateFlow.tryEmit(ScoState.IDLE)
+                }
+            }
         } else {
             // Ensure permission before attempting any BT operations
             if (!scoOrchestrator.ensurePermission()) {
@@ -518,18 +553,22 @@ class BluetoothAudioManager(
 
     /**
      * Recreate microphone audio source to ensure clean session.
-     * Uses ConditionalAudioSourceFactory which will auto-detect USB audio
-     * and select the appropriate source (UNPROCESSED for USB, DEFAULT for built-in).
+     * Uses ConditionalAudioSourceFactory with forceRecreation=true to force recreation
+     * of the AudioRecord, ensuring a clean audio session after BT disconnect.
+     * The factory will auto-detect USB and choose appropriate source type.
      */
     private fun recreateMicSource(streamerInstance: ISingleStreamer?) {
         try {
             Log.i(TAG, "Recreating mic source to ensure clean audio session")
             scope.launch(Dispatchers.Default) {
                 try {
+                    // After BT disconnect, current source is BluetoothAudioSource which won't match
+                    // AudioRecord/Microphone in isSourceEquals, so recreation happens automatically.
+                    // Factory will auto-detect USB and choose appropriate source type.
                     (streamerInstance as? IWithAudioSource)?.setAudioSource(
                         ConditionalAudioSourceFactory()
                     )
-                    Log.i(TAG, "Recreate mic source: used ConditionalAudioSourceFactory (USB-aware)")
+                    Log.i(TAG, "Recreate mic source: USB-aware auto-detect")
                 } catch (t: Throwable) {
                     Log.w(TAG, "Recreate mic source failed: ${t.message}")
                 }
