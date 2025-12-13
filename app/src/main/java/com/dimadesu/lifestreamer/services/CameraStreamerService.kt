@@ -898,10 +898,20 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Start USB audio monitoring to auto-switch audio source on USB plug/unplug
         try {
             usbAudioManager.onUsbAudioChanged = { hasUsbAudio ->
-                Log.i(TAG, "USB audio state changed: $hasUsbAudio - reconfiguring audio source")
+                Log.i(TAG, "USB audio state changed: $hasUsbAudio")
                 // Only reconfigure if actually streaming
                 if (streamer.isStreamingFlow.value) {
-                    usbAudioManager.reconfigureAudioSource(streamer)
+                    // Check if using mic-based audio - don't switch if using MediaProjection
+                    val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
+                    val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
+                    val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+                    
+                    if (isMicBasedAudio) {
+                        Log.i(TAG, "Reconfiguring mic-based audio source for USB change")
+                        usbAudioManager.reconfigureAudioSource(streamer)
+                    } else {
+                        Log.i(TAG, "Skipping USB audio reconfigure - using MediaProjection audio")
+                    }
                 }
             }
             usbAudioManager.startMonitoring()
