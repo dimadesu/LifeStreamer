@@ -12,15 +12,17 @@ import androidx.annotation.RequiresApi
 import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
 import io.github.thibaultbee.streampack.core.elements.interfaces.Releasable
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
+import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 
 /**
  * App-local MediaProjection-based audio source that captures only app audio by UID filter.
  * This is a minimal implementation compatible with StreamPack's IAudioSourceInternal usage.
+ * Implements IMediaProjectionSource so USB audio manager can detect when screen audio is in use.
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class MediaProjectionAudioSource(
-    val mediaProjection: MediaProjection  // Make public for factory comparison
-) : AudioRecordSource(), Releasable {
+    override val mediaProjection: MediaProjection  // Make public for factory comparison
+) : AudioRecordSource(), Releasable, IMediaProjectionSource {
 
     // let AudioRecordSource.configure handle buffer sizing and processor setup
     override fun buildAudioRecord(config: AudioSourceConfig, bufferSize: Int): AudioRecord {
