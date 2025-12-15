@@ -142,6 +142,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<EditTextPreference>(R.string.srt_server_port_key) ?: error("srt_server_port_key not found")
     }
 
+    private val serverLatencyPreference: EditTextPreference by lazy {
+        findPreferenceSafe<EditTextPreference>(R.string.srt_server_latency_key) ?: error("srt_server_latency_key not found")
+    }
+
     private val serverEnableBitrateRegulationPreference: SwitchPreference by lazy {
         findPreferenceSafe<SwitchPreference>(R.string.srt_server_enable_bitrate_regulation_key) ?: error("srt_server_enable_bitrate_regulation_key not found")
     }
@@ -430,6 +434,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
 
         serverPortPreference.setOnBindEditTextListener { editText ->
+            editText.inputType = InputType.TYPE_CLASS_NUMBER
+            editText.filters = arrayOf(InputFilter.LengthFilter(5))
+        }
+
+        serverLatencyPreference.setOnBindEditTextListener { editText ->
             editText.inputType = InputType.TYPE_CLASS_NUMBER
             editText.filters = arrayOf(InputFilter.LengthFilter(5))
         }
