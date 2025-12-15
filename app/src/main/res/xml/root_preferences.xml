@@ -159,6 +159,12 @@
                 app:key="@string/srt_server_enable_bitrate_regulation_key"
                 app:title="@string/srt_server_enable_bitrate_regulation" />
 
+            <EditTextPreference
+                app:defaultValue="@string/default_srt_server_latency"
+                app:key="@string/srt_server_latency_key"
+                app:title="@string/srt_server_latency"
+                app:useSimpleSummaryProvider="true" />
+
             <SeekBarPreference
                 android:max="10000"
                 app:defaultValue="5000"

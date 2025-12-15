@@ -156,11 +156,15 @@ class DataStoreRepository(
                 val passPhrase =
                     preferences[stringPreferencesKey(context.getString(R.string.srt_server_passphrase_key))]
                         ?: context.getString(R.string.default_srt_server_passphrase)
+                val latency =
+                    preferences[stringPreferencesKey(context.getString(R.string.srt_server_latency_key))]?.toIntOrNull()
+                        ?: context.getString(R.string.default_srt_server_latency).toInt()
                 SrtMediaDescriptor(
                     host = ip,
                     port = port,
                     streamId = streamId,
-                    passPhrase = passPhrase
+                    passPhrase = passPhrase,
+                    latency = latency
                 )
             }
 
