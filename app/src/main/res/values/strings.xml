@@ -146,6 +146,9 @@
     <string name="srt_server_passphrase">Passphrase</string>
     <string name="default_srt_server_stream_passphrase" />
     <string name="default_srt_server_passphrase">""</string>
+    <string name="srt_server_latency_key">srt_server_latency_key</string>
+    <string name="srt_server_latency">Latency (ms)</string>
+    <string name="default_srt_server_latency">2000</string>
     <string name="srt_server_enable_bitrate_regulation_key">srt_server_enable_bitrate_regulation_key</string>
     <string name="srt_server_enable_bitrate_regulation">Enable bitrate regulation</string>
     <string name="srt_server_video_target_bitrate_key">srt_server_video_target_bitrate_key</string>
