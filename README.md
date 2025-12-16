@@ -23,9 +23,9 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 ### Video
 
 - Phone cameras.
-- RTMP video. [Watch RTMP source demo](https://www.youtube.com/watch?v=_zlWsQYxrE4)
+- RTMP video. [Watch RTMP source demo.](https://www.youtube.com/watch?v=_zlWsQYxrE4)
 - SRT video.
-- USB Video (UVC). [Watch USB source demo](https://www.youtube.com/watch?v=RlPWbekqPx4)
+- USB Video (UVC). [Watch USB source demo.](https://www.youtube.com/watch?v=RlPWbekqPx4)
 
 ### Audio
 
@@ -81,7 +81,7 @@ I've started with original camera demo from StreamPack. I'm tweaking it and addi
   - Give LifeStreamer RTMP URL to that server to play and it will use it as video/audio source.
   - There are many things that can go wrong with RTMP source. I think it's working pretty good now.
 - [x] Reconnect on disconnect.
-- [x] USB video/audio as source. [Watch USB source demo](https://www.youtube.com/watch?v=RlPWbekqPx4)
+- [x] USB video/audio as source. [Watch USB source demo.](https://www.youtube.com/watch?v=RlPWbekqPx4)
 - [x] Audio monitoring for all sources.
 
 ### Planning to implement next
