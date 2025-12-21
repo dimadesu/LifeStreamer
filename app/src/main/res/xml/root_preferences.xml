@@ -115,6 +115,14 @@
                 app:title="@string/audio_profile"
                 app:useSimpleSummaryProvider="true" />
 
+            <SeekBarPreference
+                android:max="200"
+                app:defaultValue="100"
+                app:key="@string/audio_gain_key"
+                app:min="10"
+                app:showSeekBarValue="true"
+                app:title="@string/audio_gain" />
+
         </PreferenceCategory>
 
     </PreferenceCategory>

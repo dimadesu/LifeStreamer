@@ -110,6 +110,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<ListPreference>(R.string.audio_sample_rate_key) ?: error("audio_sample_rate_key not found")
     }
 
+    private val audioGainSeekBar: SeekBarPreference by lazy {
+        findPreferenceSafe<SeekBarPreference>(R.string.audio_gain_key) ?: error("audio_gain_key not found")
+    }
+
     private val audioByteFormatListPreference: ListPreference by lazy {
         findPreferenceSafe<ListPreference>(R.string.audio_byte_format_key) ?: error("audio_byte_format_key not found")
     }
@@ -409,6 +413,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
             audioProfileListPreference.value = value.toString()
         }
+
+        // Setup audio gain slider (10% to 200%, default 100%)
+        audioGainSeekBar.setOnPreferenceChangeListener { _, newValue ->
+            // Update summary to show percentage
+            audioGainSeekBar.summary = getString(R.string.audio_gain_summary, newValue.toString())
+            true
+        }
+        // Set initial summary
+        audioGainSeekBar.summary = getString(R.string.audio_gain_summary, audioGainSeekBar.value.toString())
     }
 
     private fun loadEndpoint() {

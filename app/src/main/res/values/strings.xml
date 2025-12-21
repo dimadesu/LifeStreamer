@@ -117,6 +117,10 @@
     <string name="audio_profile">Profile</string>
     <string name="audio_profile_key">audio_profile_key</string>
 
+    <string name="audio_gain">Audio Gain</string>
+    <string name="audio_gain_key">audio_gain_key</string>
+    <string name="audio_gain_summary">%s%%</string>
+
     <!-- Endpoint -->
     <string name="endpoint">Endpoint</string>
 

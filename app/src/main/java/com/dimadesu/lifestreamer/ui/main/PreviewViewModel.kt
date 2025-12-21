@@ -62,6 +62,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFrameRateSupported
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
+import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.core.utils.extensions.isClosedException
@@ -1306,6 +1307,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     config?.let {
                         serviceStreamer?.setVideoConfig(it)
                     } ?: Log.i(TAG, "Video is disabled")
+                }
+        }
+        viewModelScope.launch {
+            storageRepository.audioGainFlow
+                .collect { gain ->
+                    // Apply gain to audio processor
+                    val audioInput = (serviceStreamer as? IWithAudioSource)?.audioInput
+                    audioInput?.processor?.gain = gain
+                    Log.i(TAG, "Audio gain set to ${gain}x (${(gain * 100).toInt()}%)")
                 }
         }
     }

@@ -38,6 +38,12 @@ class DataStoreRepository(
         preferences[booleanPreferencesKey(context.getString(R.string.audio_enable_key))] ?: true
     }.distinctUntilChanged()
 
+    val audioGainFlow: Flow<Float> = dataStore.data.map { preferences ->
+        val gainPercent = preferences[intPreferencesKey(context.getString(R.string.audio_gain_key))] ?: 100
+        // Convert percentage (10-200) to float multiplier (0.1-2.0)
+        (gainPercent / 100f).coerceIn(0.1f, 2.0f)
+    }.distinctUntilChanged()
+
     val audioConfigFlow: Flow<AudioConfig?> = dataStore.data.map { preferences ->
         val isAudioEnable =
             preferences[booleanPreferencesKey(context.getString(R.string.audio_enable_key))] ?: true
