@@ -370,7 +370,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val audioDebugInfoLiveData: LiveData<com.dimadesu.lifestreamer.models.AudioDebugInfo?> = _audioDebugInfoLiveData
 
     // Audio debug overlay visibility state
-    private var isAudioDebugOverlayVisible = false
+    private val _isAudioDebugOverlayVisible = MutableLiveData(false)
+    val isAudioDebugOverlayVisible: LiveData<Boolean> = _isAudioDebugOverlayVisible
     
     // Selected audio source type for testing (MediaRecorder.AudioSource constants)
     var selectedAudioSourceType: Int = android.media.MediaRecorder.AudioSource.DEFAULT
@@ -3654,8 +3655,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Toggle audio debug overlay visibility
      */
     fun toggleAudioDebugOverlay() {
-        isAudioDebugOverlayVisible = !isAudioDebugOverlayVisible
-        if (isAudioDebugOverlayVisible) {
+        val newValue = !(_isAudioDebugOverlayVisible.value ?: false)
+        _isAudioDebugOverlayVisible.value = newValue
+        if (newValue) {
             // Refresh immediately when showing the overlay
             refreshAudioDebugInfo()
             // Start periodic refresh every 2 seconds

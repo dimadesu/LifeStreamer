@@ -256,7 +256,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="AUDIO DEBUG"
-                    android:backgroundTint="@color/button_gray" />
+                    android:backgroundTint='@{viewmodel.isAudioDebugOverlayVisible ? @color/active_button_green : @color/button_gray}' />
 
             </LinearLayout>
 
