@@ -37,9 +37,11 @@ class ConditionalAudioSourceFactory(
         val useUnprocessed = when {
             forceDefault -> false  // Force DEFAULT (processed) with effects
             forceUnprocessed -> true  // Force UNPROCESSED
-            else -> UsbAudioManager.hasUsbAudioInput(context)  // Auto-detect
+            // TEMPORARILY DISABLED: Testing if system switches audio source automatically
+            // else -> UsbAudioManager.hasUsbAudioInput(context)  // Auto-detect
+            else -> false  // Always use DEFAULT (no auto-switching to UNPROCESSED for testing)
         }
-        Log.i(TAG, "Creating microphone source (unprocessed=$useUnprocessed, forceUnprocessed=$forceUnprocessed, forceDefault=$forceDefault)")
+        Log.i(TAG, "Creating microphone source (unprocessed=$useUnprocessed, forceUnprocessed=$forceUnprocessed, forceDefault=$forceDefault) - AUTO-DETECT DISABLED FOR TESTING")
         return MicrophoneSourceFactory(unprocessed = useUnprocessed).create(context)
     }
 

@@ -907,8 +907,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
                     
                     if (!isMediaProjectionAudio) {
-                        Log.i(TAG, "Reconfiguring mic-based audio source for USB change")
-                        usbAudioManager.reconfigureAudioSource(streamer)
+                        Log.i(TAG, "USB audio change detected but reconfiguration DISABLED for testing")
+                        // TEMPORARILY DISABLED: Testing if system switches audio source automatically
+                        // usbAudioManager.reconfigureAudioSource(streamer)
                     } else {
                         Log.i(TAG, "Skipping USB audio reconfigure - using MediaProjection audio")
                     }
