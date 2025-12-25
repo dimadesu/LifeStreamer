@@ -3041,7 +3041,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch to UVC source first
                         delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -3069,7 +3068,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
