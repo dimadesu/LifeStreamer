@@ -3589,14 +3589,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     val configs = audioManager.activeRecordingConfigurations
                     
                     if (configs.isNotEmpty()) {
-                        val config = configs.first()
-                        val effects = config.clientEffects
-                        Triple(
-                            effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_NS },
-                            effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AEC },
-                            effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AGC }
-                        )
+                        // Use first active recording config (should be our app's session)
+                        val ourConfig = configs.first()
+                        
+                        // Check both clientEffects (requested) and effects (actual)
+                        // Try effects first (what's actually running), fall back to clientEffects if not available
+                        val effectsToCheck = try {
+                            ourConfig.effects
+                        } catch (e: Exception) {
+                            ourConfig.clientEffects
+                        }
+                        
+                        val ns = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_NS }
+                        val aec = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AEC }
+                        val agc = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AGC }
+                        
+                        Log.d(TAG, "Audio effects detected: NS=$ns, AEC=$aec, AGC=$agc (from ${effectsToCheck.size} effects)")
+                        Triple(ns, aec, agc)
                     } else {
+                        Log.d(TAG, "No active recording configurations found")
                         Triple(false, false, false)
                     }
                 } catch (e: Exception) {
