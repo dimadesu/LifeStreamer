@@ -19,9 +19,7 @@ import kotlinx.coroutines.launch
  * Manages USB audio device detection and automatic audio source switching.
  * 
  * When USB audio is plugged/unplugged during streaming, this manager will
- * reconfigure the audio source to use the optimal settings:
- * - USB audio → UNPROCESSED (raw capture)
- * - Built-in mic → DEFAULT (with system processing)
+ * detect the change and can trigger audio source reconfiguration if needed.
  */
 class UsbAudioManager(
     private val context: Context,

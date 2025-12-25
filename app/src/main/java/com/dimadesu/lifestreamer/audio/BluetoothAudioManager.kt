@@ -84,16 +84,16 @@ class BluetoothAudioManager(
             unregisterScoDisconnectReceiver()
             unregisterBtDeviceReceiver()
             
-            // CRITICAL: Switch to UNPROCESSED (no effects) BEFORE stopping SCO
+            // CRITICAL: Switch to DEFAULT (with effects) BEFORE stopping SCO
             // This seems to prevent Samsung's audio processing from getting into a bad state.
             // The theory is that the AEC/NS effects interact badly with the SCO->normal transition.
             scope.launch(Dispatchers.Default) {
                 try {
-                    // Step 1: Switch to UNPROCESSED while still on SCO
+                    // Step 1: Switch to DEFAULT while still on SCO
                     // This releases any AEC/NS effects cleanly before the routing change
-                    Log.i(TAG, "applyPolicy disable: Step 1 - switch to UNPROCESSED before SCO stop")
+                    Log.i(TAG, "applyPolicy disable: Step 1 - switch to DEFAULT before SCO stop")
                     (streamer as? IWithAudioSource)?.setAudioSource(
-                        ConditionalAudioSourceFactory(forceUnprocessed = true)
+                        ConditionalAudioSourceFactory(forceDefault = true)
                     )
                     delay(200)
                     
@@ -103,16 +103,11 @@ class BluetoothAudioManager(
                     BluetoothAudioConfig.setPreferredDevice(null)
                     delay(300)
                     
-                    // Step 3: Switch to DEFAULT with effects (only if no USB connected)
-                    // If USB is connected, we stay on UNPROCESSED which is correct
-                    if (!UsbAudioManager.hasUsbAudioInput(context)) {
-                        Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
-                        (streamer as? IWithAudioSource)?.setAudioSource(
-                            ConditionalAudioSourceFactory(forceDefault = true)
-                        )
-                    } else {
-                        Log.i(TAG, "applyPolicy disable: Step 3 skipped - USB connected, staying on UNPROCESSED")
-                    }
+                    // Step 3: Switch to DEFAULT with effects
+                    Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
+                    (streamer as? IWithAudioSource)?.setAudioSource(
+                        ConditionalAudioSourceFactory(forceDefault = true)
+                    )
                     
                     delay(150)
                     _scoStateFlow.tryEmit(ScoState.IDLE)
