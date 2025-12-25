@@ -87,33 +87,48 @@ class BluetoothAudioManager(
             // CRITICAL: Switch to DEFAULT (with effects) BEFORE stopping SCO
             // This seems to prevent Samsung's audio processing from getting into a bad state.
             // The theory is that the AEC/NS effects interact badly with the SCO->normal transition.
-            scope.launch(Dispatchers.Default) {
-                try {
-                    // Step 1: Switch to DEFAULT while still on SCO
-                    // This releases any AEC/NS effects cleanly before the routing change
-                    Log.i(TAG, "applyPolicy disable: Step 1 - switch to DEFAULT before SCO stop")
-                    (streamer as? IWithAudioSource)?.setAudioSource(
-                        ConditionalAudioSourceFactory(forceDefault = true)
-                    )
-                    delay(200)
-                    
-                    // Step 2: Now stop SCO and reset audio mode
-                    Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
-                    stopScoAndResetAudio()
-                    BluetoothAudioConfig.setPreferredDevice(null)
-                    delay(300)
-                    
-                    // Step 3: Switch to DEFAULT with effects
-                    Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
-                    (streamer as? IWithAudioSource)?.setAudioSource(
-                        ConditionalAudioSourceFactory(forceDefault = true)
-                    )
-                    
-                    delay(150)
-                    _scoStateFlow.tryEmit(ScoState.IDLE)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "applyPolicy disable failed: ${t.message}")
-                    _scoStateFlow.tryEmit(ScoState.IDLE)
+            if (streamer != null) {
+                scope.launch(Dispatchers.Default) {
+                    try {
+                        // Step 1: Switch to DEFAULT while still on SCO
+                        // This releases any AEC/NS effects cleanly before the routing change
+                        Log.i(TAG, "applyPolicy disable: Step 1 - switch to DEFAULT before SCO stop")
+                        val audioStreamer = streamer as? IWithAudioSource
+                        audioStreamer?.setAudioSource(
+                            ConditionalAudioSourceFactory(forceDefault = true)
+                        )
+                        delay(200)
+                        
+                        // Step 2: Now stop SCO and reset audio mode
+                        Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
+                        stopScoAndResetAudio()
+                        BluetoothAudioConfig.setPreferredDevice(null)
+                        delay(300)
+                        
+                        // Step 3: Switch to DEFAULT with effects (force recreation)
+                        Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
+                        audioStreamer?.setAudioSource(
+                            ConditionalAudioSourceFactory(forceDefault = true)
+                        )
+                        
+                        delay(150)
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "applyPolicy disable failed: ${t.message}")
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    }
+                }
+            } else {
+                Log.w(TAG, "applyPolicy disable: No streamer available, just stopping SCO")
+                scope.launch(Dispatchers.Default) {
+                    try {
+                        stopScoAndResetAudio()
+                        BluetoothAudioConfig.setPreferredDevice(null)
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "applyPolicy disable SCO stop failed: ${t.message}")
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    }
                 }
             }
         } else {
