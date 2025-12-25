@@ -3602,13 +3602,37 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     null
                 }
 
+                // Query for audio effects (NS, AEC, AGC)
+                val (hasNS, hasAEC, hasAGC) = try {
+                    val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val configs = audioManager.activeRecordingConfigurations
+                    
+                    if (configs.isNotEmpty()) {
+                        val config = configs.first()
+                        val effects = config.clientEffects
+                        Triple(
+                            effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_NS },
+                            effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AEC },
+                            effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AGC }
+                        )
+                    } else {
+                        Triple(false, false, false)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to get audio effects: ${e.message}")
+                    Triple(false, false, false)
+                }
+
                 val debugInfo = com.dimadesu.lifestreamer.models.AudioDebugInfo(
                     audioSource = audioSourceType,
                     actualSystemSource = actualSystemSource,
                     sampleRate = audioConfig.sampleRate,
                     bitFormat = audioConfig.byteFormat,
                     channelConfig = audioConfig.channelConfig,
-                    bitrate = audioConfig.startBitrate
+                    bitrate = audioConfig.startBitrate,
+                    noiseSuppression = hasNS,
+                    acousticEchoCanceler = hasAEC,
+                    automaticGainControl = hasAGC
                 )
 
                 _audioDebugInfoLiveData.postValue(debugInfo)

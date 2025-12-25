@@ -11,7 +11,10 @@ data class AudioDebugInfo(
     val sampleRate: Int,      // e.g., 44100, 48000
     val bitFormat: Int,       // e.g., AudioFormat.ENCODING_PCM_16BIT
     val channelConfig: Int,   // e.g., AudioFormat.CHANNEL_IN_STEREO
-    val bitrate: Int          // encoder bitrate in bps
+    val bitrate: Int,         // encoder bitrate in bps
+    val noiseSuppression: Boolean,    // NS enabled
+    val acousticEchoCanceler: Boolean, // AEC enabled
+    val automaticGainControl: Boolean  // AGC enabled
 ) {
     /**
      * Returns human-readable bit format string
@@ -41,4 +44,15 @@ data class AudioDebugInfo(
      * Returns bitrate in kbps
      */
     fun getBitrateKbps(): String = "${bitrate / 1000} kbps"
+    
+    /**
+     * Returns formatted audio effects status
+     */
+    fun getAudioEffectsString(): String {
+        val effects = mutableListOf<String>()
+        if (noiseSuppression) effects.add("NS")
+        if (acousticEchoCanceler) effects.add("AEC")
+        if (automaticGainControl) effects.add("AGC")
+        return if (effects.isEmpty()) "None" else effects.joinToString(", ")
+    }
 }
