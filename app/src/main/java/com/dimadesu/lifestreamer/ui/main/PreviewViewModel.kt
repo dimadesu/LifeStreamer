@@ -3581,14 +3581,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     null
                 }
 
-                // Query for audio effects (NS, AEC, AGC)
-                val (hasNS, hasAEC, hasAGC) = try {
+                // Query for audio effects (NS, AEC, AGC) and actual audio format from system
+                val systemAudioInfo = try {
                     val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
                     val configs = audioManager.activeRecordingConfigurations
                     
                     if (configs.isNotEmpty()) {
                         // Use first active recording config (should be our app's session)
                         val ourConfig = configs.first()
+                        
+                        // Get actual audio format from system
+                        val systemFormat = ourConfig.format
+                        val systemSampleRate = systemFormat.sampleRate
+                        val systemChannelMask = systemFormat.channelMask
+                        val systemEncoding = systemFormat.encoding
                         
                         // Check both clientEffects (requested) and effects (actual)
                         // Try effects first (what's actually running), fall back to clientEffects if not available
@@ -3602,23 +3608,27 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         val aec = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AEC }
                         val agc = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AGC }
                         
-                        Log.d(TAG, "Audio effects detected: NS=$ns, AEC=$aec, AGC=$agc (from ${effectsToCheck.size} effects)")
-                        Triple(ns, aec, agc)
+                        Log.d(TAG, "Audio config from system: SR=$systemSampleRate, CH=$systemChannelMask, FMT=$systemEncoding, Effects: NS=$ns, AEC=$aec, AGC=$agc (from ${effectsToCheck.size} effects)")
+                        
+                        Triple(ns, aec, agc) to Triple(systemSampleRate, systemChannelMask, systemEncoding)
                     } else {
                         Log.d(TAG, "No active recording configurations found")
-                        Triple(false, false, false)
+                        Triple(false, false, false) to Triple(audioConfig.sampleRate, audioConfig.channelConfig, audioConfig.byteFormat)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to get audio effects: ${e.message}")
-                    Triple(false, false, false)
+                    Log.w(TAG, "Failed to get audio effects and format: ${e.message}")
+                    Triple(false, false, false) to Triple(audioConfig.sampleRate, audioConfig.channelConfig, audioConfig.byteFormat)
                 }
+                
+                val (hasNS, hasAEC, hasAGC) = systemAudioInfo.first
+                val (actualSampleRate, actualChannelMask, actualFormat) = systemAudioInfo.second
 
                 val debugInfo = com.dimadesu.lifestreamer.models.AudioDebugInfo(
                     audioSource = audioSourceType,
                     actualSystemSource = actualSystemSource,
-                    sampleRate = audioConfig.sampleRate,
-                    bitFormat = audioConfig.byteFormat,
-                    channelConfig = audioConfig.channelConfig,
+                    sampleRate = actualSampleRate,
+                    bitFormat = actualFormat,
+                    channelConfig = actualChannelMask,
                     bitrate = audioConfig.startBitrate,
                     noiseSuppression = hasNS,
                     acousticEchoCanceler = hasAEC,
