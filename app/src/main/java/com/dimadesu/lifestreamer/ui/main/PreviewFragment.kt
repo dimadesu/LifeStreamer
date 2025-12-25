@@ -158,6 +158,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.audioDebugToggleButton.setOnClickListener {
             previewViewModel.toggleAudioDebugOverlay()
         }
+        
+        // Setup audio source spinner
+        setupAudioSourceSpinner()
 
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
             error?.let {
@@ -1085,6 +1088,38 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         if (missingPermissions.isNotEmpty()) {
             showPermissionError(*missingPermissions.toTypedArray())
         }
+    }
+    
+    private fun setupAudioSourceSpinner() {
+        val audioSourceOptions = listOf(
+            "DEFAULT" to android.media.MediaRecorder.AudioSource.DEFAULT,
+            "MIC" to android.media.MediaRecorder.AudioSource.MIC,
+            "CAMCORDER" to android.media.MediaRecorder.AudioSource.CAMCORDER,
+            "VOICE_RECOGNITION" to android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            "VOICE_COMMUNICATION" to android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            "UNPROCESSED" to android.media.MediaRecorder.AudioSource.UNPROCESSED
+        )
+        
+        val adapter = android.widget.ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            audioSourceOptions.map { it.first }
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.audioSourceSpinner.adapter = adapter
+        
+        binding.audioSourceSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                previewViewModel.selectedAudioSourceType = audioSourceOptions[position].second
+            }
+            
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {
+                // Do nothing
+            }
+        }
+        
+        // Set initial selection to DEFAULT
+        binding.audioSourceSpinner.setSelection(0)
     }
 
     private fun updateCameraButtonsVisibility() {

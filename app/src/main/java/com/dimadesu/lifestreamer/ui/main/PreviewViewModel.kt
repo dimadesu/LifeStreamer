@@ -371,6 +371,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     // Audio debug overlay visibility state
     private var isAudioDebugOverlayVisible = false
+    
+    // Selected audio source type for testing (MediaRecorder.AudioSource constants)
+    var selectedAudioSourceType: Int = android.media.MediaRecorder.AudioSource.DEFAULT
 
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
@@ -3687,6 +3690,46 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             9 -> "UNPROCESSED"
             10 -> "VOICE_PERFORMANCE"
             else -> "UNKNOWN ($source)"
+        }
+    }
+    
+    /**
+     * Apply the selected audio source type from the debug overlay.
+     * This recreates the audio source with the selected MediaRecorder.AudioSource constant.
+     */
+    fun applySelectedAudioSource() {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.w(TAG, "Cannot apply audio source - streamer not available")
+            return
+        }
+        
+        viewModelScope.launch {
+            try {
+                Log.i(TAG, "Applying audio source type: ${getAudioSourceName(selectedAudioSourceType)} ($selectedAudioSourceType)")
+                
+                // Create new microphone source based on audio source type
+                val newAudioSource = when (selectedAudioSourceType) {
+                    android.media.MediaRecorder.AudioSource.UNPROCESSED -> 
+                        MicrophoneSourceFactory(unprocessed = true)
+                    else -> 
+                        // For all other types, use DEFAULT source with effects
+                        // Note: Android's MicrophoneSource only supports DEFAULT or UNPROCESSED
+                        // Other constants like CAMCORDER, VOICE_RECOGNITION behave similarly to DEFAULT
+                        MicrophoneSourceFactory(unprocessed = false)
+                }
+                
+                currentStreamer.setAudioSource(newAudioSource)
+                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(selectedAudioSourceType)}")
+                
+                // Refresh debug info immediately
+                delay(200)
+                refreshAudioDebugInfo()
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error applying audio source: ${e.message}", e)
+                _streamerErrorLiveData.postValue("Failed to apply audio source: ${e.message}")
+            }
         }
     }
 }

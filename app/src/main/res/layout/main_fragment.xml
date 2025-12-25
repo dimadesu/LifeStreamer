@@ -136,6 +136,40 @@
                 android:textSize="13sp"
                 android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
 
+            <!-- Audio Source Selector -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:background="#40FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:text="TEST AUDIO SOURCE"
+                android:paddingBottom="4dp" />
+
+            <Spinner
+                android:id="@+id/audioSourceSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#80FFFFFF"
+                android:paddingVertical="4dp"
+                android:paddingHorizontal="8dp" />
+
+            <Button
+                android:id="@+id/applyAudioSourceButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Apply Source"
+                android:textSize="12sp"
+                android:onClick="@{() -> viewmodel.applySelectedAudioSource()}" />
+
         </LinearLayout>
 
         <!-- Scrollable single column layout for all buttons -->
