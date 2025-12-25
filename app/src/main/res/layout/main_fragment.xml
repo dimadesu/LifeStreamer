@@ -137,15 +137,6 @@
                 android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}'
                 android:paddingTop="4dp" />
 
-            <Button
-                android:id="@+id/refreshAudioDebugButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Refresh"
-                android:textSize="12sp"
-                android:padding="8dp" />
-
         </LinearLayout>
 
         <!-- Scrollable single column layout for all buttons -->

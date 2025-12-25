@@ -159,10 +159,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleAudioDebugOverlay()
         }
 
-        binding.refreshAudioDebugButton.setOnClickListener {
-            previewViewModel.refreshAudioDebugInfo()
-        }
-
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
             error?.let {
                 showError("Oops", it)

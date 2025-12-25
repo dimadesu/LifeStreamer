@@ -78,6 +78,7 @@ import com.dimadesu.lifestreamer.models.StreamStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -3650,15 +3651,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
+    // Job for periodic audio debug refresh
+    private var audioDebugRefreshJob: kotlinx.coroutines.Job? = null
+    
     /**
      * Toggle audio debug overlay visibility
      */
     fun toggleAudioDebugOverlay() {
         isAudioDebugOverlayVisible = !isAudioDebugOverlayVisible
         if (isAudioDebugOverlayVisible) {
-            // Refresh info when showing the overlay
+            // Refresh immediately when showing the overlay
             refreshAudioDebugInfo()
+            // Start periodic refresh every 2 seconds
+            audioDebugRefreshJob?.cancel()
+            audioDebugRefreshJob = viewModelScope.launch {
+                while (isActive) {
+                    delay(2000)
+                    refreshAudioDebugInfo()
+                }
+            }
         } else {
+            // Stop periodic refresh
+            audioDebugRefreshJob?.cancel()
+            audioDebugRefreshJob = null
             // Hide the overlay by setting info to null
             _audioDebugInfoLiveData.postValue(null)
         }
