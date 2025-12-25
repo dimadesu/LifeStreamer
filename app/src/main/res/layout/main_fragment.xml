@@ -82,7 +82,7 @@
                 android:textColor="@android:color/white"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:text="AUDIO DEBUG INFO"
+                android:text="AUDIO DEBUG"
                 android:paddingBottom="8dp" />
 
             <TextView
@@ -98,8 +98,15 @@
                 android:textColor="@android:color/white"
                 android:textSize="12sp"
                 android:textStyle="italic"
-                android:text='@{"System: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}'
+                android:text='@{"System Audio Source: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}'
                 app:goneUnless='@{viewmodel.audioDebugInfoLiveData.actualSystemSource != null}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -129,13 +136,6 @@
                 android:textSize="13sp"
                 android:text='@{"Bitrate: " + viewmodel.audioDebugInfoLiveData.bitrateKbps}' />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
-
             <!-- Audio Source Selector -->
             <View
                 android:layout_width="match_parent"
@@ -150,7 +150,7 @@
                 android:textColor="@android:color/white"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:text="TEST AUDIO SOURCE"
+                android:text="AUDIO SOURCE TYPE"
                 android:paddingBottom="4dp" />
 
             <Spinner
@@ -166,7 +166,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Apply Source"
+                android:text="Update"
                 android:textSize="12sp"
                 android:onClick="@{() -> viewmodel.applySelectedAudioSource()}" />
 
@@ -241,13 +241,6 @@
                     android:backgroundTint='@{viewmodel.isMonitorAudioOn ? @color/active_button_green : @color/button_gray}' />
 
                 <Button
-                    android:id="@+id/audioDebugToggleButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="AUDIO DEBUG"
-                    android:backgroundTint="@color/button_gray" />
-
-                <Button
                     android:id="@+id/bluetoothToggleButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -257,6 +250,13 @@
                     android:onClick="@{() -> viewmodel.setUseBluetoothMic(!viewmodel.useBluetoothMic.getValue())}"
                     android:backgroundTint='@{viewmodel.useBluetoothMic.getValue() ? @color/active_button_green : @color/button_gray}'
                     android:visibility="@{viewmodel.showBluetoothToggle ? android.view.View.VISIBLE : android.view.View.GONE}" />
+
+                <Button
+                    android:id="@+id/audioDebugToggleButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AUDIO DEBUG"
+                    android:backgroundTint="@color/button_gray" />
 
             </LinearLayout>
 
