@@ -62,6 +62,84 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintVertical_bias="0.25" />
 
+        <!-- Audio Debug Info Overlay (centered) -->
+        <LinearLayout
+            android:id="@+id/audioDebugOverlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:background="#CC000000"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:goneUnless='@{viewmodel.audioDebugInfoLiveData != null}'>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:text="AUDIO DEBUG INFO"
+                android:paddingBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Source: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:textStyle="italic"
+                android:text='@{"System: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}'
+                app:goneUnless='@{viewmodel.audioDebugInfoLiveData.actualSystemSource != null}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Sample Rate: " + viewmodel.audioDebugInfoLiveData.sampleRateKHz}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Bit Format: " + viewmodel.audioDebugInfoLiveData.bitFormatString}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Channels: " + viewmodel.audioDebugInfoLiveData.channelConfigString}' />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Bitrate: " + viewmodel.audioDebugInfoLiveData.bitrateKbps}' />
+
+            <Button
+                android:id="@+id/refreshAudioDebugButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Refresh"
+                android:textSize="12sp"
+                android:padding="8dp" />
+
+        </LinearLayout>
+
         <!-- Scrollable single column layout for all buttons -->
         <ScrollView
             android:layout_width="wrap_content"
@@ -129,6 +207,13 @@
                     android:layout_height="wrap_content"
                     android:text="MONITOR &#x1F3A4;"
                     android:backgroundTint='@{viewmodel.isMonitorAudioOn ? @color/active_button_green : @color/button_gray}' />
+
+                <Button
+                    android:id="@+id/audioDebugToggleButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AUDIO DEBUG"
+                    android:backgroundTint="@color/button_gray" />
 
                 <Button
                     android:id="@+id/bluetoothToggleButton"

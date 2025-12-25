@@ -364,6 +364,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _audioSourceIndicatorLiveData = MutableLiveData<String>()
     val audioSourceIndicatorLiveData: LiveData<String> = _audioSourceIndicatorLiveData
 
+    // Audio debug information for overlay display
+    private val _audioDebugInfoLiveData = MutableLiveData<com.dimadesu.lifestreamer.models.AudioDebugInfo?>()
+    val audioDebugInfoLiveData: LiveData<com.dimadesu.lifestreamer.models.AudioDebugInfo?> = _audioDebugInfoLiveData
+
+    // Audio debug overlay visibility state
+    private var isAudioDebugOverlayVisible = false
+
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
@@ -3523,7 +3530,125 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
+    /**
+     * Refresh audio debug information by reading current audio configuration from the streamer.
+     * This can be called manually when audio configuration changes (e.g., when plugging in USB mic).
+     */
+    fun refreshAudioDebugInfo() {
+        viewModelScope.launch {
+            try {
+                val currentStreamer = serviceStreamer
+                if (currentStreamer == null) {
+                    _audioDebugInfoLiveData.postValue(null)
+                    Log.d(TAG, "Cannot refresh audio debug info - streamer not available")
+                    return@launch
+                }
+
+                // Get audio codec config from the streamer
+                val audioConfig = currentStreamer.audioConfigFlow.value
+                if (audioConfig == null) {
+                    _audioDebugInfoLiveData.postValue(null)
+                    Log.d(TAG, "Cannot refresh audio debug info - audio config not available")
+                    return@launch
+                }
+
+                // Determine audio source type
+                val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+                val audioSourceType = when (audioSource) {
+                    is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH (DEFAULT)"
+                    is com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSource -> "MEDIA_PROJECTION"
+                    else -> {
+                        // Use class name for other sources (e.g., MicrophoneSource which is internal)
+                        val className = audioSource?.javaClass?.simpleName ?: "UNKNOWN"
+                        // Try to infer if it's unprocessed from the factory name if available
+                        if (className.contains("Microphone")) {
+                            "MICROPHONE" // Will show as MicrophoneSource generically
+                        } else {
+                            className
+                        }
+                    }
+                }
+
+                // Get actual system audio source from AudioManager (what HAL is really using)
+                val actualSystemSource = try {
+                    val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val configs = audioManager.activeRecordingConfigurations
+                    
+                    if (configs.isNotEmpty()) {
+                        // Find our app's recording session
+                        val ourConfig = configs.firstOrNull { config ->
+                            // Match by our client's attributes if possible
+                            true // For now, use the first active recording (should be our app)
+                        }
+                        
+                        ourConfig?.let { config ->
+                            val clientSource = config.clientAudioSource
+                            val actualSource = config.audioSource
+                            
+                            val clientName = getAudioSourceName(clientSource)
+                            val actualName = getAudioSourceName(actualSource)
+                            
+                            if (clientSource != actualSource) {
+                                "Requested: $clientName → Actual: $actualName"
+                            } else {
+                                actualName
+                            }
+                        }
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to get actual audio source: ${e.message}")
+                    null
+                }
+
+                val debugInfo = com.dimadesu.lifestreamer.models.AudioDebugInfo(
+                    audioSource = audioSourceType,
+                    actualSystemSource = actualSystemSource,
+                    sampleRate = audioConfig.sampleRate,
+                    bitFormat = audioConfig.byteFormat,
+                    channelConfig = audioConfig.channelConfig,
+                    bitrate = audioConfig.startBitrate
+                )
+
+                _audioDebugInfoLiveData.postValue(debugInfo)
+                Log.d(TAG, "Audio debug info refreshed: $debugInfo")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to refresh audio debug info: ${e.message}", e)
+                _audioDebugInfoLiveData.postValue(null)
+            }
+        }
+    }
+
+    /**
+     * Toggle audio debug overlay visibility
+     */
+    fun toggleAudioDebugOverlay() {
+        isAudioDebugOverlayVisible = !isAudioDebugOverlayVisible
+        if (isAudioDebugOverlayVisible) {
+            // Refresh info when showing the overlay
+            refreshAudioDebugInfo()
+        } else {
+            // Hide the overlay by setting info to null
+            _audioDebugInfoLiveData.postValue(null)
+        }
+    }
+
     companion object {
         private const val TAG = "PreviewViewModel"
+        
+        /**
+         * Helper to convert audio source int to readable name
+         */
+        fun getAudioSourceName(source: Int): String = when(source) {
+            0 -> "DEFAULT"
+            1 -> "MIC"
+            5 -> "CAMCORDER"
+            6 -> "VOICE_RECOGNITION"
+            7 -> "VOICE_COMMUNICATION"
+            9 -> "UNPROCESSED"
+            10 -> "VOICE_PERFORMANCE"
+            else -> "UNKNOWN ($source)"
+        }
     }
 }
