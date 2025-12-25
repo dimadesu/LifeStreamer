@@ -80,15 +80,6 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:text="AUDIO DEBUG"
-                android:paddingBottom="8dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
                 android:textSize="13sp"
                 android:text='@{"Source: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
 
@@ -151,7 +142,7 @@
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:text="AUDIO SOURCE TYPE"
-                android:paddingBottom="4dp" />
+                android:layout_marginBottom="4dp" />
 
             <Spinner
                 android:id="@+id/audioSourceSpinner"
@@ -165,8 +156,8 @@
                 android:id="@+id/applyAudioSourceButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Update"
+                android:layout_marginTop="8dp"
+                android:text="Apply"
                 android:textSize="12sp"
                 android:onClick="@{() -> viewmodel.applySelectedAudioSource()}" />
 
