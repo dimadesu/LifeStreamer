@@ -62,12 +62,12 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintVertical_bias="0.25" />
 
-        <!-- Audio Debug Info Overlay (centered) -->
+        <!-- Audio Debug Info Overlay (centered, 2 columns) -->
         <LinearLayout
             android:id="@+id/audioDebugOverlay"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:padding="12dp"
             android:background="#CC000000"
             app:layout_constraintTop_toTopOf="parent"
@@ -76,90 +76,142 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:goneUnless='@{viewmodel.audioDebugInfoLiveData != null}'>
 
-            <TextView
+            <!-- Left Column: Stats -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Source: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
+                android:orientation="vertical"
+                android:paddingEnd="16dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="12sp"
-                android:textStyle="italic"
-                android:text='@{"System Audio Source: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}'
-                app:goneUnless='@{viewmodel.audioDebugInfoLiveData.actualSystemSource != null}' />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:text='@{"Source: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:textStyle="italic"
+                    android:text='@{"System: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}'
+                    app:goneUnless='@{viewmodel.audioDebugInfoLiveData.actualSystemSource != null}' />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Sample Rate: " + viewmodel.audioDebugInfoLiveData.sampleRateKHz}' />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Bit Format: " + viewmodel.audioDebugInfoLiveData.bitFormatString}' />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:text='@{"Sample Rate: " + viewmodel.audioDebugInfoLiveData.sampleRateKHz}' />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Channels: " + viewmodel.audioDebugInfoLiveData.channelConfigString}' />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:text='@{"Bit Format: " + viewmodel.audioDebugInfoLiveData.bitFormatString}' />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                android:text='@{"Bitrate: " + viewmodel.audioDebugInfoLiveData.bitrateKbps}' />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:text='@{"Channels: " + viewmodel.audioDebugInfoLiveData.channelConfigString}' />
 
-            <!-- Audio Source Selector -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:text='@{"Bitrate: " + viewmodel.audioDebugInfoLiveData.bitrateKbps}' />
+
+            </LinearLayout>
+
+            <!-- Vertical Divider -->
             <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp"
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_marginHorizontal="8dp"
                 android:background="#40FFFFFF" />
 
-            <TextView
+            <!-- Right Column: Controls -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:text="AUDIO SOURCE TYPE"
-                android:layout_marginBottom="4dp" />
+                android:orientation="vertical"
+                android:paddingStart="8dp">
 
-            <Spinner
-                android:id="@+id/audioSourceSpinner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="#80FFFFFF"
-                android:paddingVertical="4dp"
-                android:paddingHorizontal="8dp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:text="Audio Source"
+                    android:paddingBottom="4dp" />
 
-            <Button
-                android:id="@+id/applyAudioSourceButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Apply"
-                android:textSize="12sp"
-                android:onClick="@{() -> viewmodel.applySelectedAudioSource()}" />
+                <Spinner
+                    android:id="@+id/audioSourceSpinner"
+                    android:layout_width="200dp"
+                    android:layout_height="wrap_content"
+                    android:background="#80FFFFFF"
+                    android:paddingVertical="4dp"
+                    android:paddingHorizontal="8dp"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:text="Audio Effects"
+                    android:paddingBottom="4dp" />
+
+                <CheckBox
+                    android:id="@+id/noiseSuppressionCheckbox"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Noise Suppression (NS)"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:checked="@={viewmodel.enableNoiseSuppression}" />
+
+                <CheckBox
+                    android:id="@+id/echoCancelerCheckbox"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Echo Canceler (AEC)"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:checked="@={viewmodel.enableEchoCanceler}" />
+
+                <CheckBox
+                    android:id="@+id/gainControlCheckbox"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Gain Control (AGC)"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:checked="@={viewmodel.enableGainControl}" />
+
+                <Button
+                    android:id="@+id/applyAudioSourceButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Apply"
+                    android:textSize="12sp"
+                    android:onClick="@{() -> viewmodel.applySelectedAudioSource()}" />
+
+            </LinearLayout>
 
         </LinearLayout>
 

@@ -375,6 +375,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     // Selected audio source type for testing (MediaRecorder.AudioSource constants)
     var selectedAudioSourceType: Int = android.media.MediaRecorder.AudioSource.DEFAULT
+    
+    // Audio effect toggles
+    val enableNoiseSuppression = MutableLiveData(true)
+    val enableEchoCanceler = MutableLiveData(true)
+    val enableGainControl = MutableLiveData(false)
 
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
@@ -3710,11 +3715,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             try {
                 Log.i(TAG, "Applying audio source type: ${getAudioSourceName(selectedAudioSourceType)} ($selectedAudioSourceType)")
                 
-                // Create new microphone source with the selected audio source type
-                val newAudioSource = MicrophoneSourceFactory(audioSourceType = selectedAudioSourceType)
+                // Build effects set based on checkboxes
+                val effects = mutableSetOf<java.util.UUID>()
+                if (enableNoiseSuppression.value == true) {
+                    effects.add(android.media.audiofx.NoiseSuppressor.EFFECT_TYPE_NS)
+                }
+                if (enableEchoCanceler.value == true) {
+                    effects.add(android.media.audiofx.AcousticEchoCanceler.EFFECT_TYPE_AEC)
+                }
+                if (enableGainControl.value == true) {
+                    effects.add(android.media.audiofx.AutomaticGainControl.EFFECT_TYPE_AGC)
+                }
+                
+                Log.i(TAG, "Applying effects: NS=${enableNoiseSuppression.value}, AEC=${enableEchoCanceler.value}, AGC=${enableGainControl.value}")
+                
+                // Create new microphone source with the selected audio source type and effects
+                val newAudioSource = MicrophoneSourceFactory(
+                    audioSourceType = selectedAudioSourceType,
+                    effects = effects
+                )
                 
                 currentStreamer.setAudioSource(newAudioSource)
-                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(selectedAudioSourceType)}")
+                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(selectedAudioSourceType)} with ${effects.size} effects")
                 
                 // Refresh debug info immediately
                 delay(200)
