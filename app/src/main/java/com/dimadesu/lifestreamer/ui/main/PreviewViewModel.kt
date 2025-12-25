@@ -3708,16 +3708,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             try {
                 Log.i(TAG, "Applying audio source type: ${getAudioSourceName(selectedAudioSourceType)} ($selectedAudioSourceType)")
                 
-                // Create new microphone source based on audio source type
-                val newAudioSource = when (selectedAudioSourceType) {
-                    android.media.MediaRecorder.AudioSource.UNPROCESSED -> 
-                        MicrophoneSourceFactory(unprocessed = true)
-                    else -> 
-                        // For all other types, use DEFAULT source with effects
-                        // Note: Android's MicrophoneSource only supports DEFAULT or UNPROCESSED
-                        // Other constants like CAMCORDER, VOICE_RECOGNITION behave similarly to DEFAULT
-                        MicrophoneSourceFactory(unprocessed = false)
-                }
+                // Create new microphone source with the selected audio source type
+                val newAudioSource = MicrophoneSourceFactory(audioSourceType = selectedAudioSourceType)
                 
                 currentStreamer.setAudioSource(newAudioSource)
                 Log.i(TAG, "Audio source changed to: ${getAudioSourceName(selectedAudioSourceType)}")
