@@ -167,10 +167,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private val bluetoothAudioManager by lazy { 
         com.dimadesu.lifestreamer.audio.BluetoothAudioManager(this, serviceScope, bluetoothConnectPermissionRequest) 
     }
-    // USB audio manager - handles USB audio detection and auto-switching
-    private val usbAudioManager by lazy {
-        com.dimadesu.lifestreamer.audio.UsbAudioManager(this, serviceScope)
-    }
     // Service-wide streaming status for UI synchronization (shared enum)
     private val _serviceStreamStatus = MutableStateFlow(StreamStatus.NOT_STREAMING)
     val serviceStreamStatus = _serviceStreamStatus.asStateFlow()
@@ -446,11 +442,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             bluetoothAudioManager.cleanup()
         } catch (_: Throwable) {}
 
-        // Cleanup USB audio manager resources
-        try {
-            usbAudioManager.cleanup()
-        } catch (_: Throwable) {}
-
         super.onDestroy()
     }
 
@@ -546,14 +537,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // when the stream truly stops (not during reconnection cleanup)
         // This prevents rotation changes from being accepted during reconnection
         Log.i(TAG, "Streaming stopped - rotation lock maintained for potential reconnection")
-        
-        // Stop USB audio monitoring when streaming stops
-        try {
-            usbAudioManager.stopMonitoring()
-            Log.i(TAG, "USB audio monitoring stopped")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to stop USB audio monitoring: ${e.message}")
-        }
         
         // Release wake locks when streaming stops
         releaseWakeLock()
@@ -894,31 +877,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
             try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}
-        }
-        
-        // Start USB audio monitoring to auto-switch audio source on USB plug/unplug
-        try {
-            usbAudioManager.onUsbAudioChanged = { hasUsbAudio ->
-                Log.i(TAG, "USB audio state changed: $hasUsbAudio")
-                // Only reconfigure if actually streaming
-                if (streamer.isStreamingFlow.value) {
-                    // Check if using mic-based audio - don't switch if using MediaProjection
-                    val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
-                    val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
-                    
-                    if (!isMediaProjectionAudio) {
-                        Log.i(TAG, "USB audio change detected but reconfiguration DISABLED for testing")
-                        // TEMPORARILY DISABLED: Testing if system switches audio source automatically
-                        // usbAudioManager.reconfigureAudioSource(streamer)
-                    } else {
-                        Log.i(TAG, "Skipping USB audio reconfigure - using MediaProjection audio")
-                    }
-                }
-            }
-            usbAudioManager.startMonitoring()
-            Log.i(TAG, "USB audio monitoring started")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to start USB audio monitoring: ${e.message}")
         }
         
         super.onStreamingStart()
