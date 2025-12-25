@@ -134,8 +134,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
                 android:textSize="13sp"
-                android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}'
-                android:paddingTop="4dp" />
+                android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
 
         </LinearLayout>
 
