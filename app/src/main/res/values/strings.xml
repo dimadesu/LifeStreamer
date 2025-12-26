@@ -117,6 +117,24 @@
     <string name="audio_profile">Profile</string>
     <string name="audio_profile_key">audio_profile_key</string>
 
+    <!-- Audio Source & Effects -->
+    <string name="audio_source_type">Audio Source Type</string>
+    <string name="audio_source_type_key">audio_source_type_key</string>
+    <string name="audio_source_default">DEFAULT</string>
+    <string name="audio_source_mic">MIC</string>
+    <string name="audio_source_camcorder">CAMCORDER</string>
+    <string name="audio_source_voice_recognition">VOICE_RECOGNITION</string>
+    <string name="audio_source_voice_communication">VOICE_COMMUNICATION</string>
+    <string name="audio_source_unprocessed">UNPROCESSED</string>
+
+    <string name="audio_effects">Audio Effects</string>
+    <string name="audio_effect_ns">Noise Suppression (NS)</string>
+    <string name="audio_effect_ns_key">audio_effect_ns_key</string>
+    <string name="audio_effect_aec">Echo Cancellation (AEC)</string>
+    <string name="audio_effect_aec_key">audio_effect_aec_key</string>
+    <string name="audio_effect_agc">Auto Gain Control (AGC)</string>
+    <string name="audio_effect_agc_key">audio_effect_agc_key</string>
+
     <!-- Endpoint -->
     <string name="endpoint">Endpoint</string>
 

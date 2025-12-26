@@ -3663,6 +3663,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val newValue = !(_isAudioDebugOverlayVisible.value ?: false)
         _isAudioDebugOverlayVisible.value = newValue
         if (newValue) {
+            // Load current settings from DataStore when opening overlay
+            viewModelScope.launch {
+                selectedAudioSourceType = storageRepository.audioSourceTypeFlow.first()
+                enableNoiseSuppression.value = storageRepository.audioEffectNsFlow.first()
+                enableEchoCanceler.value = storageRepository.audioEffectAecFlow.first()
+                enableGainControl.value = storageRepository.audioEffectAgcFlow.first()
+                Log.d(TAG, "Loaded audio settings from DataStore: source=$selectedAudioSourceType, NS=${enableNoiseSuppression.value}, AEC=${enableEchoCanceler.value}, AGC=${enableGainControl.value}")
+            }
+            
             // Refresh immediately when showing the overlay
             refreshAudioDebugInfo()
             // Start periodic refresh every 2 seconds
@@ -3703,6 +3712,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Apply the selected audio source type from the debug overlay.
      * This recreates the audio source with the selected MediaRecorder.AudioSource constant.
+     * Also saves the settings to DataStore for persistence.
      */
     fun applySelectedAudioSource() {
         val currentStreamer = serviceStreamer
@@ -3714,6 +3724,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             try {
                 Log.i(TAG, "Applying audio source type: ${getAudioSourceName(selectedAudioSourceType)} ($selectedAudioSourceType)")
+                
+                // Save settings to DataStore for persistence
+                storageRepository.saveAudioSourceType(selectedAudioSourceType)
+                storageRepository.saveAudioEffectNs(enableNoiseSuppression.value ?: true)
+                storageRepository.saveAudioEffectAec(enableEchoCanceler.value ?: true)
+                storageRepository.saveAudioEffectAgc(enableGainControl.value ?: false)
+                Log.d(TAG, "Saved audio settings to DataStore")
                 
                 // Build effects set based on checkboxes
                 val effects = mutableSetOf<java.util.UUID>()
