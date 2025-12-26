@@ -70,6 +70,7 @@
             android:orientation="horizontal"
             android:padding="12dp"
             android:background="#CC000000"
+            android:elevation="100dp"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
