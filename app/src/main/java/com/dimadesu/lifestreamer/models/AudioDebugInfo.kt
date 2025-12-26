@@ -55,4 +55,9 @@ data class AudioDebugInfo(
         if (automaticGainControl) effects.add("AGC")
         return if (effects.isEmpty()) "None" else effects.joinToString(", ")
     }
+    
+    /**
+     * Returns actual system source or "None" if null
+     */
+    fun getActualSystemSourceDisplay(): String = actualSystemSource ?: "None"
 }
