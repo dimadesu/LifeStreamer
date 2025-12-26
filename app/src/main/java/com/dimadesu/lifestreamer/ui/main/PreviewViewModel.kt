@@ -3761,6 +3761,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.setAudioSource(newAudioSource)
                 Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)} with ${effects.size} effects")
                 
+                // If audio monitoring is enabled, restart passthrough with new settings
+                if (_isMonitorAudioOn.value == true) {
+                    Log.i(TAG, "Restarting audio passthrough with new settings")
+                    service?.stopAudioPassthrough()
+                    delay(100) // Small delay to ensure clean restart
+                    service?.startAudioPassthrough()
+                }
+                
                 // Refresh debug info immediately
                 delay(200)
                 refreshAudioDebugInfo()
