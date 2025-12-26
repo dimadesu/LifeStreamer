@@ -42,16 +42,16 @@ class DataStoreRepository(
     // Audio source type (MediaRecorder.AudioSource constant)
     val audioSourceTypeFlow: Flow<Int> = dataStore.data.map { preferences ->
         preferences[stringPreferencesKey(context.getString(R.string.audio_source_type_key))]?.toIntOrNull()
-            ?: android.media.MediaRecorder.AudioSource.DEFAULT
+            ?: android.media.MediaRecorder.AudioSource.CAMCORDER
     }.distinctUntilChanged()
 
     // Audio effects settings
     val audioEffectNsFlow: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[booleanPreferencesKey(context.getString(R.string.audio_effect_ns_key))] ?: true
+        preferences[booleanPreferencesKey(context.getString(R.string.audio_effect_ns_key))] ?: false
     }.distinctUntilChanged()
 
     val audioEffectAecFlow: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[booleanPreferencesKey(context.getString(R.string.audio_effect_aec_key))] ?: true
+        preferences[booleanPreferencesKey(context.getString(R.string.audio_effect_aec_key))] ?: false
     }.distinctUntilChanged()
 
     val audioEffectAgcFlow: Flow<Boolean> = dataStore.data.map { preferences ->
