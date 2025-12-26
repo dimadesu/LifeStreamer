@@ -1091,14 +1091,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
     
     private fun setupAudioSourceSpinner() {
-        val audioSourceOptions = listOf(
-            "DEFAULT" to android.media.MediaRecorder.AudioSource.DEFAULT,
-            "MIC" to android.media.MediaRecorder.AudioSource.MIC,
-            "CAMCORDER" to android.media.MediaRecorder.AudioSource.CAMCORDER,
-            "VOICE_RECOGNITION" to android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            "VOICE_COMMUNICATION" to android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            "UNPROCESSED" to android.media.MediaRecorder.AudioSource.UNPROCESSED
-        )
+        // Read from the same XML arrays as Settings activity
+        val entries = resources.getStringArray(R.array.AudioSourceTypeEntries)
+        val values = resources.getStringArray(R.array.AudioSourceTypeEntryValues)
+        val audioSourceOptions = entries.zip(values.map { it.toInt() })
         
         val adapter = android.widget.ArrayAdapter(
             requireContext(),
