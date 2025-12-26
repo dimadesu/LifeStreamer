@@ -11,7 +11,6 @@ data class AudioDebugInfo(
     val sampleRate: Int?,      // e.g., 44100, 48000 (null if no active recording)
     val bitFormat: Int?,       // e.g., AudioFormat.ENCODING_PCM_16BIT (null if no active recording)
     val channelConfig: Int?,   // e.g., AudioFormat.CHANNEL_IN_STEREO (null if no active recording)
-    val bitrate: Int,         // encoder bitrate in bps
     val noiseSuppression: Boolean?,    // NS enabled (null if no active recording)
     val acousticEchoCanceler: Boolean?, // AEC enabled (null if no active recording)
     val automaticGainControl: Boolean?,  // AGC enabled (null if no active recording)
@@ -40,11 +39,6 @@ data class AudioDebugInfo(
      * Returns sample rate in kHz or N/A if no active recording
      */
     fun getSampleRateKHz(): String = if (sampleRate == null) "N/A" else "${"%.1f".format(sampleRate / 1000.0)} kHz"
-    
-    /**
-     * Returns bitrate in kbps
-     */
-    fun getBitrateKbps(): String = "${bitrate / 1000} kbps"
     
     /**
      * Returns formatted audio effects status or N/A if no active recording

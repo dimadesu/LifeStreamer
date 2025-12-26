@@ -3645,7 +3645,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     sampleRate = actualSampleRate,
                     bitFormat = actualFormat,
                     channelConfig = actualChannelMask,
-                    bitrate = audioConfig.startBitrate,
                     noiseSuppression = hasNS,
                     acousticEchoCanceler = hasAEC,
                     automaticGainControl = hasAGC,
