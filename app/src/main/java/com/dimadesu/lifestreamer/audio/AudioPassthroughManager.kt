@@ -8,6 +8,9 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Process
 import android.util.Log
@@ -17,11 +20,19 @@ import android.util.Log
  * @param sampleRate Sample rate in Hz (typically 44100 or 48000)
  * @param channelConfig Audio channel configuration (CHANNEL_IN_MONO or CHANNEL_IN_STEREO)
  * @param audioFormat Audio format (typically ENCODING_PCM_16BIT)
+ * @param audioSourceType MediaRecorder.AudioSource constant (DEFAULT, MIC, CAMCORDER, etc.)
+ * @param enableNoiseSuppressor Enable noise suppression effect
+ * @param enableEchoCanceler Enable acoustic echo canceler effect
+ * @param enableGainControl Enable automatic gain control effect
  */
 data class AudioPassthroughConfig(
     val sampleRate: Int = 44100,
     val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
-    val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT
+    val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT,
+    val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT,
+    val enableNoiseSuppressor: Boolean = true,
+    val enableEchoCanceler: Boolean = true,
+    val enableGainControl: Boolean = false
 )
 
 /**
@@ -39,6 +50,11 @@ class AudioPassthroughManager(
     @Volatile
     private var isRunning = false
     private var preferredDevice: AudioDeviceInfo? = null
+    
+    // Audio effects
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var gainControl: AutomaticGainControl? = null
 
     /**
      * Set preferred audio device for recording (e.g., Bluetooth device).
@@ -90,13 +106,13 @@ class AudioPassthroughManager(
                     .setChannelMask(channelConfig)
                     .build()
 
-                // Use VOICE_COMMUNICATION for BT (routes to SCO), DEFAULT for built-in (matches streaming)
+                // Use VOICE_COMMUNICATION for BT (routes to SCO), otherwise use configured source
                 val audioSource = if (currentDevice != null) {
                     MediaRecorder.AudioSource.VOICE_COMMUNICATION
                 } else {
-                    MediaRecorder.AudioSource.DEFAULT
+                    config.audioSourceType
                 }
-                Log.i(TAG, "Using audio source: ${if (currentDevice != null) "VOICE_COMMUNICATION (BT)" else "DEFAULT (built-in)"}")
+                Log.i(TAG, "Using audio source: ${if (currentDevice != null) "VOICE_COMMUNICATION (BT)" else "${config.audioSourceType} (from settings)"}")
 
                 val builder = AudioRecord.Builder()
                     .setAudioFormat(audioFormatObj)
@@ -122,11 +138,11 @@ class AudioPassthroughManager(
 
                 record
             } else {
-                // For older APIs, use DEFAULT for built-in mic (matches streaming)
+                // For older APIs, use configured source for built-in mic
                 val audioSource = if (preferredDevice != null) {
                     MediaRecorder.AudioSource.VOICE_COMMUNICATION
                 } else {
-                    MediaRecorder.AudioSource.DEFAULT
+                    config.audioSourceType
                 }
                 AudioRecord(
                     audioSource,
@@ -224,6 +240,51 @@ class AudioPassthroughManager(
                 Log.w(TAG, "Failed to configure communication device: ${e.message}")
             }
             
+            // Apply audio effects based on config
+            audioRecord?.let { record ->
+                val audioSessionId = record.audioSessionId
+                Log.i(TAG, "Applying audio effects to session $audioSessionId")
+                
+                // Noise Suppressor
+                if (config.enableNoiseSuppressor && NoiseSuppressor.isAvailable()) {
+                    try {
+                        noiseSuppressor = NoiseSuppressor.create(audioSessionId)
+                        noiseSuppressor?.enabled = true
+                        Log.i(TAG, "NoiseSuppressor enabled")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to create NoiseSuppressor: ${e.message}")
+                    }
+                } else {
+                    Log.i(TAG, "NoiseSuppressor not enabled (config=${config.enableNoiseSuppressor}, available=${NoiseSuppressor.isAvailable()})")
+                }
+                
+                // Echo Canceler
+                if (config.enableEchoCanceler && AcousticEchoCanceler.isAvailable()) {
+                    try {
+                        echoCanceler = AcousticEchoCanceler.create(audioSessionId)
+                        echoCanceler?.enabled = true
+                        Log.i(TAG, "AcousticEchoCanceler enabled")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to create AcousticEchoCanceler: ${e.message}")
+                    }
+                } else {
+                    Log.i(TAG, "AcousticEchoCanceler not enabled (config=${config.enableEchoCanceler}, available=${AcousticEchoCanceler.isAvailable()})")
+                }
+                
+                // Automatic Gain Control
+                if (config.enableGainControl && AutomaticGainControl.isAvailable()) {
+                    try {
+                        gainControl = AutomaticGainControl.create(audioSessionId)
+                        gainControl?.enabled = true
+                        Log.i(TAG, "AutomaticGainControl enabled")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to create AutomaticGainControl: ${e.message}")
+                    }
+                } else {
+                    Log.i(TAG, "AutomaticGainControl not enabled (config=${config.enableGainControl}, available=${AutomaticGainControl.isAvailable()})")
+                }
+            }
+            
             // Start recording and playback
             audioRecord?.startRecording()
             audioTrack?.play()
@@ -291,6 +352,26 @@ class AudioPassthroughManager(
             Log.w(TAG, "Error while joining passthrough thread: ${t.message}")
         }
         passthroughThread = null
+        
+        // Release audio effects
+        try {
+            noiseSuppressor?.release()
+            noiseSuppressor = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing NoiseSuppressor: ${e.message}")
+        }
+        try {
+            echoCanceler?.release()
+            echoCanceler = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AcousticEchoCanceler: ${e.message}")
+        }
+        try {
+            gainControl?.release()
+            gainControl = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AutomaticGainControl: ${e.message}")
+        }
         
         try {
             audioRecord?.stop()

@@ -182,8 +182,7 @@
                     android:textColor="@android:color/white"
                     android:textSize="12sp"
                     android:textStyle="italic"
-                    android:text='@{"System: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}'
-                    app:goneUnless='@{viewmodel.audioDebugInfoLiveData.actualSystemSource != null}' />
+                    android:text='@{"System: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}' />
 
                 <TextView
                     android:layout_width="wrap_content"
