@@ -1110,7 +1110,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         
         binding.audioSourceSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                previewViewModel.selectedAudioSourceType = audioSourceOptions[position].second
+                previewViewModel.setSelectedAudioSourceType(audioSourceOptions[position].second)
             }
             
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {
@@ -1118,8 +1118,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
         
-        // Set initial selection to DEFAULT
-        binding.audioSourceSpinner.setSelection(0)
+        // Observe the selected audio source type and update spinner position
+        previewViewModel.selectedAudioSourceType.observe(viewLifecycleOwner) { sourceType ->
+            val position = audioSourceOptions.indexOfFirst { it.second == sourceType }
+            if (position >= 0 && binding.audioSourceSpinner.selectedItemPosition != position) {
+                binding.audioSourceSpinner.setSelection(position)
+            }
+        }
     }
 
     private fun updateCameraButtonsVisibility() {

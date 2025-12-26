@@ -374,7 +374,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isAudioDebugOverlayVisible: LiveData<Boolean> = _isAudioDebugOverlayVisible
     
     // Selected audio source type for testing (MediaRecorder.AudioSource constants)
-    var selectedAudioSourceType: Int = android.media.MediaRecorder.AudioSource.DEFAULT
+    private val _selectedAudioSourceType = MutableLiveData(android.media.MediaRecorder.AudioSource.DEFAULT)
+    val selectedAudioSourceType: LiveData<Int> = _selectedAudioSourceType
+    
+    fun setSelectedAudioSourceType(sourceType: Int) {
+        _selectedAudioSourceType.value = sourceType
+    }
     
     // Audio effect toggles
     val enableNoiseSuppression = MutableLiveData(true)
@@ -3665,11 +3670,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (newValue) {
             // Load current settings from DataStore when opening overlay
             viewModelScope.launch {
-                selectedAudioSourceType = storageRepository.audioSourceTypeFlow.first()
+                _selectedAudioSourceType.value = storageRepository.audioSourceTypeFlow.first()
                 enableNoiseSuppression.value = storageRepository.audioEffectNsFlow.first()
                 enableEchoCanceler.value = storageRepository.audioEffectAecFlow.first()
                 enableGainControl.value = storageRepository.audioEffectAgcFlow.first()
-                Log.d(TAG, "Loaded audio settings from DataStore: source=$selectedAudioSourceType, NS=${enableNoiseSuppression.value}, AEC=${enableEchoCanceler.value}, AGC=${enableGainControl.value}")
+                Log.d(TAG, "Loaded audio settings from DataStore: source=${_selectedAudioSourceType.value}, NS=${enableNoiseSuppression.value}, AEC=${enableEchoCanceler.value}, AGC=${enableGainControl.value}")
             }
             
             // Refresh immediately when showing the overlay
@@ -3723,10 +3728,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         viewModelScope.launch {
             try {
-                Log.i(TAG, "Applying audio source type: ${getAudioSourceName(selectedAudioSourceType)} ($selectedAudioSourceType)")
+                val sourceType = _selectedAudioSourceType.value ?: android.media.MediaRecorder.AudioSource.DEFAULT
+                Log.i(TAG, "Applying audio source type: ${getAudioSourceName(sourceType)} ($sourceType)")
                 
                 // Save settings to DataStore for persistence
-                storageRepository.saveAudioSourceType(selectedAudioSourceType)
+                storageRepository.saveAudioSourceType(sourceType)
                 storageRepository.saveAudioEffectNs(enableNoiseSuppression.value ?: true)
                 storageRepository.saveAudioEffectAec(enableEchoCanceler.value ?: true)
                 storageRepository.saveAudioEffectAgc(enableGainControl.value ?: false)
@@ -3748,12 +3754,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Create new microphone source with the selected audio source type and effects
                 val newAudioSource = MicrophoneSourceFactory(
-                    audioSourceType = selectedAudioSourceType,
+                    audioSourceType = sourceType,
                     effects = effects
                 )
                 
                 currentStreamer.setAudioSource(newAudioSource)
-                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(selectedAudioSourceType)} with ${effects.size} effects")
+                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)} with ${effects.size} effects")
                 
                 // Refresh debug info immediately
                 delay(200)
