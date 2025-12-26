@@ -43,9 +43,9 @@
         <!-- <item>DEFAULT</item> -->
         <!-- <item>MIC</item> -->
         <item>CAMCORDER</item>
-        <item>VOICE_RECOGNITION</item>
+        <!-- <item>VOICE_RECOGNITION</item> -->
         <item>VOICE_COMMUNICATION</item>
-        <item>UNPROCESSED</item>
+        <!-- <item>UNPROCESSED</item> -->
     </string-array>
 
     <string-array name="AudioSourceTypeEntryValues">
@@ -56,11 +56,11 @@
         <!-- MediaRecorder.AudioSource.CAMCORDER = 5 -->
         <item>5</item>
         <!-- MediaRecorder.AudioSource.VOICE_RECOGNITION = 6 -->
-        <item>6</item>
+        <!-- <item>6</item> -->
         <!-- MediaRecorder.AudioSource.VOICE_COMMUNICATION = 7 -->
         <item>7</item>
         <!-- MediaRecorder.AudioSource.UNPROCESSED = 9 -->
-        <item>9</item>
+        <!-- <item>9</item> -->
     </string-array>
 
 </resources>
