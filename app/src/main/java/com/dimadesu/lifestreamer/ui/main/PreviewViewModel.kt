@@ -3624,18 +3624,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         Log.d(TAG, "Audio config from system: SR=$systemSampleRate, CH=$systemChannelMask, FMT=$systemEncoding, Effects: NS=$ns, AEC=$aec, AGC=$agc (from ${effectsToCheck.size} effects)")
                         
-                        Triple(ns, aec, agc) to Triple(systemSampleRate, systemChannelMask, systemEncoding)
+                        Triple(ns, aec, agc) to Triple(systemSampleRate, systemChannelMask, systemEncoding) to true
                     } else {
                         Log.d(TAG, "No active recording configurations found")
-                        Triple(false, false, false) to Triple(audioConfig.sampleRate, audioConfig.channelConfig, audioConfig.byteFormat)
+                        Triple<Boolean?, Boolean?, Boolean?>(null, null, null) to Triple<Int?, Int?, Int?>(null, null, null) to false
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to get audio effects and format: ${e.message}")
-                    Triple(false, false, false) to Triple(audioConfig.sampleRate, audioConfig.channelConfig, audioConfig.byteFormat)
+                    Triple<Boolean?, Boolean?, Boolean?>(null, null, null) to Triple<Int?, Int?, Int?>(null, null, null) to false
                 }
                 
-                val (hasNS, hasAEC, hasAGC) = systemAudioInfo.first
-                val (actualSampleRate, actualChannelMask, actualFormat) = systemAudioInfo.second
+                val (effectsAndFormat, hasActiveRecording) = systemAudioInfo
+                val (effects, format) = effectsAndFormat
+                val (hasNS, hasAEC, hasAGC) = effects
+                val (actualSampleRate, actualChannelMask, actualFormat) = format
 
                 val debugInfo = com.dimadesu.lifestreamer.models.AudioDebugInfo(
                     audioSource = audioSourceType,
@@ -3646,7 +3648,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     bitrate = audioConfig.startBitrate,
                     noiseSuppression = hasNS,
                     acousticEchoCanceler = hasAEC,
-                    automaticGainControl = hasAGC
+                    automaticGainControl = hasAGC,
+                    hasActiveRecording = hasActiveRecording
                 )
 
                 _audioDebugInfoLiveData.postValue(debugInfo)
