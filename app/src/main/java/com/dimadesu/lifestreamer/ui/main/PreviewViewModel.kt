@@ -3548,8 +3548,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Determine audio source type
                 val audioSource = currentStreamer.audioInput?.sourceFlow?.value
                 val audioSourceType = when (audioSource) {
-                    is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH (DEFAULT)"
-                    is com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSource -> "MEDIA_PROJECTION"
+                    is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
+                    is com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSource -> "MEDIA PROJECTION"
                     else -> {
                         // Use class name for other sources (e.g., MicrophoneSource which is internal)
                         val className = audioSource?.javaClass?.simpleName ?: "UNKNOWN"
