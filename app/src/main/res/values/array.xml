@@ -40,8 +40,8 @@
 
     <!-- Audio Source Types (MediaRecorder.AudioSource constants) -->
     <string-array name="AudioSourceTypeEntries">
-        <item>DEFAULT</item>
-        <item>MIC</item>
+        <!-- <item>DEFAULT</item> -->
+        <!-- <item>MIC</item> -->
         <item>CAMCORDER</item>
         <item>VOICE_RECOGNITION</item>
         <item>VOICE_COMMUNICATION</item>
@@ -50,9 +50,9 @@
 
     <string-array name="AudioSourceTypeEntryValues">
         <!-- MediaRecorder.AudioSource.DEFAULT = 0 -->
-        <item>0</item>
+        <!-- <item>0</item> -->
         <!-- MediaRecorder.AudioSource.MIC = 1 -->
-        <item>1</item>
+        <!-- <item>1</item> -->
         <!-- MediaRecorder.AudioSource.CAMCORDER = 5 -->
         <item>5</item>
         <!-- MediaRecorder.AudioSource.VOICE_RECOGNITION = 6 -->
