@@ -7,8 +7,16 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresPermission
+import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
+import com.dimadesu.lifestreamer.utils.dataStore
+import kotlinx.coroutines.flow.first
+import java.util.UUID
 import io.github.thibaultbee.streampack.core.elements.data.RawFrame
 import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
@@ -33,8 +41,17 @@ import kotlin.coroutines.resume
  * when building `AudioRecord` by using reflection to call `setPreferredDevice` on the builder
  * when supported.
  */
-class BluetoothAudioSource(private val context: Context, private val preferredDevice: AudioDeviceInfo?) :
+class BluetoothAudioSource(
+    private val context: Context,
+    private val preferredDevice: AudioDeviceInfo?,
+    private val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT,
+    private val effects: Set<UUID> = emptySet()
+) :
     IAudioSourceInternal, IAudioFrameSourceInternal, SuspendStreamable, SuspendConfigurable<AudioSourceConfig>, Releasable {
+
+    companion object {
+        private const val TAG = "BluetoothAudioSource"
+    }
 
     private var audioRecord: AudioRecord? = null
     private var bufferSize: Int = 0
@@ -44,6 +61,11 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
 
     private var currentConfig: AudioSourceConfig? = null
     private var scoStarted = false
+    
+    // Audio effects
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var gainControl: AutomaticGainControl? = null
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     override suspend fun configure(config: AudioSourceConfig) {
@@ -71,10 +93,12 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
                 .setChannelMask(config.channelConfig)
                 .build()
 
-            val builder = AudioRecord.Builder()
-                .setAudioFormat(audioFormat)
-                .setBufferSizeInBytes(bufferSize)
-                .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+Log.i(TAG, "Creating AudioRecord with audioSourceType=$audioSourceType, effects=$effects")
+                
+                val builder = AudioRecord.Builder()
+                    .setAudioFormat(audioFormat)
+                    .setBufferSizeInBytes(bufferSize)
+                    .setAudioSource(audioSourceType)
 
             // Try to prefer the Bluetooth device reflectively
             try {
@@ -92,12 +116,48 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
             builder.build()
         } else {
             AudioRecord(
-                MediaRecorder.AudioSource.DEFAULT,
+                audioSourceType,
                 config.sampleRate,
                 config.channelConfig,
                 config.byteFormat,
                 bufferSize
             )
+        }
+
+        // Apply audio effects
+        audioRecord?.let { record ->
+            val audioSessionId = record.audioSessionId
+            Log.i(TAG, "Applying audio effects to session $audioSessionId")
+            
+            if (effects.contains(NoiseSuppressor.EFFECT_TYPE_NS) && NoiseSuppressor.isAvailable()) {
+                try {
+                    noiseSuppressor = NoiseSuppressor.create(audioSessionId)
+                    noiseSuppressor?.enabled = true
+                    Log.i(TAG, "NoiseSuppressor enabled")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create NoiseSuppressor: ${e.message}")
+                }
+            }
+            
+            if (effects.contains(AcousticEchoCanceler.EFFECT_TYPE_AEC) && AcousticEchoCanceler.isAvailable()) {
+                try {
+                    echoCanceler = AcousticEchoCanceler.create(audioSessionId)
+                    echoCanceler?.enabled = true
+                    Log.i(TAG, "AcousticEchoCanceler enabled")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create AcousticEchoCanceler: ${e.message}")
+                }
+            }
+            
+            if (effects.contains(AutomaticGainControl.EFFECT_TYPE_AGC) && AutomaticGainControl.isAvailable()) {
+                try {
+                    gainControl = AutomaticGainControl.create(audioSessionId)
+                    gainControl?.enabled = true
+                    Log.i(TAG, "AutomaticGainControl enabled")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create AutomaticGainControl: ${e.message}")
+                }
+            }
         }
 
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
@@ -182,6 +242,27 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
 
     override fun release() {
         _isStreamingFlow.tryEmit(false)
+        
+        // Release audio effects
+        try {
+            noiseSuppressor?.release()
+            noiseSuppressor = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing NoiseSuppressor: ${e.message}")
+        }
+        try {
+            echoCanceler?.release()
+            echoCanceler = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AcousticEchoCanceler: ${e.message}")
+        }
+        try {
+            gainControl?.release()
+            gainControl = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AutomaticGainControl: ${e.message}")
+        }
+        
         audioRecord?.release()
         audioRecord = null
         currentConfig = null
@@ -245,10 +326,38 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
 
 /**
  * Factory for `BluetoothAudioSource` that matches `IAudioSourceInternal.Factory`.
+ * Reads audio source type and effects from DataStore settings.
  */
 class BluetoothAudioSourceFactory(private val device: AudioDeviceInfo?) : IAudioSourceInternal.Factory {
+    
+    companion object {
+        private const val TAG = "BluetoothAudioSourceFactory"
+    }
+    
     override suspend fun create(context: Context): IAudioSourceInternal {
-        return BluetoothAudioSource(context.applicationContext, device)
+        // Read settings from DataStore
+        val dataStoreRepository = DataStoreRepository(context, context.dataStore)
+        
+        val audioSourceType = dataStoreRepository.audioSourceTypeFlow.first()
+        val enableNs = dataStoreRepository.audioEffectNsFlow.first()
+        val enableAec = dataStoreRepository.audioEffectAecFlow.first()
+        val enableAgc = dataStoreRepository.audioEffectAgcFlow.first()
+        
+        // Build effects set based on settings
+        val effects = mutableSetOf<UUID>()
+        if (enableNs) {
+            effects.add(NoiseSuppressor.EFFECT_TYPE_NS)
+        }
+        if (enableAec) {
+            effects.add(AcousticEchoCanceler.EFFECT_TYPE_AEC)
+        }
+        if (enableAgc) {
+            effects.add(AutomaticGainControl.EFFECT_TYPE_AGC)
+        }
+        
+        Log.i(TAG, "Creating BluetoothAudioSource with audioSourceType=$audioSourceType, effects: NS=$enableNs, AEC=$enableAec, AGC=$enableAgc")
+        
+        return BluetoothAudioSource(context.applicationContext, device, audioSourceType, effects)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
