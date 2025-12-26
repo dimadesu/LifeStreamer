@@ -177,15 +177,14 @@
                     android:layout_height="wrap_content"
                     android:textColor="@android:color/white"
                     android:textSize="13sp"
-                    android:text='@{"Source: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
+                    android:text='@{"Input: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:textStyle="italic"
-                    android:text='@{"System: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}' />
+                    android:textSize="13sp"
+                    android:text='@{"Audio Source: " + viewmodel.audioDebugInfoLiveData.actualSystemSource}' />
 
                 <TextView
                     android:layout_width="wrap_content"
