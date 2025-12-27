@@ -84,15 +84,13 @@ class BluetoothAudioManager(
             unregisterScoDisconnectReceiver()
             unregisterBtDeviceReceiver()
             
-            // CRITICAL: Switch to DEFAULT (with effects) BEFORE stopping SCO
-            // This seems to prevent Samsung's audio processing from getting into a bad state.
-            // The theory is that the AEC/NS effects interact badly with the SCO->normal transition.
+            // Switch to built-in mic BEFORE stopping SCO to prevent audio routing issues
+
             if (streamer != null) {
                 scope.launch(Dispatchers.Default) {
                     try {
-                        // Step 1: Switch to DEFAULT while still on SCO
-                        // This releases any AEC/NS effects cleanly before the routing change
-                        Log.i(TAG, "applyPolicy disable: Step 1 - switch to DEFAULT before SCO stop")
+                        // Step 1: Switch audio source while still on SCO
+                        Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
                         val audioStreamer = streamer as? IWithAudioSource
                         audioStreamer?.setAudioSource(
                             ConditionalAudioSourceFactory(forceDefault = true)
@@ -105,8 +103,8 @@ class BluetoothAudioManager(
                         BluetoothAudioConfig.setPreferredDevice(null)
                         delay(300)
                         
-                        // Step 3: Switch to DEFAULT with effects (force recreation)
-                        Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
+                        // Step 3: Recreate audio source with fresh AudioRecord
+                        Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
                         audioStreamer?.setAudioSource(
                             ConditionalAudioSourceFactory(forceDefault = true)
                         )
