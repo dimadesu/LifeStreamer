@@ -24,7 +24,6 @@ data class AudioPassthroughConfig(
     val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
     val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT,
     val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT
-    // Audio effects removed - they don't have noticeable effect on most devices
 )
 
 /**
@@ -219,13 +218,6 @@ class AudioPassthroughManager(
                 }
             } catch (e: Throwable) {
                 Log.w(TAG, "Failed to configure communication device: ${e.message}")
-            }
-            
-            // Apply audio effects based on config
-            audioRecord?.let { record ->
-                val audioSessionId = record.audioSessionId
-                // Audio effects removed - they don't have noticeable effect on most devices
-                Log.i(TAG, "Audio effects disabled for session $audioSessionId")
             }
             
             // Start recording and playback
