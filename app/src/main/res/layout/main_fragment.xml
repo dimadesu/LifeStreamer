@@ -65,7 +65,7 @@
         <!-- Audio Debug Info Overlay (centered, 2 columns) -->
         <LinearLayout
             android:id="@+id/audioDebugOverlay"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:padding="12dp"
@@ -73,6 +73,8 @@
             android:elevation="100dp"
             android:clickable="true"
             android:focusable="true"
+            app:layout_constraintWidth_max="360dp"
+            app:layout_constraintWidth_default="wrap"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
@@ -81,7 +83,8 @@
 
             <!-- Left Column: Controls -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:paddingEnd="8dp">
@@ -103,9 +106,10 @@
                     android:layout_marginBottom="4dp" />
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="#AAAAAA"
+                    android:textSize="10sp"
                     android:text="Try VOICE_COMMUNICATION if USB audio is too loud/noisy"
                     android:layout_marginBottom="8dp" />
 
