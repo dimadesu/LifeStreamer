@@ -17,13 +17,13 @@ import android.util.Log
  * @param sampleRate Sample rate in Hz (typically 44100 or 48000)
  * @param channelConfig Audio channel configuration (CHANNEL_IN_MONO or CHANNEL_IN_STEREO)
  * @param audioFormat Audio format (typically ENCODING_PCM_16BIT)
- * @param audioSourceType MediaRecorder.AudioSource constant (DEFAULT, MIC, CAMCORDER, etc.)
+ * @param audioSourceType MediaRecorder.AudioSource constant (CAMCORDER or VOICE_COMMUNICATION)
  */
 data class AudioPassthroughConfig(
     val sampleRate: Int = 44100,
     val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
     val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT,
-    val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT
+    val audioSourceType: Int = MediaRecorder.AudioSource.CAMCORDER
 )
 
 /**

@@ -40,7 +40,7 @@ import kotlin.coroutines.resume
 class BluetoothAudioSource(
     private val context: Context,
     private val preferredDevice: AudioDeviceInfo?,
-    private val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT
+    private val audioSourceType: Int = MediaRecorder.AudioSource.CAMCORDER
 ) :
     IAudioSourceInternal, IAudioFrameSourceInternal, SuspendStreamable, SuspendConfigurable<AudioSourceConfig>, Releasable {
 

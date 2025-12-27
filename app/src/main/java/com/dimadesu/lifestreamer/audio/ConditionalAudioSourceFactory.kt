@@ -1,16 +1,12 @@
 package com.dimadesu.lifestreamer.audio
 
 import android.content.Context
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.AutomaticGainControl
-import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.utils.dataStore
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import kotlinx.coroutines.flow.first
-import java.util.UUID
 
 /**
  * Audio source factory that creates microphone audio source based on settings from DataStore.
@@ -33,14 +29,12 @@ class ConditionalAudioSourceFactory(
         
         val audioSourceType = dataStoreRepository.audioSourceTypeFlow.first()
         
-        // Audio effects are disabled - they don't have noticeable effect on most devices
-        val effects = emptySet<UUID>()
+        Log.i(TAG, "Creating microphone source with audioSourceType=$audioSourceType (forceDefault=$forceDefault)")
         
-        Log.i(TAG, "Creating microphone source with audioSourceType=$audioSourceType, no effects (forceDefault=$forceDefault)")
-        
+        // Explicitly pass emptySet() to disable effects (MicrophoneSourceFactory enables AEC+NS by default)
         return MicrophoneSourceFactory(
             audioSourceType = audioSourceType,
-            effects = effects
+            effects = emptySet()
         ).create(context)
     }
 
