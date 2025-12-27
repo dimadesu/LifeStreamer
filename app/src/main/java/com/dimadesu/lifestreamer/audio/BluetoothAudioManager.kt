@@ -5,9 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
-import android.os.Build
 import android.util.Log
-import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import kotlinx.coroutines.CoroutineScope
@@ -93,7 +91,7 @@ class BluetoothAudioManager(
                         Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
                         val audioStreamer = streamer as? IWithAudioSource
                         audioStreamer?.setAudioSource(
-                            ConditionalAudioSourceFactory(forceDefault = true)
+                            ConditionalAudioSourceFactory()
                         )
                         delay(200)
                         
@@ -106,7 +104,7 @@ class BluetoothAudioManager(
                         // Step 3: Recreate audio source with fresh AudioRecord
                         Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
                         audioStreamer?.setAudioSource(
-                            ConditionalAudioSourceFactory(forceDefault = true)
+                            ConditionalAudioSourceFactory()
                         )
                         
                         delay(150)

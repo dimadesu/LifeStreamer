@@ -11,13 +11,9 @@ import kotlinx.coroutines.flow.first
 /**
  * Audio source factory that creates microphone audio source based on settings from DataStore.
  * Reads audio source type from user preferences.
- * 
- * @param forceDefault When true, forces recreation (isSourceEquals returns false).
- *                     Used when transitioning between audio sources to ensure fresh AudioRecord.
+ * Always forces recreation to ensure fresh AudioRecord with current settings.
  */
-class ConditionalAudioSourceFactory(
-    private val forceDefault: Boolean = false
-) : IAudioSourceInternal.Factory {
+class ConditionalAudioSourceFactory : IAudioSourceInternal.Factory {
     
     companion object {
         private const val TAG = "ConditionalAudioSrcFact"
@@ -29,7 +25,7 @@ class ConditionalAudioSourceFactory(
         
         val audioSourceType = dataStoreRepository.audioSourceTypeFlow.first()
         
-        Log.i(TAG, "Creating microphone source with audioSourceType=$audioSourceType (forceDefault=$forceDefault)")
+        Log.i(TAG, "Creating microphone source with audioSourceType=$audioSourceType")
         
         // Explicitly pass emptySet() to disable effects (MicrophoneSourceFactory enables AEC+NS by default)
         return MicrophoneSourceFactory(
@@ -39,18 +35,12 @@ class ConditionalAudioSourceFactory(
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        // If source is null, we need to create a new source
-        if (source == null) return false
-        
-        // When forced, always recreate to get fresh AudioRecord
-        if (forceDefault) return false
-        
-        // Always return false to force recreation when settings may have changed
-        // This ensures the new audio source type is applied
+        // Always return false to force recreation
+        // This ensures the current audio source type from settings is applied
         return false
     }
     
     override fun toString(): String {
-        return "ConditionalAudioSourceFactory(forceDefault=$forceDefault)"
+        return "ConditionalAudioSourceFactory()"
     }
 }
