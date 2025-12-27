@@ -1319,25 +1319,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         delay(500)
                     }
                     
-                    // Configure passthrough with audio settings (including source type and effects)
+                    // Configure passthrough with audio settings
                     val audioConfig = storageRepository.audioConfigFlow.first()
                     val audioSourceType = storageRepository.audioSourceTypeFlow.first()
-                    val enableNs = storageRepository.audioEffectNsFlow.first()
-                    val enableAec = storageRepository.audioEffectAecFlow.first()
-                    val enableAgc = storageRepository.audioEffectAgcFlow.first()
                     
                     if (audioConfig != null) {
                         val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
                             sampleRate = audioConfig.sampleRate,
                             channelConfig = audioConfig.channelConfig,
                             audioFormat = audioConfig.byteFormat,
-                            audioSourceType = audioSourceType,
-                            enableNoiseSuppressor = enableNs,
-                            enableEchoCanceler = enableAec,
-                            enableGainControl = enableAgc
+                            audioSourceType = audioSourceType
                         )
                         audioPassthroughManager.setConfig(passthroughConfig)
-                        Log.i(TAG, "Passthrough config: ${audioConfig.sampleRate}Hz, source=$audioSourceType, NS=$enableNs, AEC=$enableAec, AGC=$enableAgc")
+                        Log.i(TAG, "Passthrough config: ${audioConfig.sampleRate}Hz, source=$audioSourceType")
                     }
                     
                     // Set preferred device for BT routing (or null for built-in mic)
@@ -1438,25 +1432,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     false
                 }
                 
-                // Configure passthrough with audio settings (including source type and effects)
+                // Configure passthrough with audio settings
                 val audioConfig = storageRepository.audioConfigFlow.first()
                 val audioSourceType = storageRepository.audioSourceTypeFlow.first()
-                val enableNs = storageRepository.audioEffectNsFlow.first()
-                val enableAec = storageRepository.audioEffectAecFlow.first()
-                val enableAgc = storageRepository.audioEffectAgcFlow.first()
                 
                 if (audioConfig != null) {
                     val passthroughConfig = com.dimadesu.lifestreamer.audio.AudioPassthroughConfig(
                         sampleRate = audioConfig.sampleRate,
                         channelConfig = audioConfig.channelConfig,
                         audioFormat = audioConfig.byteFormat,
-                        audioSourceType = audioSourceType,
-                        enableNoiseSuppressor = enableNs,
-                        enableEchoCanceler = enableAec,
-                        enableGainControl = enableAgc
+                        audioSourceType = audioSourceType
                     )
                     audioPassthroughManager.setConfig(passthroughConfig)
-                    Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}, source=$audioSourceType, NS=$enableNs, AEC=$enableAec, AGC=$enableAgc")
+                    Log.i(TAG, "Audio passthrough config: ${audioConfig.sampleRate}Hz, ${if (audioConfig.channelConfig == android.media.AudioFormat.CHANNEL_IN_STEREO) "STEREO" else "MONO"}, source=$audioSourceType")
                 }
 
                 // Set preferred device for BT routing (or null for built-in mic)

@@ -339,23 +339,11 @@ class BluetoothAudioSourceFactory(private val device: AudioDeviceInfo?) : IAudio
         val dataStoreRepository = DataStoreRepository(context, context.dataStore)
         
         val audioSourceType = dataStoreRepository.audioSourceTypeFlow.first()
-        val enableNs = dataStoreRepository.audioEffectNsFlow.first()
-        val enableAec = dataStoreRepository.audioEffectAecFlow.first()
-        val enableAgc = dataStoreRepository.audioEffectAgcFlow.first()
         
-        // Build effects set based on settings
-        val effects = mutableSetOf<UUID>()
-        if (enableNs) {
-            effects.add(NoiseSuppressor.EFFECT_TYPE_NS)
-        }
-        if (enableAec) {
-            effects.add(AcousticEchoCanceler.EFFECT_TYPE_AEC)
-        }
-        if (enableAgc) {
-            effects.add(AutomaticGainControl.EFFECT_TYPE_AGC)
-        }
+        // Audio effects are disabled - they don't have noticeable effect on most devices
+        val effects = emptySet<UUID>()
         
-        Log.i(TAG, "Creating BluetoothAudioSource with audioSourceType=$audioSourceType, effects: NS=$enableNs, AEC=$enableAec, AGC=$enableAgc")
+        Log.i(TAG, "Creating BluetoothAudioSource with audioSourceType=$audioSourceType, no effects")
         
         return BluetoothAudioSource(context.applicationContext, device, audioSourceType, effects)
     }

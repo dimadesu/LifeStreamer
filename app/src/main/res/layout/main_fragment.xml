@@ -103,41 +103,6 @@
                     android:paddingHorizontal="8dp"
                     android:layout_marginBottom="8dp" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="11sp"
-                    android:text="Audio Effects"
-                    android:paddingBottom="4dp" />
-
-                <CheckBox
-                    android:id="@+id/noiseSuppressionCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Noise Suppression (NS)"
-                    android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:checked="@={viewmodel.enableNoiseSuppression}" />
-
-                <CheckBox
-                    android:id="@+id/echoCancelerCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Echo Canceler (AEC)"
-                    android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:checked="@={viewmodel.enableEchoCanceler}" />
-
-                <CheckBox
-                    android:id="@+id/gainControlCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Gain Control (AGC)"
-                    android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:checked="@={viewmodel.enableGainControl}" />
-
             </LinearLayout>
 
             <!-- Vertical Divider -->

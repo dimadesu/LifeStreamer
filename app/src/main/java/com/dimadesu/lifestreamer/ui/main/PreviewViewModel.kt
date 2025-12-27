@@ -381,10 +381,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         _selectedAudioSourceType.value = sourceType
     }
     
-    // Audio effect toggles
-    val enableNoiseSuppression = MutableLiveData(true)
-    val enableEchoCanceler = MutableLiveData(true)
-    val enableGainControl = MutableLiveData(false)
+    // Audio effects removed - they don't have noticeable effect on most devices
 
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
@@ -3670,13 +3667,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val newValue = !(_isAudioDebugOverlayVisible.value ?: false)
         _isAudioDebugOverlayVisible.value = newValue
         if (newValue) {
-            // Load current settings from DataStore when opening overlay
+            // Load current audio source type from DataStore when opening overlay
             viewModelScope.launch {
                 _selectedAudioSourceType.value = storageRepository.audioSourceTypeFlow.first()
-                enableNoiseSuppression.value = storageRepository.audioEffectNsFlow.first()
-                enableEchoCanceler.value = storageRepository.audioEffectAecFlow.first()
-                enableGainControl.value = storageRepository.audioEffectAgcFlow.first()
-                Log.d(TAG, "Loaded audio settings from DataStore: source=${_selectedAudioSourceType.value}, NS=${enableNoiseSuppression.value}, AEC=${enableEchoCanceler.value}, AGC=${enableGainControl.value}")
+                Log.d(TAG, "Loaded audio source from DataStore: source=${_selectedAudioSourceType.value}")
             }
             
             // Refresh immediately when showing the overlay
@@ -3730,38 +3724,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         viewModelScope.launch {
             try {
-                val sourceType = _selectedAudioSourceType.value ?: android.media.MediaRecorder.AudioSource.DEFAULT
+                val sourceType = _selectedAudioSourceType.value ?: android.media.MediaRecorder.AudioSource.CAMCORDER
                 Log.i(TAG, "Applying audio source type: ${getAudioSourceName(sourceType)} ($sourceType)")
                 
-                // Save settings to DataStore for persistence
+                // Save audio source type to DataStore for persistence
                 storageRepository.saveAudioSourceType(sourceType)
-                storageRepository.saveAudioEffectNs(enableNoiseSuppression.value ?: true)
-                storageRepository.saveAudioEffectAec(enableEchoCanceler.value ?: true)
-                storageRepository.saveAudioEffectAgc(enableGainControl.value ?: false)
-                Log.d(TAG, "Saved audio settings to DataStore")
+                Log.d(TAG, "Saved audio source type to DataStore")
                 
-                // Build effects set based on checkboxes
-                val effects = mutableSetOf<java.util.UUID>()
-                if (enableNoiseSuppression.value == true) {
-                    effects.add(android.media.audiofx.NoiseSuppressor.EFFECT_TYPE_NS)
-                }
-                if (enableEchoCanceler.value == true) {
-                    effects.add(android.media.audiofx.AcousticEchoCanceler.EFFECT_TYPE_AEC)
-                }
-                if (enableGainControl.value == true) {
-                    effects.add(android.media.audiofx.AutomaticGainControl.EFFECT_TYPE_AGC)
-                }
+                // Audio effects are disabled - they don't have noticeable effect on most devices
+                val effects = emptySet<java.util.UUID>()
                 
-                Log.i(TAG, "Applying effects: NS=${enableNoiseSuppression.value}, AEC=${enableEchoCanceler.value}, AGC=${enableGainControl.value}")
+                Log.i(TAG, "Applying audio source with no effects")
                 
-                // Create new microphone source with the selected audio source type and effects
+                // Create new microphone source with the selected audio source type and no effects
                 val newAudioSource = MicrophoneSourceFactory(
                     audioSourceType = sourceType,
                     effects = effects
                 )
                 
                 currentStreamer.setAudioSource(newAudioSource)
-                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)} with ${effects.size} effects")
+                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
                 
                 // If audio monitoring is enabled, restart passthrough with new settings
                 if (_isMonitorAudioOn.value == true) {
@@ -3790,30 +3772,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             try {
                 val storedSourceType = storageRepository.audioSourceTypeFlow.first()
-                val storedNs = storageRepository.audioEffectNsFlow.first()
-                val storedAec = storageRepository.audioEffectAecFlow.first()
-                val storedAgc = storageRepository.audioEffectAgcFlow.first()
-                
                 val currentSourceType = _selectedAudioSourceType.value
-                val currentNs = enableNoiseSuppression.value
-                val currentAec = enableEchoCanceler.value
-                val currentAgc = enableGainControl.value
                 
-                val hasChanged = storedSourceType != currentSourceType ||
-                                 storedNs != currentNs ||
-                                 storedAec != currentAec ||
-                                 storedAgc != currentAgc
+                val hasChanged = storedSourceType != currentSourceType
                 
                 if (hasChanged) {
-                    Log.i(TAG, "Audio settings changed externally, reloading and applying. " +
-                               "Source: $currentSourceType->$storedSourceType, " +
-                               "NS: $currentNs->$storedNs, AEC: $currentAec->$storedAec, AGC: $currentAgc->$storedAgc")
+                    Log.i(TAG, "Audio source changed externally, reloading and applying. " +
+                               "Source: $currentSourceType->$storedSourceType")
                     
-                    // Update ViewModel values
+                    // Update ViewModel value
                     _selectedAudioSourceType.value = storedSourceType
-                    enableNoiseSuppression.value = storedNs
-                    enableEchoCanceler.value = storedAec
-                    enableGainControl.value = storedAgc
                     
                     // Apply the new settings
                     applySelectedAudioSource()

@@ -1140,39 +1140,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 binding.audioSourceSpinner.setSelection(position)
             }
         }
-        
-        // Setup checkbox listeners to auto-apply when effects change
-        setupAudioEffectCheckboxListeners()
-    }
-    
-    private var isInitializingCheckboxes = true
-    
-    private fun setupAudioEffectCheckboxListeners() {
-        // Track initial state to avoid applying on first load
-        isInitializingCheckboxes = true
-        
-        binding.noiseSuppressionCheckbox.setOnCheckedChangeListener { _, _ ->
-            if (!isInitializingCheckboxes) {
-                previewViewModel.applySelectedAudioSource()
-            }
-        }
-        
-        binding.echoCancelerCheckbox.setOnCheckedChangeListener { _, _ ->
-            if (!isInitializingCheckboxes) {
-                previewViewModel.applySelectedAudioSource()
-            }
-        }
-        
-        binding.gainControlCheckbox.setOnCheckedChangeListener { _, _ ->
-            if (!isInitializingCheckboxes) {
-                previewViewModel.applySelectedAudioSource()
-            }
-        }
-        
-        // After a short delay, enable auto-apply (to skip initial binding)
-        binding.root.postDelayed({
-            isInitializingCheckboxes = false
-        }, 500)
     }
 
     private fun updateCameraButtonsVisibility() {

@@ -117,28 +117,14 @@
 
             <!-- Audio Source Type -->
             <ListPreference
-                app:defaultValue="0"
+                app:defaultValue="5"
                 app:key="@string/audio_source_type_key"
                 app:title="@string/audio_source_type"
                 app:entries="@array/AudioSourceTypeEntries"
                 app:entryValues="@array/AudioSourceTypeEntryValues"
                 app:useSimpleSummaryProvider="true" />
 
-            <!-- Audio Effects -->
-            <SwitchPreference
-                android:defaultValue="true"
-                app:key="@string/audio_effect_ns_key"
-                app:title="@string/audio_effect_ns" />
-
-            <SwitchPreference
-                android:defaultValue="true"
-                app:key="@string/audio_effect_aec_key"
-                app:title="@string/audio_effect_aec" />
-
-            <SwitchPreference
-                android:defaultValue="false"
-                app:key="@string/audio_effect_agc_key"
-                app:title="@string/audio_effect_agc" />
+            <!-- Audio Effects removed - they don't have noticeable effect on most devices -->
 
         </PreferenceCategory>
 

@@ -21,18 +21,13 @@ import android.util.Log
  * @param channelConfig Audio channel configuration (CHANNEL_IN_MONO or CHANNEL_IN_STEREO)
  * @param audioFormat Audio format (typically ENCODING_PCM_16BIT)
  * @param audioSourceType MediaRecorder.AudioSource constant (DEFAULT, MIC, CAMCORDER, etc.)
- * @param enableNoiseSuppressor Enable noise suppression effect
- * @param enableEchoCanceler Enable acoustic echo canceler effect
- * @param enableGainControl Enable automatic gain control effect
  */
 data class AudioPassthroughConfig(
     val sampleRate: Int = 44100,
     val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
     val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT,
-    val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT,
-    val enableNoiseSuppressor: Boolean = true,
-    val enableEchoCanceler: Boolean = true,
-    val enableGainControl: Boolean = false
+    val audioSourceType: Int = MediaRecorder.AudioSource.DEFAULT
+    // Audio effects removed - they don't have noticeable effect on most devices
 )
 
 /**
@@ -237,46 +232,8 @@ class AudioPassthroughManager(
             // Apply audio effects based on config
             audioRecord?.let { record ->
                 val audioSessionId = record.audioSessionId
-                Log.i(TAG, "Applying audio effects to session $audioSessionId")
-                
-                // Noise Suppressor
-                if (config.enableNoiseSuppressor && NoiseSuppressor.isAvailable()) {
-                    try {
-                        noiseSuppressor = NoiseSuppressor.create(audioSessionId)
-                        noiseSuppressor?.enabled = true
-                        Log.i(TAG, "NoiseSuppressor enabled")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to create NoiseSuppressor: ${e.message}")
-                    }
-                } else {
-                    Log.i(TAG, "NoiseSuppressor not enabled (config=${config.enableNoiseSuppressor}, available=${NoiseSuppressor.isAvailable()})")
-                }
-                
-                // Echo Canceler
-                if (config.enableEchoCanceler && AcousticEchoCanceler.isAvailable()) {
-                    try {
-                        echoCanceler = AcousticEchoCanceler.create(audioSessionId)
-                        echoCanceler?.enabled = true
-                        Log.i(TAG, "AcousticEchoCanceler enabled")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to create AcousticEchoCanceler: ${e.message}")
-                    }
-                } else {
-                    Log.i(TAG, "AcousticEchoCanceler not enabled (config=${config.enableEchoCanceler}, available=${AcousticEchoCanceler.isAvailable()})")
-                }
-                
-                // Automatic Gain Control
-                if (config.enableGainControl && AutomaticGainControl.isAvailable()) {
-                    try {
-                        gainControl = AutomaticGainControl.create(audioSessionId)
-                        gainControl?.enabled = true
-                        Log.i(TAG, "AutomaticGainControl enabled")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to create AutomaticGainControl: ${e.message}")
-                    }
-                } else {
-                    Log.i(TAG, "AutomaticGainControl not enabled (config=${config.enableGainControl}, available=${AutomaticGainControl.isAvailable()})")
-                }
+                // Audio effects removed - they don't have noticeable effect on most devices
+                Log.i(TAG, "Audio effects disabled for session $audioSessionId")
             }
             
             // Start recording and playback
