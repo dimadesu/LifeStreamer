@@ -3767,9 +3767,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     service?.startAudioPassthrough()
                 }
                 
-                // Refresh debug info immediately
-                delay(200)
-                refreshAudioDebugInfo()
+                // Refresh debug info only if overlay is visible
+                if (_isAudioDebugOverlayVisible.value == true) {
+                    delay(200)
+                    refreshAudioDebugInfo()
+                }
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error applying audio source: ${e.message}", e)
