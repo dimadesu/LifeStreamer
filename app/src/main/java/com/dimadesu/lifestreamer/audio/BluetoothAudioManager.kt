@@ -5,9 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
-import android.os.Build
 import android.util.Log
-import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import kotlinx.coroutines.CoroutineScope
@@ -84,41 +82,49 @@ class BluetoothAudioManager(
             unregisterScoDisconnectReceiver()
             unregisterBtDeviceReceiver()
             
-            // CRITICAL: Switch to UNPROCESSED (no effects) BEFORE stopping SCO
-            // This seems to prevent Samsung's audio processing from getting into a bad state.
-            // The theory is that the AEC/NS effects interact badly with the SCO->normal transition.
-            scope.launch(Dispatchers.Default) {
-                try {
-                    // Step 1: Switch to UNPROCESSED while still on SCO
-                    // This releases any AEC/NS effects cleanly before the routing change
-                    Log.i(TAG, "applyPolicy disable: Step 1 - switch to UNPROCESSED before SCO stop")
-                    (streamer as? IWithAudioSource)?.setAudioSource(
-                        ConditionalAudioSourceFactory(forceUnprocessed = true)
-                    )
-                    delay(200)
-                    
-                    // Step 2: Now stop SCO and reset audio mode
-                    Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
-                    stopScoAndResetAudio()
-                    BluetoothAudioConfig.setPreferredDevice(null)
-                    delay(300)
-                    
-                    // Step 3: Switch to DEFAULT with effects (only if no USB connected)
-                    // If USB is connected, we stay on UNPROCESSED which is correct
-                    if (!UsbAudioManager.hasUsbAudioInput(context)) {
-                        Log.i(TAG, "applyPolicy disable: Step 3 - switch to DEFAULT with effects")
-                        (streamer as? IWithAudioSource)?.setAudioSource(
-                            ConditionalAudioSourceFactory(forceDefault = true)
+            // Switch to built-in mic BEFORE stopping SCO to prevent audio routing issues
+
+            if (streamer != null) {
+                scope.launch(Dispatchers.Default) {
+                    try {
+                        // Step 1: Switch audio source while still on SCO
+                        Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
+                        val audioStreamer = streamer as? IWithAudioSource
+                        audioStreamer?.setAudioSource(
+                            ConditionalAudioSourceFactory()
                         )
-                    } else {
-                        Log.i(TAG, "applyPolicy disable: Step 3 skipped - USB connected, staying on UNPROCESSED")
+                        delay(200)
+                        
+                        // Step 2: Now stop SCO and reset audio mode
+                        Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
+                        stopScoAndResetAudio()
+                        BluetoothAudioConfig.setPreferredDevice(null)
+                        delay(300)
+                        
+                        // Step 3: Recreate audio source with fresh AudioRecord
+                        Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
+                        audioStreamer?.setAudioSource(
+                            ConditionalAudioSourceFactory()
+                        )
+                        
+                        delay(150)
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "applyPolicy disable failed: ${t.message}")
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
                     }
-                    
-                    delay(150)
-                    _scoStateFlow.tryEmit(ScoState.IDLE)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "applyPolicy disable failed: ${t.message}")
-                    _scoStateFlow.tryEmit(ScoState.IDLE)
+                }
+            } else {
+                Log.w(TAG, "applyPolicy disable: No streamer available, just stopping SCO")
+                scope.launch(Dispatchers.Default) {
+                    try {
+                        stopScoAndResetAudio()
+                        BluetoothAudioConfig.setPreferredDevice(null)
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "applyPolicy disable SCO stop failed: ${t.message}")
+                        _scoStateFlow.tryEmit(ScoState.IDLE)
+                    }
                 }
             }
         } else {

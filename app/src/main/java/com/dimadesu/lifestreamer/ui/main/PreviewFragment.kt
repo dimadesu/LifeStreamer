@@ -155,6 +155,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             startActivity(intent)
         }
 
+        binding.audioDebugToggleButton.setOnClickListener {
+            previewViewModel.toggleAudioDebugOverlay()
+        }
+        
+        // Setup audio source spinner
+        setupAudioSourceSpinner()
+
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
             error?.let {
                 showError("Oops", it)
@@ -702,6 +709,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 }
             }
         }
+        
+        // Reload audio settings from DataStore (may have changed in Settings activity)
+        // and apply if they differ from current values
+        previewViewModel.reloadAndApplyAudioSettingsIfChanged()
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
@@ -1080,6 +1091,54 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
         if (missingPermissions.isNotEmpty()) {
             showPermissionError(*missingPermissions.toTypedArray())
+        }
+    }
+    
+    private fun setupAudioSourceSpinner() {
+        // Read from the same XML arrays as Settings activity
+        val entries = resources.getStringArray(R.array.AudioSourceTypeEntries)
+        val values = resources.getStringArray(R.array.AudioSourceTypeEntryValues)
+        val audioSourceOptions = entries.zip(values.map { it.toInt() })
+        
+        val adapter = android.widget.ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            audioSourceOptions.map { it.first }
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.audioSourceSpinner.adapter = adapter
+        
+        binding.audioSourceSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            private var isFirstSelection = true
+            
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                val newSourceType = audioSourceOptions[position].second
+                val currentSourceType = previewViewModel.selectedAudioSourceType.value
+                
+                // Skip first selection (initial setup) and only apply if value changed
+                if (isFirstSelection) {
+                    isFirstSelection = false
+                    previewViewModel.setSelectedAudioSourceType(newSourceType)
+                    return
+                }
+                
+                if (newSourceType != currentSourceType) {
+                    previewViewModel.setSelectedAudioSourceType(newSourceType)
+                    previewViewModel.applySelectedAudioSource()
+                }
+            }
+            
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {
+                // Do nothing
+            }
+        }
+        
+        // Observe the selected audio source type and update spinner position
+        previewViewModel.selectedAudioSourceType.observe(viewLifecycleOwner) { sourceType ->
+            val position = audioSourceOptions.indexOfFirst { it.second == sourceType }
+            if (position >= 0 && binding.audioSourceSpinner.selectedItemPosition != position) {
+                binding.audioSourceSpinner.setSelection(position)
+            }
         }
     }
 

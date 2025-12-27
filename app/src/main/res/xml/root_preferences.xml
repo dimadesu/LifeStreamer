@@ -115,6 +115,15 @@
                 app:title="@string/audio_profile"
                 app:useSimpleSummaryProvider="true" />
 
+            <!-- Audio Source Type -->
+            <ListPreference
+                app:defaultValue="5"
+                app:key="@string/audio_source_type_key"
+                app:title="@string/audio_source_type"
+                app:entries="@array/AudioSourceTypeEntries"
+                app:entryValues="@array/AudioSourceTypeEntryValues"
+                app:useSimpleSummaryProvider="true" />
+
         </PreferenceCategory>
 
     </PreferenceCategory>

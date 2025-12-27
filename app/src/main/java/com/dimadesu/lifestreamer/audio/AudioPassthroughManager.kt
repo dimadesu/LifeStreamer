@@ -17,11 +17,13 @@ import android.util.Log
  * @param sampleRate Sample rate in Hz (typically 44100 or 48000)
  * @param channelConfig Audio channel configuration (CHANNEL_IN_MONO or CHANNEL_IN_STEREO)
  * @param audioFormat Audio format (typically ENCODING_PCM_16BIT)
+ * @param audioSourceType MediaRecorder.AudioSource constant (CAMCORDER or VOICE_COMMUNICATION)
  */
 data class AudioPassthroughConfig(
     val sampleRate: Int = 44100,
     val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
-    val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT
+    val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT,
+    val audioSourceType: Int = MediaRecorder.AudioSource.CAMCORDER
 )
 
 /**
@@ -90,13 +92,10 @@ class AudioPassthroughManager(
                     .setChannelMask(channelConfig)
                     .build()
 
-                // Use VOICE_COMMUNICATION for BT (routes to SCO), DEFAULT for built-in (matches streaming)
-                val audioSource = if (currentDevice != null) {
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                } else {
-                    MediaRecorder.AudioSource.DEFAULT
-                }
-                Log.i(TAG, "Using audio source: ${if (currentDevice != null) "VOICE_COMMUNICATION (BT)" else "DEFAULT (built-in)"}")
+                // Use configured audio source type for all cases
+                // BT routing is handled via setPreferredDevice and setCommunicationDevice
+                val audioSource = config.audioSourceType
+                Log.i(TAG, "Using audio source: $audioSource (from settings), BT device: ${currentDevice?.productName ?: "none"}")
 
                 val builder = AudioRecord.Builder()
                     .setAudioFormat(audioFormatObj)
@@ -122,12 +121,9 @@ class AudioPassthroughManager(
 
                 record
             } else {
-                // For older APIs, use DEFAULT for built-in mic (matches streaming)
-                val audioSource = if (preferredDevice != null) {
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                } else {
-                    MediaRecorder.AudioSource.DEFAULT
-                }
+                // For older APIs, use configured source type
+                // BT routing relies on system audio mode settings
+                val audioSource = config.audioSourceType
                 AudioRecord(
                     audioSource,
                     sampleRate,

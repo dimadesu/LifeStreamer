@@ -8,7 +8,11 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresPermission
+import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
+import com.dimadesu.lifestreamer.utils.dataStore
+import kotlinx.coroutines.flow.first
 import io.github.thibaultbee.streampack.core.elements.data.RawFrame
 import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
@@ -33,8 +37,16 @@ import kotlin.coroutines.resume
  * when building `AudioRecord` by using reflection to call `setPreferredDevice` on the builder
  * when supported.
  */
-class BluetoothAudioSource(private val context: Context, private val preferredDevice: AudioDeviceInfo?) :
+class BluetoothAudioSource(
+    private val context: Context,
+    private val preferredDevice: AudioDeviceInfo?,
+    private val audioSourceType: Int = MediaRecorder.AudioSource.CAMCORDER
+) :
     IAudioSourceInternal, IAudioFrameSourceInternal, SuspendStreamable, SuspendConfigurable<AudioSourceConfig>, Releasable {
+
+    companion object {
+        private const val TAG = "BluetoothAudioSource"
+    }
 
     private var audioRecord: AudioRecord? = null
     private var bufferSize: Int = 0
@@ -71,10 +83,12 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
                 .setChannelMask(config.channelConfig)
                 .build()
 
+            Log.i(TAG, "Creating AudioRecord with audioSourceType=$audioSourceType")
+            
             val builder = AudioRecord.Builder()
                 .setAudioFormat(audioFormat)
                 .setBufferSizeInBytes(bufferSize)
-                .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+                .setAudioSource(audioSourceType)
 
             // Try to prefer the Bluetooth device reflectively
             try {
@@ -92,7 +106,7 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
             builder.build()
         } else {
             AudioRecord(
-                MediaRecorder.AudioSource.DEFAULT,
+                audioSourceType,
                 config.sampleRate,
                 config.channelConfig,
                 config.byteFormat,
@@ -182,6 +196,7 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
 
     override fun release() {
         _isStreamingFlow.tryEmit(false)
+        
         audioRecord?.release()
         audioRecord = null
         currentConfig = null
@@ -236,19 +251,27 @@ class BluetoothAudioSource(private val context: Context, private val preferredDe
         val cfg = requireNotNull(currentConfig) { "Audio source is not configured" }
         return fillAudioFrame(frameFactory.create(bufferSize, 0))
     }
-
-    // Effects: no-op in app-level implementation. Return false to indicate effect not applied.
-    fun addEffect(effectType: java.util.UUID): Boolean = false
-
-    fun removeEffect(effectType: java.util.UUID) {}
 }
 
 /**
  * Factory for `BluetoothAudioSource` that matches `IAudioSourceInternal.Factory`.
+ * Reads audio source type from DataStore settings.
  */
 class BluetoothAudioSourceFactory(private val device: AudioDeviceInfo?) : IAudioSourceInternal.Factory {
+    
+    companion object {
+        private const val TAG = "BluetoothAudioSourceFactory"
+    }
+    
     override suspend fun create(context: Context): IAudioSourceInternal {
-        return BluetoothAudioSource(context.applicationContext, device)
+        // Read settings from DataStore
+        val dataStoreRepository = DataStoreRepository(context, context.dataStore)
+        
+        val audioSourceType = dataStoreRepository.audioSourceTypeFlow.first()
+        
+        Log.i(TAG, "Creating BluetoothAudioSource with audioSourceType=$audioSourceType")
+        
+        return BluetoothAudioSource(context.applicationContext, device, audioSourceType)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {

@@ -48,6 +48,7 @@ import com.dimadesu.lifestreamer.ui.main.usecases.BuildStreamerUseCase
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.uvc.UvcVideoSource
+import com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
@@ -77,7 +78,9 @@ import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -364,6 +367,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _audioSourceIndicatorLiveData = MutableLiveData<String>()
     val audioSourceIndicatorLiveData: LiveData<String> = _audioSourceIndicatorLiveData
 
+    // Audio debug information for overlay display
+    private val _audioDebugInfoLiveData = MutableLiveData<com.dimadesu.lifestreamer.models.AudioDebugInfo?>()
+    val audioDebugInfoLiveData: LiveData<com.dimadesu.lifestreamer.models.AudioDebugInfo?> = _audioDebugInfoLiveData
+
+    // Audio debug overlay visibility state
+    private val _isAudioDebugOverlayVisible = MutableLiveData(false)
+    val isAudioDebugOverlayVisible: LiveData<Boolean> = _isAudioDebugOverlayVisible
+    
+    // Selected audio source type for testing (MediaRecorder.AudioSource constants)
+    private val _selectedAudioSourceType = MutableLiveData(android.media.MediaRecorder.AudioSource.DEFAULT)
+    val selectedAudioSourceType: LiveData<Int> = _selectedAudioSourceType
+    
+    fun setSelectedAudioSourceType(sourceType: Int) {
+        _selectedAudioSourceType.value = sourceType
+    }
+    
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
@@ -411,6 +430,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.i(TAG, "Service ready: $isReady, serviceStreamer: ${serviceStreamer != null}")
                 }
             }
+        }
+        
+        // Observe audio source type changes from DataStore (e.g., from Settings activity)
+        // This applies changes in real-time without waiting for fragment resume
+        viewModelScope.launch {
+            var isFirstEmission = true
+            storageRepository.audioSourceTypeFlow
+                .distinctUntilChanged()
+                .collect { newSourceType ->
+                    if (isFirstEmission) {
+                        // First emission is just the initial value - update LiveData but don't apply
+                        _selectedAudioSourceType.value = newSourceType
+                        Log.d(TAG, "Initial audio source type from DataStore: ${getAudioSourceName(newSourceType)}")
+                        isFirstEmission = false
+                    } else if (serviceStreamer != null) {
+                        // Subsequent emissions mean the value changed (e.g., in Settings)
+                        val currentValue = _selectedAudioSourceType.value
+                        if (currentValue != newSourceType) {
+                            Log.i(TAG, "Audio source changed in DataStore: ${getAudioSourceName(currentValue ?: -1)} -> ${getAudioSourceName(newSourceType)}")
+                            _selectedAudioSourceType.value = newSourceType
+                            applySelectedAudioSource()
+                        }
+                    }
+                }
         }
 
         // Status-to-notification messaging removed; UI no longer shows sliding panel
@@ -2859,19 +2902,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
                         
-                        // Switch back to camera (audio source unchanged - Android handles USB audio routing)
+                        // Switch back to camera (audio unchanged)
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        
-                        // Reset audio source to auto-detect mode (not forced)
-                        // This allows proper USB detection on next toggle
-                        Log.i(TAG, "UVC OFF: Resetting audio to auto-detect mode")
-                        try {
-                            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory(forceUnprocessed = false))
-                            Log.i(TAG, "UVC OFF: Audio reset to auto-detect mode")
-                        } catch (audioEx: Exception) {
-                            Log.w(TAG, "UVC OFF: Failed to reset audio: ${audioEx.message}")
-                        }
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2937,17 +2970,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                     applyMonitorAudioState()
                                                 }
                                                 
-                                                Log.i(TAG, "Switched to UVC source after permission grant (audio unchanged)")
-                                                
-                                                // Force UNPROCESSED audio for USB video
-                                                // This forces audio reinitialization to better quality mode
-                                                Log.i(TAG, "UVC: Forcing UNPROCESSED audio for USB video")
-                                                try {
-                                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory(forceUnprocessed = true))
-                                                    Log.i(TAG, "UVC: UNPROCESSED audio source set successfully")
-                                                } catch (audioEx: Exception) {
-                                                    Log.w(TAG, "UVC: Failed to set UNPROCESSED audio: ${audioEx.message}")
-                                                }
+                                                Log.i(TAG, "Switched to UVC source after permission grant")
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Error switching to UVC after permission: ${e.message}", e)
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
@@ -3053,7 +3076,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Switch to UVC source first
                         delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -3081,7 +3103,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -3523,7 +3544,269 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
+    /**
+     * Refresh audio debug information by reading current audio configuration from the streamer.
+     * This can be called manually when audio configuration changes (e.g., when plugging in USB mic).
+     */
+    fun refreshAudioDebugInfo() {
+        viewModelScope.launch {
+            try {
+                val currentStreamer = serviceStreamer
+                if (currentStreamer == null) {
+                    _audioDebugInfoLiveData.postValue(null)
+                    Log.d(TAG, "Cannot refresh audio debug info - streamer not available")
+                    return@launch
+                }
+
+                // Get audio codec config from the streamer
+                val audioConfig = currentStreamer.audioConfigFlow.value
+                if (audioConfig == null) {
+                    _audioDebugInfoLiveData.postValue(null)
+                    Log.d(TAG, "Cannot refresh audio debug info - audio config not available")
+                    return@launch
+                }
+
+                // Determine audio source type
+                val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+                val audioSourceType = when (audioSource) {
+                    is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
+                    is com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSource -> "MEDIA PROJECTION"
+                    else -> {
+                        // Use class name for other sources (e.g., MicrophoneSource which is internal)
+                        val className = audioSource?.javaClass?.simpleName ?: "UNKNOWN"
+                        // Try to infer if it's unprocessed from the factory name if available
+                        if (className.contains("Microphone")) {
+                            "MICROPHONE" // Will show as MicrophoneSource generically
+                        } else {
+                            className
+                        }
+                    }
+                }
+
+                // Get actual system audio source from AudioManager (what HAL is really using)
+                val actualSystemSource = try {
+                    val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val configs = audioManager.activeRecordingConfigurations
+                    
+                    if (configs.isNotEmpty()) {
+                        // Find our app's recording session
+                        val ourConfig = configs.firstOrNull { config ->
+                            // Match by our client's attributes if possible
+                            true // For now, use the first active recording (should be our app)
+                        }
+                        
+                        ourConfig?.let { config ->
+                            val clientSource = config.clientAudioSource
+                            val actualSource = config.audioSource
+                            
+                            val clientName = getAudioSourceName(clientSource)
+                            val actualName = getAudioSourceName(actualSource)
+                            
+                            if (clientSource != actualSource) {
+                                "Requested: $clientName → Actual: $actualName"
+                            } else {
+                                actualName
+                            }
+                        }
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to get actual audio source: ${e.message}")
+                    null
+                }
+
+                // Query for audio effects (NS, AEC, AGC) and actual audio format from system
+                val systemAudioInfo = try {
+                    val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val configs = audioManager.activeRecordingConfigurations
+                    
+                    if (configs.isNotEmpty()) {
+                        // Use first active recording config (should be our app's session)
+                        val ourConfig = configs.first()
+                        
+                        // Get actual audio format from system
+                        val systemFormat = ourConfig.format
+                        val systemSampleRate = systemFormat.sampleRate
+                        val systemChannelMask = systemFormat.channelMask
+                        val systemEncoding = systemFormat.encoding
+                        
+                        // Check both clientEffects (requested) and effects (actual)
+                        // Try effects first (what's actually running), fall back to clientEffects if not available
+                        val effectsToCheck = try {
+                            ourConfig.effects
+                        } catch (e: Exception) {
+                            ourConfig.clientEffects
+                        }
+                        
+                        val ns = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_NS }
+                        val aec = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AEC }
+                        val agc = effectsToCheck.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_AGC }
+                        
+                        Log.d(TAG, "Audio config from system: SR=$systemSampleRate, CH=$systemChannelMask, FMT=$systemEncoding, Effects: NS=$ns, AEC=$aec, AGC=$agc (from ${effectsToCheck.size} effects)")
+                        
+                        Triple(ns, aec, agc) to Triple(systemSampleRate, systemChannelMask, systemEncoding) to true
+                    } else {
+                        Log.d(TAG, "No active recording configurations found")
+                        Triple<Boolean?, Boolean?, Boolean?>(null, null, null) to Triple<Int?, Int?, Int?>(null, null, null) to false
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to get audio effects and format: ${e.message}")
+                    Triple<Boolean?, Boolean?, Boolean?>(null, null, null) to Triple<Int?, Int?, Int?>(null, null, null) to false
+                }
+                
+                val (effectsAndFormat, hasActiveRecording) = systemAudioInfo
+                val (effects, format) = effectsAndFormat
+                val (hasNS, hasAEC, hasAGC) = effects
+                val (actualSampleRate, actualChannelMask, actualFormat) = format
+
+                val debugInfo = com.dimadesu.lifestreamer.models.AudioDebugInfo(
+                    audioSource = audioSourceType,
+                    actualSystemSource = actualSystemSource,
+                    sampleRate = actualSampleRate,
+                    bitFormat = actualFormat,
+                    channelConfig = actualChannelMask,
+                    noiseSuppression = hasNS,
+                    acousticEchoCanceler = hasAEC,
+                    automaticGainControl = hasAGC,
+                    hasActiveRecording = hasActiveRecording
+                )
+
+                _audioDebugInfoLiveData.postValue(debugInfo)
+                Log.d(TAG, "Audio debug info refreshed: $debugInfo")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to refresh audio debug info: ${e.message}", e)
+                _audioDebugInfoLiveData.postValue(null)
+            }
+        }
+    }
+
+    // Job for periodic audio debug refresh
+    private var audioDebugRefreshJob: kotlinx.coroutines.Job? = null
+    
+    /**
+     * Toggle audio debug overlay visibility
+     */
+    fun toggleAudioDebugOverlay() {
+        val newValue = !(_isAudioDebugOverlayVisible.value ?: false)
+        _isAudioDebugOverlayVisible.value = newValue
+        if (newValue) {
+            // Load current audio source type from DataStore when opening overlay
+            viewModelScope.launch {
+                _selectedAudioSourceType.value = storageRepository.audioSourceTypeFlow.first()
+                Log.d(TAG, "Loaded audio source from DataStore: source=${_selectedAudioSourceType.value}")
+            }
+            
+            // Refresh immediately when showing the overlay
+            refreshAudioDebugInfo()
+            // Start periodic refresh every 2 seconds
+            audioDebugRefreshJob?.cancel()
+            audioDebugRefreshJob = viewModelScope.launch {
+                while (isActive) {
+                    delay(2000)
+                    refreshAudioDebugInfo()
+                }
+            }
+        } else {
+            // Stop periodic refresh
+            audioDebugRefreshJob?.cancel()
+            audioDebugRefreshJob = null
+            // Hide the overlay by setting info to null
+            _audioDebugInfoLiveData.postValue(null)
+        }
+    }
+
     companion object {
         private const val TAG = "PreviewViewModel"
+        
+        /**
+         * Helper to convert audio source int to readable name
+         */
+        fun getAudioSourceName(source: Int): String = when(source) {
+            0 -> "DEFAULT"
+            1 -> "MIC"
+            5 -> "CAMCORDER"
+            6 -> "VOICE_RECOGNITION"
+            7 -> "VOICE_COMMUNICATION"
+            9 -> "UNPROCESSED"
+            10 -> "VOICE_PERFORMANCE"
+            else -> "UNKNOWN ($source)"
+        }
+    }
+    
+    /**
+     * Apply the selected audio source type from the debug overlay.
+     * This recreates the audio source with the selected MediaRecorder.AudioSource constant.
+     * Also saves the settings to DataStore for persistence.
+     */
+    fun applySelectedAudioSource() {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.w(TAG, "Cannot apply audio source - streamer not available")
+            return
+        }
+        
+        viewModelScope.launch {
+            try {
+                val sourceType = _selectedAudioSourceType.value ?: android.media.MediaRecorder.AudioSource.CAMCORDER
+                Log.i(TAG, "Applying audio source type: ${getAudioSourceName(sourceType)} ($sourceType)")
+                
+                // Save audio source type to DataStore for persistence
+                storageRepository.saveAudioSourceType(sourceType)
+                Log.d(TAG, "Saved audio source type to DataStore")
+                
+                // Use ConditionalAudioSourceFactory which reads from DataStore and disables effects
+                currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
+                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
+                
+                // If audio monitoring is enabled, restart passthrough with new settings
+                if (_isMonitorAudioOn.value == true) {
+                    Log.i(TAG, "Restarting audio passthrough with new settings")
+                    service?.stopAudioPassthrough()
+                    delay(100) // Small delay to ensure clean restart
+                    service?.startAudioPassthrough()
+                }
+                
+                // Refresh debug info only if overlay is visible
+                if (_isAudioDebugOverlayVisible.value == true) {
+                    delay(200)
+                    refreshAudioDebugInfo()
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error applying audio source: ${e.message}", e)
+                _streamerErrorLiveData.postValue("Failed to apply audio source: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Reload audio settings from DataStore and apply if they differ from current ViewModel values.
+     * Called on fragment resume to pick up changes made in Settings activity.
+     */
+    fun reloadAndApplyAudioSettingsIfChanged() {
+        viewModelScope.launch {
+            try {
+                val storedSourceType = storageRepository.audioSourceTypeFlow.first()
+                val currentSourceType = _selectedAudioSourceType.value
+                
+                val hasChanged = storedSourceType != currentSourceType
+                
+                if (hasChanged) {
+                    Log.i(TAG, "Audio source changed externally, reloading and applying. " +
+                               "Source: $currentSourceType->$storedSourceType")
+                    
+                    // Update ViewModel value
+                    _selectedAudioSourceType.value = storedSourceType
+                    
+                    // Apply the new settings
+                    applySelectedAudioSource()
+                } else {
+                    Log.d(TAG, "Audio settings unchanged, no reload needed")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to reload audio settings: ${e.message}")
+            }
+        }
     }
 }

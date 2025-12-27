@@ -8,6 +8,7 @@ import android.util.Size
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.dimadesu.lifestreamer.ApplicationConstants
@@ -36,6 +37,12 @@ class DataStoreRepository(
 ) {
     val isAudioEnableFlow: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[booleanPreferencesKey(context.getString(R.string.audio_enable_key))] ?: true
+    }.distinctUntilChanged()
+
+    // Audio source type (MediaRecorder.AudioSource constant)
+    val audioSourceTypeFlow: Flow<Int> = dataStore.data.map { preferences ->
+        preferences[stringPreferencesKey(context.getString(R.string.audio_source_type_key))]?.toIntOrNull()
+            ?: android.media.MediaRecorder.AudioSource.CAMCORDER
     }.distinctUntilChanged()
 
     val audioConfigFlow: Flow<AudioConfig?> = dataStore.data.map { preferences ->
@@ -217,4 +224,11 @@ class DataStoreRepository(
             else -> com.dimadesu.lifestreamer.bitrate.RegulatorMode.BELABOX
         }
     }.distinctUntilChanged()
+
+    // Save methods for audio settings
+    suspend fun saveAudioSourceType(sourceType: Int) {
+        dataStore.edit { preferences ->
+            preferences[stringPreferencesKey(context.getString(R.string.audio_source_type_key))] = sourceType.toString()
+        }
+    }
 }
