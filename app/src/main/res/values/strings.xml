@@ -120,12 +120,6 @@
     <!-- Audio Source -->
     <string name="audio_source_type">Audio Source (try VC if USB audio is too loud/noisy)</string>
     <string name="audio_source_type_key">audio_source_type_key</string>
-    <string name="audio_source_default">DEFAULT</string>
-    <string name="audio_source_mic">MIC</string>
-    <string name="audio_source_camcorder">CAMCORDER</string>
-    <string name="audio_source_voice_recognition">VOICE_RECOGNITION</string>
-    <string name="audio_source_voice_communication">VOICE_COMMUNICATION</string>
-    <string name="audio_source_unprocessed">UNPROCESSED</string>
 
     <!-- Endpoint -->
     <string name="endpoint">Endpoint</string>
