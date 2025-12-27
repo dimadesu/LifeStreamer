@@ -14,7 +14,7 @@ import java.util.UUID
 
 /**
  * Audio source factory that creates microphone audio source based on settings from DataStore.
- * Reads audio source type and effects (NS, AEC, AGC) from user preferences.
+ * Reads audio source type from user preferences.
  * 
  * @param forceDefault When true, forces recreation (isSourceEquals returns false).
  *                     Used when transitioning between audio sources to ensure fresh AudioRecord.
@@ -52,7 +52,7 @@ class ConditionalAudioSourceFactory(
         if (forceDefault) return false
         
         // Always return false to force recreation when settings may have changed
-        // This ensures the new audio source type and effects are applied
+        // This ensures the new audio source type is applied
         return false
     }
     

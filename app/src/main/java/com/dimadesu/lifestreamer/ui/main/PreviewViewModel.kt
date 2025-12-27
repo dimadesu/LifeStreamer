@@ -381,8 +381,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         _selectedAudioSourceType.value = sourceType
     }
     
-    // Audio effects removed - they don't have noticeable effect on most devices
-
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 

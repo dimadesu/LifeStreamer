@@ -124,8 +124,6 @@
                 app:entryValues="@array/AudioSourceTypeEntryValues"
                 app:useSimpleSummaryProvider="true" />
 
-            <!-- Audio Effects removed - they don't have noticeable effect on most devices -->
-
         </PreferenceCategory>
 
     </PreferenceCategory>

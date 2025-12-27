@@ -83,12 +83,12 @@ class BluetoothAudioSource(
                 .setChannelMask(config.channelConfig)
                 .build()
 
-Log.i(TAG, "Creating AudioRecord with audioSourceType=$audioSourceType")
-                
-                val builder = AudioRecord.Builder()
-                    .setAudioFormat(audioFormat)
-                    .setBufferSizeInBytes(bufferSize)
-                    .setAudioSource(audioSourceType)
+            Log.i(TAG, "Creating AudioRecord with audioSourceType=$audioSourceType")
+            
+            val builder = AudioRecord.Builder()
+                .setAudioFormat(audioFormat)
+                .setBufferSizeInBytes(bufferSize)
+                .setAudioSource(audioSourceType)
 
             // Try to prefer the Bluetooth device reflectively
             try {
