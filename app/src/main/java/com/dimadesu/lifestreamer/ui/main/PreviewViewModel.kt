@@ -48,6 +48,7 @@ import com.dimadesu.lifestreamer.ui.main.usecases.BuildStreamerUseCase
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.uvc.UvcVideoSource
+import com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
@@ -3729,18 +3730,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 storageRepository.saveAudioSourceType(sourceType)
                 Log.d(TAG, "Saved audio source type to DataStore")
                 
-                // Audio effects are disabled - they don't have noticeable effect on most devices
-                val effects = emptySet<java.util.UUID>()
-                
-                Log.i(TAG, "Applying audio source with no effects")
-                
-                // Create new microphone source with the selected audio source type and no effects
-                val newAudioSource = MicrophoneSourceFactory(
-                    audioSourceType = sourceType,
-                    effects = effects
-                )
-                
-                currentStreamer.setAudioSource(newAudioSource)
+                // Use ConditionalAudioSourceFactory which reads from DataStore and disables effects
+                currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
                 Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
                 
                 // If audio monitoring is enabled, restart passthrough with new settings
