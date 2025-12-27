@@ -8,9 +8,6 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.AutomaticGainControl
-import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Process
 import android.util.Log
@@ -45,11 +42,6 @@ class AudioPassthroughManager(
     @Volatile
     private var isRunning = false
     private var preferredDevice: AudioDeviceInfo? = null
-    
-    // Audio effects
-    private var noiseSuppressor: NoiseSuppressor? = null
-    private var echoCanceler: AcousticEchoCanceler? = null
-    private var gainControl: AutomaticGainControl? = null
 
     /**
      * Set preferred audio device for recording (e.g., Bluetooth device).
@@ -303,26 +295,6 @@ class AudioPassthroughManager(
             Log.w(TAG, "Error while joining passthrough thread: ${t.message}")
         }
         passthroughThread = null
-        
-        // Release audio effects
-        try {
-            noiseSuppressor?.release()
-            noiseSuppressor = null
-        } catch (e: Exception) {
-            Log.w(TAG, "Error releasing NoiseSuppressor: ${e.message}")
-        }
-        try {
-            echoCanceler?.release()
-            echoCanceler = null
-        } catch (e: Exception) {
-            Log.w(TAG, "Error releasing AcousticEchoCanceler: ${e.message}")
-        }
-        try {
-            gainControl?.release()
-            gainControl = null
-        } catch (e: Exception) {
-            Log.w(TAG, "Error releasing AutomaticGainControl: ${e.message}")
-        }
         
         try {
             audioRecord?.stop()
