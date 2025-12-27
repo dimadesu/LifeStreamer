@@ -3781,4 +3781,48 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
     }
+    
+    /**
+     * Reload audio settings from DataStore and apply if they differ from current ViewModel values.
+     * Called on fragment resume to pick up changes made in Settings activity.
+     */
+    fun reloadAndApplyAudioSettingsIfChanged() {
+        viewModelScope.launch {
+            try {
+                val storedSourceType = storageRepository.audioSourceTypeFlow.first()
+                val storedNs = storageRepository.audioEffectNsFlow.first()
+                val storedAec = storageRepository.audioEffectAecFlow.first()
+                val storedAgc = storageRepository.audioEffectAgcFlow.first()
+                
+                val currentSourceType = _selectedAudioSourceType.value
+                val currentNs = enableNoiseSuppression.value
+                val currentAec = enableEchoCanceler.value
+                val currentAgc = enableGainControl.value
+                
+                val hasChanged = storedSourceType != currentSourceType ||
+                                 storedNs != currentNs ||
+                                 storedAec != currentAec ||
+                                 storedAgc != currentAgc
+                
+                if (hasChanged) {
+                    Log.i(TAG, "Audio settings changed externally, reloading and applying. " +
+                               "Source: $currentSourceType->$storedSourceType, " +
+                               "NS: $currentNs->$storedNs, AEC: $currentAec->$storedAec, AGC: $currentAgc->$storedAgc")
+                    
+                    // Update ViewModel values
+                    _selectedAudioSourceType.value = storedSourceType
+                    enableNoiseSuppression.value = storedNs
+                    enableEchoCanceler.value = storedAec
+                    enableGainControl.value = storedAgc
+                    
+                    // Apply the new settings
+                    applySelectedAudioSource()
+                } else {
+                    Log.d(TAG, "Audio settings unchanged, no reload needed")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to reload audio settings: ${e.message}")
+            }
+        }
+    }
 }

@@ -709,6 +709,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 }
             }
         }
+        
+        // Reload audio settings from DataStore (may have changed in Settings activity)
+        // and apply if they differ from current values
+        previewViewModel.reloadAndApplyAudioSettingsIfChanged()
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
@@ -1105,8 +1109,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.audioSourceSpinner.adapter = adapter
         
         binding.audioSourceSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            private var isFirstSelection = true
+            
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                previewViewModel.setSelectedAudioSourceType(audioSourceOptions[position].second)
+                val newSourceType = audioSourceOptions[position].second
+                val currentSourceType = previewViewModel.selectedAudioSourceType.value
+                
+                // Skip first selection (initial setup) and only apply if value changed
+                if (isFirstSelection) {
+                    isFirstSelection = false
+                    previewViewModel.setSelectedAudioSourceType(newSourceType)
+                    return
+                }
+                
+                if (newSourceType != currentSourceType) {
+                    previewViewModel.setSelectedAudioSourceType(newSourceType)
+                    previewViewModel.applySelectedAudioSource()
+                }
             }
             
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {
@@ -1121,6 +1140,39 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 binding.audioSourceSpinner.setSelection(position)
             }
         }
+        
+        // Setup checkbox listeners to auto-apply when effects change
+        setupAudioEffectCheckboxListeners()
+    }
+    
+    private var isInitializingCheckboxes = true
+    
+    private fun setupAudioEffectCheckboxListeners() {
+        // Track initial state to avoid applying on first load
+        isInitializingCheckboxes = true
+        
+        binding.noiseSuppressionCheckbox.setOnCheckedChangeListener { _, _ ->
+            if (!isInitializingCheckboxes) {
+                previewViewModel.applySelectedAudioSource()
+            }
+        }
+        
+        binding.echoCancelerCheckbox.setOnCheckedChangeListener { _, _ ->
+            if (!isInitializingCheckboxes) {
+                previewViewModel.applySelectedAudioSource()
+            }
+        }
+        
+        binding.gainControlCheckbox.setOnCheckedChangeListener { _, _ ->
+            if (!isInitializingCheckboxes) {
+                previewViewModel.applySelectedAudioSource()
+            }
+        }
+        
+        // After a short delay, enable auto-apply (to skip initial binding)
+        binding.root.postDelayed({
+            isInitializingCheckboxes = false
+        }, 500)
     }
 
     private fun updateCameraButtonsVisibility() {
