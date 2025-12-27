@@ -90,7 +90,6 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="@android:color/white"
-                    android:textSize="11sp"
                     android:text="Audio Source"
                     android:paddingBottom="4dp" />
 
@@ -101,6 +100,13 @@
                     android:background="#80FFFFFF"
                     android:paddingVertical="4dp"
                     android:paddingHorizontal="8dp"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#AAAAAA"
+                    android:text="Try VOICE_COMMUNICATION if USB audio is too loud/noisy"
                     android:layout_marginBottom="8dp" />
 
             </LinearLayout>

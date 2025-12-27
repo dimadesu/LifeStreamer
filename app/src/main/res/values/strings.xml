@@ -118,7 +118,7 @@
     <string name="audio_profile_key">audio_profile_key</string>
 
     <!-- Audio Source & Effects -->
-    <string name="audio_source_type">Audio Source Type</string>
+    <string name="audio_source_type">Audio Source. Try VC if USB audio is too loud/noisy</string>
     <string name="audio_source_type_key">audio_source_type_key</string>
     <string name="audio_source_default">DEFAULT</string>
     <string name="audio_source_mic">MIC</string>
