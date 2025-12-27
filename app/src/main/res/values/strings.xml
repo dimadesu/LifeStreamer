@@ -127,14 +127,6 @@
     <string name="audio_source_voice_communication">VOICE_COMMUNICATION</string>
     <string name="audio_source_unprocessed">UNPROCESSED</string>
 
-    <string name="audio_effects">Audio Effects</string>
-    <string name="audio_effect_ns">Noise Suppression (NS)</string>
-    <string name="audio_effect_ns_key">audio_effect_ns_key</string>
-    <string name="audio_effect_aec">Echo Cancellation (AEC)</string>
-    <string name="audio_effect_aec_key">audio_effect_aec_key</string>
-    <string name="audio_effect_agc">Auto Gain Control (AGC)</string>
-    <string name="audio_effect_agc_key">audio_effect_agc_key</string>
-
     <!-- Endpoint -->
     <string name="endpoint">Endpoint</string>
 
