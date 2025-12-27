@@ -78,6 +78,7 @@ import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
@@ -429,6 +430,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Log.i(TAG, "Service ready: $isReady, serviceStreamer: ${serviceStreamer != null}")
                 }
             }
+        }
+        
+        // Observe audio source type changes from DataStore (e.g., from Settings activity)
+        // This applies changes in real-time without waiting for fragment resume
+        viewModelScope.launch {
+            var isFirstEmission = true
+            storageRepository.audioSourceTypeFlow
+                .distinctUntilChanged()
+                .collect { newSourceType ->
+                    if (isFirstEmission) {
+                        // First emission is just the initial value - update LiveData but don't apply
+                        _selectedAudioSourceType.value = newSourceType
+                        Log.d(TAG, "Initial audio source type from DataStore: ${getAudioSourceName(newSourceType)}")
+                        isFirstEmission = false
+                    } else if (serviceStreamer != null) {
+                        // Subsequent emissions mean the value changed (e.g., in Settings)
+                        val currentValue = _selectedAudioSourceType.value
+                        if (currentValue != newSourceType) {
+                            Log.i(TAG, "Audio source changed in DataStore: ${getAudioSourceName(currentValue ?: -1)} -> ${getAudioSourceName(newSourceType)}")
+                            _selectedAudioSourceType.value = newSourceType
+                            applySelectedAudioSource()
+                        }
+                    }
+                }
         }
 
         // Status-to-notification messaging removed; UI no longer shows sliding panel
