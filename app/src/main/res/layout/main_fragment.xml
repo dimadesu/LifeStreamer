@@ -80,102 +80,76 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:goneUnless='@{viewmodel.audioDebugInfoLiveData != null}'>
 
-            <!-- Controls Section -->
-            <LinearLayout
+            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingBottom="8dp">
+                android:textColor="@android:color/white"
+                android:text="Audio Source"
+                android:paddingBottom="4dp" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:text="Audio Source"
-                    android:paddingBottom="4dp" />
+            <Spinner
+                android:id="@+id/audioSourceSpinner"
+                android:layout_width="200dp"
+                android:layout_height="wrap_content"
+                android:background="#80FFFFFF"
+                android:paddingVertical="4dp"
+                android:paddingHorizontal="8dp"
+                android:layout_marginBottom="4dp" />
 
-                <Spinner
-                    android:id="@+id/audioSourceSpinner"
-                    android:layout_width="200dp"
-                    android:layout_height="wrap_content"
-                    android:background="#80FFFFFF"
-                    android:paddingVertical="4dp"
-                    android:paddingHorizontal="8dp"
-                    android:layout_marginBottom="4dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="#AAAAAA"
-                    android:text="Try VOICE_COMMUNICATION\nif USB audio is too loud" />
-
-            </LinearLayout>
-
-            <!-- Horizontal Divider -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginVertical="8dp"
-                android:background="#40FFFFFF" />
-
-            <!-- Stats Section -->
-            <LinearLayout
+            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="8dp">
+                android:textColor="#AAAAAA"
+                android:text="Try VOICE_COMMUNICATION\nif USB audio is too loud"
+                android:layout_marginBottom="8dp" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="#AAAAAA"
-                    android:textStyle="bold"
-                    android:text="Actual System State"
-                    android:paddingBottom="8dp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textStyle="bold"
+                android:text="ACTUAL SYSTEM STATE" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:text='@{"Input: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Input: " + viewmodel.audioDebugInfoLiveData.audioSource}' />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:text='@{"Audio Source: " + viewmodel.audioDebugInfoLiveData.actualSystemSourceDisplay}' />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Audio Source: " + viewmodel.audioDebugInfoLiveData.actualSystemSourceDisplay}' />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Effects: " + viewmodel.audioDebugInfoLiveData.audioEffectsString}' />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:text='@{"Sample Rate: " + viewmodel.audioDebugInfoLiveData.sampleRateKHz}' />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Sample Rate: " + viewmodel.audioDebugInfoLiveData.sampleRateKHz}' />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:text='@{"Bit Format: " + viewmodel.audioDebugInfoLiveData.bitFormatString}' />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Bit Format: " + viewmodel.audioDebugInfoLiveData.bitFormatString}' />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="13sp"
-                    android:text='@{"Channels: " + viewmodel.audioDebugInfoLiveData.channelConfigString}' />
-
-            </LinearLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="13sp"
+                android:text='@{"Channels: " + viewmodel.audioDebugInfoLiveData.channelConfigString}' />
 
         </LinearLayout>
 
