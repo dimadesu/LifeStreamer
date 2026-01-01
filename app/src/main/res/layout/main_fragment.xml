@@ -77,7 +77,7 @@
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:goneUnless='@{viewmodel.audioDebugInfoLiveData != null}'>
+            app:goneUnless='@{viewmodel.audioDebugInfoLiveData != null &amp;&amp; !viewmodel.isRtmpSource}'>
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -243,7 +243,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="AUDIO SRC"
-                    android:backgroundTint='@{viewmodel.isAudioDebugOverlayVisible ? @color/active_button_green : @color/button_gray}' />
+                    android:backgroundTint='@{viewmodel.isAudioDebugOverlayVisible ? @color/active_button_green : @color/button_gray}'
+                    app:goneUnless="@{!viewmodel.isRtmpSource}" />
 
             </LinearLayout>
 
