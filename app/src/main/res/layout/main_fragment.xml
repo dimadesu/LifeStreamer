@@ -103,6 +103,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:textSize="13sp"
                     android:text="Try VOICE_COMMUNICATION\nif USB audio is too loud"
                     android:layout_marginBottom="8dp" />
 
