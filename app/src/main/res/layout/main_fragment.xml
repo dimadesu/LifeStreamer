@@ -89,7 +89,7 @@
 
             <Spinner
                 android:id="@+id/audioSourceSpinner"
-                android:layout_width="200dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="#80FFFFFF"
                 android:paddingVertical="4dp"
