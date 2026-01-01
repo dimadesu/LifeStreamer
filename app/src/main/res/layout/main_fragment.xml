@@ -83,8 +83,8 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@android:color/white"
-                android:text="Audio Source"
+                android:textStyle="bold"
+                android:text="AUDIO SOURCE"
                 android:paddingBottom="4dp" />
 
             <Spinner
@@ -99,7 +99,6 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#AAAAAA"
                 android:text="Try VOICE_COMMUNICATION\nif USB audio is too loud"
                 android:layout_marginBottom="8dp" />
 
