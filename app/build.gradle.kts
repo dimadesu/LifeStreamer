@@ -1,4 +1,6 @@
 import java.io.FileInputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Properties
 
 plugins {
@@ -57,20 +59,27 @@ android {
         }
     }
     
-    // Rename bundle files
+    // Custom AAB output names - create copy so Android Studio can still locate original
     tasks.whenTaskAdded {
         if (name.startsWith("bundle")) {
             val variant = name.removePrefix("bundle").replaceFirstChar { it.lowercase() }
-            finalizedBy(tasks.register("rename${name.capitalize()}") {
-                doLast {
-                    val bundleDir = layout.buildDirectory.dir("outputs/bundle/$variant").get().asFile
-                    val defaultBundle = bundleDir.listFiles()?.firstOrNull { it.extension == "aab" }
-                    defaultBundle?.let {
-                        val newName = "LifeStreamer-v${defaultConfig.versionName}-$variant.aab"
-                        it.renameTo(File(bundleDir, newName))
-                    }
+            doLast {
+                val bundleDir = layout.buildDirectory.dir("outputs/bundle/$variant").get().asFile
+                // Find only the original bundle file (not our custom-named copies)
+                val originalBundle = bundleDir.listFiles()?.firstOrNull { 
+                    it.extension == "aab" && it.name.startsWith("app-")
                 }
-            })
+                originalBundle?.let { file ->
+                    val newName = "LifeStreamer-v${defaultConfig.versionName}-$variant.aab"
+                    val newFile = File(file.parent, newName)
+                    // Copy instead of rename so Studio can locate the original
+                    Files.copy(
+                        file.toPath(),
+                        newFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING
+                    )
+                }
+            }
         }
     }
     
