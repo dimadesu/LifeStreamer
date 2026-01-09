@@ -56,6 +56,24 @@ android {
                 "LifeStreamer-v${versionName}-${name}.apk"
         }
     }
+    
+    // Rename bundle files
+    tasks.whenTaskAdded {
+        if (name.startsWith("bundle")) {
+            val variant = name.removePrefix("bundle").replaceFirstChar { it.lowercase() }
+            finalizedBy(tasks.register("rename${name.capitalize()}") {
+                doLast {
+                    val bundleDir = layout.buildDirectory.dir("outputs/bundle/$variant").get().asFile
+                    val defaultBundle = bundleDir.listFiles()?.firstOrNull { it.extension == "aab" }
+                    defaultBundle?.let {
+                        val newName = "LifeStreamer-v${defaultConfig.versionName}-$variant.aab"
+                        it.renameTo(File(bundleDir, newName))
+                    }
+                }
+            })
+        }
+    }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
