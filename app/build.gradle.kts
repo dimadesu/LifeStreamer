@@ -1,3 +1,8 @@
+import java.io.FileInputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -20,22 +25,40 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            // Read from keystore.properties file
+            val keystorePropertiesFile = rootProject.file("keystore.properties")
+            if (keystorePropertiesFile.exists()) {
+                val keystoreProperties = Properties()
+                keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                
+                storeFile = file(keystoreProperties["storeFile"].toString())
+                storePassword = keystoreProperties["storePassword"].toString()
+                keyAlias = keystoreProperties["keyAlias"].toString()
+                keyPassword = keystoreProperties["keyPassword"].toString()
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     
     applicationVariants.all {
         outputs.all {
             (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
-                "LifeStreamer-${name}.apk"
+                "LifeStreamer-v${versionName}-${name}.apk"
         }
     }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -83,4 +106,18 @@ dependencies {
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+}
+
+// Custom AAB output names - create copy so Android Studio can still locate original
+afterEvaluate {
+    tasks.named("bundleRelease").configure {
+        doLast {
+            val originalBundle = file("${projectDir}/release/app-release.aab")
+            if (originalBundle.exists()) {
+                val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.aab"
+                val newFile = File(originalBundle.parent, newName)
+                Files.copy(originalBundle.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        }
+    }
 }
