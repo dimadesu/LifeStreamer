@@ -1409,17 +1409,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                     Log.i(TAG, "Cleared communication device (BT disabled, S+)")
                                 } catch (_: Exception) {}
                             } else {
-                                // On older versions, stop SCO explicitly
+                                // On older versions (API < 31), just stop SCO and set normal mode
+                                // clearCommunicationDevice() doesn't exist before API 31
                                 try { 
                                     @Suppress("DEPRECATION")
                                     audioManager.stopBluetoothSco() 
                                     Log.i(TAG, "Stopped Bluetooth SCO (BT disabled, pre-S)")
-                                } catch (_: Exception) {}
-                                // Also try to clear communication device via reflection
-                                try {
-                                    val method = audioManager::class.java.getMethod("clearCommunicationDevice")
-                                    method.invoke(audioManager)
-                                    Log.i(TAG, "Cleared communication device via reflection (BT disabled)")
                                 } catch (_: Exception) {}
                             }
                             // Set mode to NORMAL
