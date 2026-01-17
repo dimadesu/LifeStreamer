@@ -3568,21 +3568,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@launch
                 }
 
-                // Determine audio source type
+                // Determine audio source type using type checking instead of class names
                 val audioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val audioSourceType = when (audioSource) {
-                    is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
-                    is com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSource -> "MEDIA PROJECTION"
-                    else -> {
-                        // Use class name for other sources (e.g., MicrophoneSource which is internal)
-                        val className = audioSource?.javaClass?.simpleName ?: "UNKNOWN"
-                        // Try to infer if it's unprocessed from the factory name if available
-                        if (className.contains("Microphone")) {
-                            "MICROPHONE" // Will show as MicrophoneSource generically
-                        } else {
-                            className
-                        }
-                    }
+                val audioSourceType = when {
+                    audioSource is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
+                    audioSource is IMediaProjectionSource -> "MEDIA PROJECTION"
+                    audioSource != null -> "MICROPHONE" // Any other audio source is microphone-based
+                    else -> "UNKNOWN"
                 }
 
                 // Get actual system audio source from AudioManager (what HAL is really using)
