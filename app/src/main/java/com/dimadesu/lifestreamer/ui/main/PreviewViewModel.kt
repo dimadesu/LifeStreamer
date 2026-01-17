@@ -1941,7 +1941,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
                 val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
-                val hasMediaProjectionAudio = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                val hasMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
                 
                 if (isRtmpOrBitmap && hasMediaProjectionAudio) {
                     try {
@@ -2350,8 +2350,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun applyMonitorAudioState() {
         val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
         val audioSource = serviceStreamer?.audioInput?.sourceFlow?.value
-        
-        Log.i(TAG, "applyMonitorAudioState: videoSource=${videoSource?.javaClass?.simpleName}, audioSource=${audioSource?.javaClass?.simpleName}, isMediaProjection=${audioSource is IMediaProjectionSource}")
         
         when {
             // RTMP source - monitor ExoPlayer audio
@@ -3442,7 +3440,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
             audioSource == null -> application.getString(R.string.audio_source_none)
-            audioSource.javaClass.simpleName.contains("MediaProjection") -> 
+            audioSource is IMediaProjectionSource -> 
                 application.getString(R.string.audio_source_rtmp)
             else -> application.getString(R.string.audio_source_microphone)
         }

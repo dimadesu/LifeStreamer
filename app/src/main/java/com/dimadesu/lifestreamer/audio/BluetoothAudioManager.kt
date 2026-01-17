@@ -217,7 +217,7 @@ class BluetoothAudioManager(
             // Check if already using Bluetooth source
             val audioInput = (streamerInstance as? IWithAudioSource)?.audioInput
             val currentSource = audioInput?.sourceFlow?.value
-            if (currentSource != null && currentSource.javaClass.simpleName.contains("Bluetooth", ignoreCase = true)) {
+            if (currentSource is BluetoothAudioSource) {
                 Log.i(TAG, "SCO orchestration: audio source already Bluetooth - verifying")
                 verifyAndEmitUsingBtOrFail(1200)
                 return

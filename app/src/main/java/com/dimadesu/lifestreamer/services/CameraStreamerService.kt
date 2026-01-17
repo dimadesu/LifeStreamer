@@ -997,7 +997,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private fun isUsingRtmpSource(): Boolean {
         val currentStreamer = streamer
         val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
-        return videoSource?.javaClass?.simpleName == "RTMPVideoSource"
+        return videoSource is com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
     }
     
     /**
