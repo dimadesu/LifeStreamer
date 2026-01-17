@@ -162,56 +162,34 @@ class AudioPassthroughManager(
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .build()
             
-            // If BT device is preferred, try to set it as communication device
-            // This forces Android to route audio through BT
-            // If NOT using BT, explicitly clear communication device to ensure built-in mic is used
+            // If BT device is preferred, try to set it as communication device (API 31+)
+            // For older APIs, setPreferredDevice on AudioRecord (above) handles routing
             try {
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                if (audioManager != null) {
+                if (audioManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     if (currentDevice != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            audioManager.setCommunicationDevice(currentDevice)
-                            Log.i(TAG, "AudioManager.setCommunicationDevice set for: ${currentDevice.productName}")
-                        } else {
-                            // On pre-S, use reflection as fallback
-                            try {
-                                val method = audioManager::class.java.getMethod("setCommunicationDevice", AudioDeviceInfo::class.java)
-                                method.invoke(audioManager, currentDevice)
-                                Log.i(TAG, "AudioManager.setCommunicationDevice set via reflection for: ${currentDevice.productName}")
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "setCommunicationDevice reflection failed: ${e.message}")
-                            }
-                        }
+                        audioManager.setCommunicationDevice(currentDevice)
+                        Log.i(TAG, "AudioManager.setCommunicationDevice set for: ${currentDevice.productName}")
                     } else {
                         // Explicitly clear communication device to ensure built-in mic is used
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            try {
-                                audioManager.clearCommunicationDevice()
-                                Log.i(TAG, "AudioManager.clearCommunicationDevice called (ensuring built-in mic)")
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "Failed to clear communication device: ${e.message}")
-                            }
-                        } else {
-                            // On pre-S, use reflection as fallback
-                            try {
-                                val clearMethod = audioManager::class.java.getMethod("clearCommunicationDevice")
-                                clearMethod.invoke(audioManager)
-                                Log.i(TAG, "AudioManager.clearCommunicationDevice called via reflection (ensuring built-in mic)")
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "Failed to clear communication device via reflection: ${e.message}")
-                            }
+                        try {
+                            audioManager.clearCommunicationDevice()
+                            Log.i(TAG, "AudioManager.clearCommunicationDevice called (ensuring built-in mic)")
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "Failed to clear communication device: ${e.message}")
                         }
-                        // Also ensure SCO is stopped (pre-S only)
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                            try {
-                                @Suppress("DEPRECATION")
-                                audioManager.stopBluetoothSco()
-                                Log.i(TAG, "stopBluetoothSco called (ensuring built-in mic, pre-S)")
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
-                            }
+                    }
+                } else if (audioManager != null) {
+                    // For API < 31: rely on setPreferredDevice on AudioRecord
+                    // If no preferred device, ensure Bluetooth SCO is stopped and mode is normal
+                    if (currentDevice == null) {
+                        try {
+                            @Suppress("DEPRECATION")
+                            audioManager.stopBluetoothSco()
+                            Log.i(TAG, "stopBluetoothSco called (ensuring built-in mic)")
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "Failed to stop BT SCO: ${e.message}")
                         }
-                        // Set mode to NORMAL
                         audioManager.mode = AudioManager.MODE_NORMAL
                         Log.i(TAG, "Audio mode set to NORMAL")
                     }
@@ -304,15 +282,12 @@ class AudioPassthroughManager(
         }
         audioTrack = null
         
-        // Clear communication device if it was set
+        // Clear communication device if it was set (API 31+ only)
         try {
-            if (preferredDevice != null) {
+            if (preferredDevice != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                if (audioManager != null) {
-                    val method = audioManager::class.java.getMethod("clearCommunicationDevice")
-                    method.invoke(audioManager)
-                    Log.i(TAG, "AudioManager.clearCommunicationDevice called")
-                }
+                audioManager?.clearCommunicationDevice()
+                Log.i(TAG, "AudioManager.clearCommunicationDevice called")
             }
         } catch (e: Throwable) {
             Log.w(TAG, "Failed to clear communication device: ${e.message}")

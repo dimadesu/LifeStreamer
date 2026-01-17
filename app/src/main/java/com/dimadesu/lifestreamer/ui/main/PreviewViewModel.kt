@@ -49,6 +49,7 @@ import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.uvc.UvcVideoSource
 import com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory
+import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
@@ -688,11 +689,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             // Trigger BT mic activation if using mic-based audio (not MediaProjection)
             // This covers Camera, UVC, and any fallback to mic scenarios
+            // Use type checking instead of class name to avoid R8 obfuscation
             val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-            val audioSourceName = currentAudioSource?.javaClass?.simpleName ?: ""
-            val isMicBasedAudio = !audioSourceName.contains("MediaProjection", ignoreCase = true)
+            val isMicBasedAudio = currentAudioSource != null && currentAudioSource !is IMediaProjectionSource
             if (isMicBasedAudio) {
-                Log.i(TAG, "doStartStream: Mic-based audio detected ($audioSourceName), triggering BT activation")
+                Log.i(TAG, "doStartStream: Mic-based audio detected (${currentAudioSource?.javaClass?.simpleName}), triggering BT activation")
                 service?.triggerBluetoothMicActivation()
             } else {
                 Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
@@ -1940,7 +1941,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
                 val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
-                val hasMediaProjectionAudio = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                val hasMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
                 
                 if (isRtmpOrBitmap && hasMediaProjectionAudio) {
                     try {
@@ -2367,7 +2368,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             
             // Camera/UVC/Bitmap with microphone - monitor default audio input
-            audioSource?.javaClass?.simpleName?.contains("Microphone") == true -> {
+            // Use type checking instead of class name to avoid R8 obfuscation issues
+            audioSource != null && audioSource !is IMediaProjectionSource -> {
                 currentRtmpPlayer?.let { player ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         try {
@@ -3438,7 +3440,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
             audioSource == null -> application.getString(R.string.audio_source_none)
-            audioSource.javaClass.simpleName.contains("MediaProjection") -> 
+            audioSource is IMediaProjectionSource -> 
                 application.getString(R.string.audio_source_rtmp)
             else -> application.getString(R.string.audio_source_microphone)
         }
@@ -3566,21 +3568,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@launch
                 }
 
-                // Determine audio source type
+                // Determine audio source type using type checking instead of class names
                 val audioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val audioSourceType = when (audioSource) {
-                    is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
-                    is com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSource -> "MEDIA PROJECTION"
-                    else -> {
-                        // Use class name for other sources (e.g., MicrophoneSource which is internal)
-                        val className = audioSource?.javaClass?.simpleName ?: "UNKNOWN"
-                        // Try to infer if it's unprocessed from the factory name if available
-                        if (className.contains("Microphone")) {
-                            "MICROPHONE" // Will show as MicrophoneSource generically
-                        } else {
-                            className
-                        }
-                    }
+                val audioSourceType = when {
+                    audioSource is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
+                    audioSource is IMediaProjectionSource -> "MEDIA PROJECTION"
+                    audioSource != null -> "MICROPHONE" // Any other audio source is microphone-based
+                    else -> "UNKNOWN"
                 }
 
                 // Get actual system audio source from AudioManager (what HAL is really using)

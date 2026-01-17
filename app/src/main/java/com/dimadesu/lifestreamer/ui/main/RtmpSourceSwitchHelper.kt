@@ -252,7 +252,7 @@ internal object RtmpSourceSwitchHelper {
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
                             val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                            val currentAudioIsMediaProjection = currentAudioSource?.javaClass?.simpleName?.contains("MediaProjection") == true
+                            val currentAudioIsMediaProjection = currentAudioSource is io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
                             
                             if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                                 // Use MediaProjection audio when streaming
