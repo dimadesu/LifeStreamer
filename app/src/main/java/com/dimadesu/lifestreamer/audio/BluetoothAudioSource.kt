@@ -85,25 +85,19 @@ class BluetoothAudioSource(
 
             Log.i(TAG, "Creating AudioRecord with audioSourceType=$audioSourceType")
             
-            val builder = AudioRecord.Builder()
+            val record = AudioRecord.Builder()
                 .setAudioFormat(audioFormat)
                 .setBufferSizeInBytes(bufferSize)
                 .setAudioSource(audioSourceType)
+                .build()
 
-            // Try to prefer the Bluetooth device reflectively
-            try {
-                if (preferredDevice != null) {
-                    val m = try {
-                        builder::class.java.getMethod("setPreferredDevice", AudioDeviceInfo::class.java)
-                    } catch (_: NoSuchMethodException) {
-                        null
-                    }
-                    m?.invoke(builder, preferredDevice)
-                }
-            } catch (_: Throwable) {
+            // Set preferred device for Bluetooth routing
+            if (preferredDevice != null) {
+                val success = record.setPreferredDevice(preferredDevice)
+                Log.i(TAG, "Set preferred device: ${preferredDevice.productName}, success=$success")
             }
 
-            builder.build()
+            record
         } else {
             AudioRecord(
                 audioSourceType,
