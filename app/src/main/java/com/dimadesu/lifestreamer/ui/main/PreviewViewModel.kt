@@ -2947,18 +2947,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         lastUsedCameraId = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
-                        // Clean up existing UVC camera helper if it exists (might be stale after UvcTestActivity)
-                        uvcCameraHelper?.let { existingHelper ->
-                            try {
-                                Log.d(TAG, "Releasing existing UVC camera helper")
-                                existingHelper.stopPreview()
-                                existingHelper.closeCamera()
-                                existingHelper.release()
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Error releasing existing helper: ${e.message}")
-                            }
-                            uvcCameraHelper = null
-                        }
+                        // Note: Don't try to cleanup old CameraHelper here - it was already released
+                        // when the UvcVideoSource was released by StreamPack during setVideoSource().
+                        // The CameraHelper's internal Handler thread is dead at this point.
+                        // Just clear our reference.
+                        uvcCameraHelper = null
                         
                         // Always create a fresh CameraHelper instance
                         uvcCameraHelper = com.herohan.uvcapp.CameraHelper().apply {

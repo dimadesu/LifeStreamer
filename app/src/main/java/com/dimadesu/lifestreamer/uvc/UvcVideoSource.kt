@@ -93,6 +93,10 @@ class UvcVideoSource(
     // Pending cleanup management
     private var pendingCleanupRunnable: Runnable? = null
 
+    // Track if this source has been released to avoid calling methods on dead CameraHelper
+    @Volatile
+    private var isReleased = false
+
     override val timebase = Timebase.UPTIME
 
     init {
@@ -170,6 +174,13 @@ class UvcVideoSource(
 
     override suspend fun release() {
         Log.d(TAG, "release() called")
+        
+        // Mark as released FIRST to prevent any pending operations
+        isReleased = true
+        
+        // Cancel any pending cleanup to avoid double-release
+        cancelPendingCleanup("release")
+        
         mainHandler.post {
             try {
                 // Stop camera preview
@@ -472,6 +483,11 @@ class UvcVideoSource(
         cancelPendingCleanup("scheduling new cleanup")
         val runnable = Runnable {
             try {
+                // Don't execute cleanup if already released
+                if (isReleased) {
+                    Log.d(TAG, "Skipping scheduled cleanup - already released")
+                    return@Runnable
+                }
                 action()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in scheduled cleanup: ${e.message}", e)
