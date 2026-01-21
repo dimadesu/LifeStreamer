@@ -97,12 +97,41 @@ class UvcVideoSource(
     @Volatile
     private var isReleased = false
 
+    // Track if camera is ready (opened)
+    @Volatile
+    private var isCameraReady = false
+
     override val timebase = Timebase.UPTIME
 
     init {
         Log.d(TAG, "UvcVideoSource initialized")
         // Get initial camera format if available
         updateCachedFormat()
+    }
+
+    /**
+     * Called when the UVC camera has opened and is ready to stream.
+     * This re-adds surfaces and starts the preview to ensure frames flow properly.
+     */
+    fun onCameraReady() {
+        Log.d(TAG, "onCameraReady() called")
+        isCameraReady = true
+        
+        mainHandler.post {
+            try {
+                // Re-add the input surface and start preview now that camera is ready
+                inputSurface?.let { surface ->
+                    Log.d(TAG, "Re-adding input surface after camera ready")
+                    cameraHelper.addSurface(surface, true)
+                    cameraHelper.startPreview()
+                    Log.i(TAG, "Camera preview started after camera ready")
+                } ?: run {
+                    Log.w(TAG, "No input surface available in onCameraReady")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onCameraReady: ${e.message}", e)
+            }
+        }
     }
 
     override suspend fun startStream() {

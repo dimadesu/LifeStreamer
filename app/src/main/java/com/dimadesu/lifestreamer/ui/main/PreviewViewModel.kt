@@ -3012,8 +3012,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 
                                 override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
                                     Log.i(TAG, "UVC camera opened and ready")
-                                    // Camera is now ready and streaming
-                                    startPreview()
+                                    // Camera is now ready - notify the UvcVideoSource so it can
+                                    // re-add surfaces and start preview properly
+                                    val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    if (videoSource is UvcVideoSource) {
+                                        videoSource.onCameraReady()
+                                    } else {
+                                        // Fallback: just call startPreview on CameraHelper directly
+                                        Log.d(TAG, "Video source is not UvcVideoSource, calling startPreview directly")
+                                        startPreview()
+                                    }
                                 }
                                 
                                 override fun onCameraClose(device: android.hardware.usb.UsbDevice) {
