@@ -2953,6 +2953,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Just clear our reference.
                         uvcCameraHelper = null
                         
+                        // Track whether we've already done the source switch synchronously
+                        // (when permission is already granted). This prevents double-switch
+                        // when onDeviceOpen is called. Use AtomicBoolean for thread-safe visibility.
+                        val sourceSwitchedSynchronously = java.util.concurrent.atomic.AtomicBoolean(false)
+                        
                         // Always create a fresh CameraHelper instance
                         uvcCameraHelper = com.herohan.uvcapp.CameraHelper().apply {
                             setStateCallback(object : com.herohan.uvcapp.ICameraHelper.StateCallback {
@@ -2961,10 +2966,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 
                                 override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
-                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen)")
+                                    val alreadySwitched = sourceSwitchedSynchronously.get()
+                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen, alreadySwitched=$alreadySwitched)")
                                     
-                                    // If this is first open after permission grant, switch video source now
-                                    if (isFirstOpen) {
+                                    // If this is first open after permission grant AND we haven't already switched
+                                    // synchronously (i.e., permission was just granted via dialog), switch video source now.
+                                    if (isFirstOpen && !alreadySwitched) {
                                         Log.i(TAG, "First open after permission grant - switching to UVC source")
                                         viewModelScope.launch {
                                             try {
@@ -2993,6 +3000,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
                                             }
                                         }
+                                    } else if (isFirstOpen) {
+                                        Log.d(TAG, "Skipping source switch in onDeviceOpen - already switched synchronously")
                                     }
                                     
                                     // Open the camera after device is opened - use saved video config if available
@@ -3082,6 +3091,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // We have permission - proceed with source switch
                         Log.d(TAG, "USB permission already granted - switching source now")
+                        
+                        // Mark that we're doing the source switch synchronously (not in onDeviceOpen)
+                        sourceSwitchedSynchronously.set(true)
                         
                         // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
                         _userToggledUvc.postValue(true)
