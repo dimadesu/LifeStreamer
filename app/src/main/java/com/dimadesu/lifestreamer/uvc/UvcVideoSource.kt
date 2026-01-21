@@ -117,15 +117,26 @@ class UvcVideoSource(
                 // Update cached format from current camera settings
                 updateCachedFormat()
 
-                // Attach camera to appropriate surface
+                // Add surface for streaming - if camera is already previewing, 
+                // the surface will start receiving frames. If camera isn't open yet,
+                // the surface will be used when onCameraOpen->startPreview() is called.
                 if (surfaceProcessor != null && inputSurface != null) {
-                    Log.d(TAG, "Attaching camera to surface processor input")
+                    Log.d(TAG, "Adding surface processor input for streaming")
                     cameraHelper.addSurface(inputSurface, true)
-                    cameraHelper.startPreview()
+                    // If camera is already open and running, start preview to ensure frames flow
+                    try {
+                        cameraHelper.startPreview()
+                    } catch (e: Exception) {
+                        Log.d(TAG, "startPreview in startStream: ${e.message} (may be normal if camera not ready)")
+                    }
                 } else if (outputSurface != null) {
-                    Log.d(TAG, "Attaching camera directly to output surface")
+                    Log.d(TAG, "Adding output surface directly for streaming")
                     cameraHelper.addSurface(outputSurface, true)
-                    cameraHelper.startPreview()
+                    try {
+                        cameraHelper.startPreview()
+                    } catch (e: Exception) {
+                        Log.d(TAG, "startPreview in startStream: ${e.message} (may be normal if camera not ready)")
+                    }
                 } else {
                     Log.w(TAG, "No surface available for streaming")
                 }
@@ -230,11 +241,11 @@ class UvcVideoSource(
             try {
                 cancelPendingCleanup("setOutput")
                 
-                // Attach camera to input surface if processor is ready
+                // Just set up the surface - don't start preview yet.
+                // The camera might not be open yet; onCameraOpen callback will start preview.
                 inputSurface?.let { input ->
                     cameraHelper.addSurface(input, true)
-                    cameraHelper.startPreview()
-                    Log.d(TAG, "Attached camera to surface processor input")
+                    Log.d(TAG, "Added input surface to CameraHelper (preview will start when camera opens)")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting output: ${e.message}", e)
@@ -261,15 +272,15 @@ class UvcVideoSource(
 
             mainHandler.post {
                 try {
-                    // Start camera preview to appropriate surface
+                    // Just add the surface - don't call cameraHelper.startPreview() here.
+                    // The camera might not be open yet; onCameraOpen callback handles starting preview.
+                    // If camera is already open and streaming, adding the surface will receive frames.
                     if (surfaceProcessor != null && inputSurface != null) {
                         cameraHelper.addSurface(inputSurface, false)
-                        cameraHelper.startPreview()
-                        Log.d(TAG, "Started preview with surface processor")
+                        Log.d(TAG, "Added input surface for preview (camera will start when ready)")
                     } else if (previewSurface != null) {
                         cameraHelper.addSurface(previewSurface, false)
-                        cameraHelper.startPreview()
-                        Log.d(TAG, "Started preview directly")
+                        Log.d(TAG, "Added preview surface directly (camera will start when ready)")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error starting preview: ${e.message}", e)
