@@ -12,8 +12,8 @@ import io.github.thibaultbee.streampack.core.elements.processing.video.source.IS
 import io.github.thibaultbee.streampack.core.elements.processing.video.ISurfaceProcessorInternal
 import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
 import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.SurfaceOutput
-import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.AspectRatioMode
 import io.github.thibaultbee.streampack.core.elements.sources.video.AbstractPreviewableSource
+import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.VideoSourceConfig
 import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
@@ -93,7 +93,7 @@ class UvcVideoSource(
     // Pending cleanup management
     private var pendingCleanupRunnable: Runnable? = null
 
-    override val timestampOffsetInNs: Long = 0L
+    override val timebase = Timebase.UPTIME
 
     init {
         Log.d(TAG, "UvcVideoSource initialized")
@@ -168,7 +168,7 @@ class UvcVideoSource(
         updateCachedFormat()
     }
 
-    override fun release() {
+    override suspend fun release() {
         Log.d(TAG, "release() called")
         mainHandler.post {
             try {
@@ -375,7 +375,7 @@ class UvcVideoSource(
                 // Create input surface for camera
                 val width = cachedWidth.get()
                 val height = cachedHeight.get()
-                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timestampOffsetInNs)
+                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timebase)
 
                 Log.d(TAG, "Created input surface: $inputSurface with size ${width}x${height}")
 
@@ -404,7 +404,7 @@ class UvcVideoSource(
             outputSurface?.let { surface ->
                 if (outputSurfaceOutput != null) {
                     try {
-                        val existingSurface = outputSurfaceOutput?.descriptor?.surface
+                        val existingSurface = outputSurfaceOutput?.targetSurface
                         if (existingSurface != surface) {
                             processor.removeOutputSurface(outputSurfaceOutput!!)
                             outputSurfaceOutput = null
@@ -415,23 +415,14 @@ class UvcVideoSource(
                 }
 
                 if (outputSurfaceOutput == null) {
-                    val surfaceDescriptor = SurfaceDescriptor(
-                        surface = surface,
-                        resolution = Size(width, height),
-                        targetRotation = 0,
-                        isEncoderInputSurface = true
-                    )
-                    val transformationInfo = SurfaceOutput.TransformationInfo(
-                        aspectRatioMode = AspectRatioMode.PRESERVE,
-                        targetRotation = 0,
-                        cropRect = Rect(0, 0, width, height),
-                        needMirroring = false,
-                        infoProvider = _infoProviderFlow.value
-                    )
                     outputSurfaceOutput = SurfaceOutput(
-                        surfaceDescriptor,
-                        { _isStreamingFlow.value },
-                        transformationInfo
+                        targetSurface = surface,
+                        targetResolution = Size(width, height),
+                        targetRotation = 0,
+                        isStreaming = { _isStreamingFlow.value },
+                        sourceResolution = Size(width, height),
+                        needMirroring = false,
+                        sourceInfoProvider = _infoProviderFlow.value
                     )
                     processor.addOutputSurface(outputSurfaceOutput!!)
                     Log.d(TAG, "Added output surface to processor")
@@ -442,7 +433,7 @@ class UvcVideoSource(
             previewSurface?.let { surface ->
                 if (previewSurfaceOutput != null) {
                     try {
-                        val existingSurface = previewSurfaceOutput?.descriptor?.surface
+                        val existingSurface = previewSurfaceOutput?.targetSurface
                         if (existingSurface != surface) {
                             processor.removeOutputSurface(previewSurfaceOutput!!)
                             previewSurfaceOutput = null
@@ -453,23 +444,14 @@ class UvcVideoSource(
                 }
 
                 if (previewSurfaceOutput == null) {
-                    val surfaceDescriptor = SurfaceDescriptor(
-                        surface = surface,
-                        resolution = Size(width, height),
-                        targetRotation = 0,
-                        isEncoderInputSurface = false
-                    )
-                    val transformationInfo = SurfaceOutput.TransformationInfo(
-                        aspectRatioMode = AspectRatioMode.PRESERVE,
-                        targetRotation = 0,
-                        cropRect = Rect(0, 0, width, height),
-                        needMirroring = false,
-                        infoProvider = _infoProviderFlow.value
-                    )
                     previewSurfaceOutput = SurfaceOutput(
-                        surfaceDescriptor,
-                        { _isPreviewingFlow.value },
-                        transformationInfo
+                        targetSurface = surface,
+                        targetResolution = Size(width, height),
+                        targetRotation = 0,
+                        isStreaming = { _isPreviewingFlow.value },
+                        sourceResolution = Size(width, height),
+                        needMirroring = false,
+                        sourceInfoProvider = _infoProviderFlow.value
                     )
                     processor.addOutputSurface(previewSurfaceOutput!!)
                     Log.d(TAG, "Added preview surface to processor")

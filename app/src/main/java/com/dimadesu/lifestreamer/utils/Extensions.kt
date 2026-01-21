@@ -35,7 +35,8 @@ import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 
 @RequiresPermission(Manifest.permission.CAMERA)
 suspend fun IWithVideoSource.setNextCameraId(context: Context) {
-    val cameras = context.cameras
+    val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+    val cameras = cameraManager.cameraIdList.toList()
     val videoSource = videoInput?.sourceFlow?.value
 
     val newCameraId = if (videoSource is ICameraSource) {
@@ -50,15 +51,24 @@ suspend fun IWithVideoSource.setNextCameraId(context: Context) {
 
 @RequiresPermission(Manifest.permission.CAMERA)
 suspend fun IWithVideoSource.toggleBackToFront(context: Context) {
+    val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     val videoSource = videoInput?.sourceFlow?.value
     val cameras = if (videoSource is ICameraSource) {
-        if (context.isBackCamera(videoSource.cameraId)) {
-            context.frontCameras
+        val characteristics = cameraManager.getCameraCharacteristics(videoSource.cameraId)
+        val facing = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)
+        if (facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) {
+            cameraManager.cameraIdList.filter {
+                cameraManager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+            }
         } else {
-            context.backCameras
+            cameraManager.cameraIdList.filter {
+                cameraManager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+            }
         }
     } else {
-        context.frontCameras
+        cameraManager.cameraIdList.filter {
+            cameraManager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+        }
     }
 
     if (cameras.isNotEmpty()) {

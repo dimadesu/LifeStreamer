@@ -15,6 +15,7 @@
  */
 package com.dimadesu.lifestreamer.ui.settings
 
+import android.content.Context
 import android.media.AudioFormat
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -40,7 +41,7 @@ import com.dimadesu.lifestreamer.utils.dataStore
 import io.github.thibaultbee.streampack.core.elements.encoders.mediacodec.MediaCodecHelper
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameras
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.defaultCameraId
-import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFrameRateSupported
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFpsSupported
 import io.github.thibaultbee.streampack.core.streamers.infos.CameraStreamerConfigurationInfo
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
@@ -233,8 +234,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         videoFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
             val fps = (newValue as? String)?.toIntOrNull() ?: return@setOnPreferenceChangeListener true
-            val unsupportedCameras = requireContext().cameras.filter {
-                !requireContext().isFrameRateSupported(it, fps)
+            val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            val unsupportedCameras = cameraManager.cameraIdList.filter {
+                !cameraManager.getCameraCharacteristics(it).isFpsSupported(fps)
             }
             if (unsupportedCameras.isNotEmpty()) {
                 DialogUtils.showAlertDialog(
