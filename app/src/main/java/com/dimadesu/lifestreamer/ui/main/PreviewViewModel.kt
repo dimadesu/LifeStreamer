@@ -1340,7 +1340,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         ) == PackageManager.PERMISSION_GRANTED
                     ) {
                         config?.let {
-                            serviceStreamer?.setAudioConfig(it)
+                            try {
+                                serviceStreamer?.setAudioConfig(it)
+                            } catch (t: Throwable) {
+                                Log.e(TAG, "setAudioConfig failed", t)
+                                _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
+                            }
                         } ?: Log.i(TAG, "Audio is disabled")
                     }
                 }
@@ -1355,7 +1360,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
 
                     config?.let {
-                        serviceStreamer?.setVideoConfig(it)
+                        try {
+                            serviceStreamer?.setVideoConfig(it)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "setVideoConfig failed", t)
+                            _streamerErrorLiveData.postValue("setVideoConfig: ${t.message ?: t::class.java.simpleName}")
+                        }
                     } ?: Log.i(TAG, "Video is disabled")
                 }
         }
@@ -1495,7 +1505,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=${service?.isReconnecting?.value}", e)
                 // Don't show error dialog if reconnection will handle it
                 if (service?.isReconnecting?.value != true) {
-                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: e::class.java.simpleName}")
                 }
                 // Check if reconnection was triggered by the exception
                 if (service?.isReconnecting?.value == true) {
@@ -1601,7 +1611,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 service?.setStreamStatus(StreamStatus.STREAMING)
                 onSuccess()
             } catch (e: Throwable) {
-                val error = "Stream start failed: ${e.message ?: "Unknown error"}"
+                val error = "Stream start failed: ${e.message ?: e::class.java.simpleName}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
                 
                 // Check if user stopped manually - if so, don't trigger reconnection
