@@ -113,8 +113,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val mediaProjectionHelper = MediaProjectionHelper(application)
     private val buildStreamerUseCase = BuildStreamerUseCase(application, storageRepository)
 
+    // Dispatcher for camera/video source operations to avoid blocking Main thread with mutex
+    private val defaultDispatcher = Dispatchers.IO
+
     // Mutex to prevent race conditions on rapid start/stop operations
     private val streamOperationMutex = Mutex()
+
+    // Mutex to prevent race conditions on video source operations (camera switch, etc.)
+    private val videoSourceMutex = Mutex()
 
     // Service binding for background streaming
     /**
@@ -2281,8 +2287,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
          */
         val videoSource = streamer?.videoInput?.sourceFlow?.value
         if (videoSource is ICameraSource) {
-            viewModelScope.launch {
-                streamer?.toggleBackToFront(application)
+            viewModelScope.launch(defaultDispatcher) {
+                videoSourceMutex.withLock {
+                    streamer?.toggleBackToFront(application)
+                }
             }
         }
         return true
@@ -2304,16 +2312,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         val videoSource = currentStreamer.videoInput?.sourceFlow?.value
         if (videoSource is ICameraSource) {
-            viewModelScope.launch {
-                try {
-                    // Add delay before switching camera to allow previous camera to fully release
-                    // This prevents resource conflicts when hot-swapping cameras
-                    delay(300)
-                    currentStreamer.setNextCameraId(application)
-                    Log.i(TAG, "Camera toggled successfully")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to toggle camera", e)
-                    _streamerErrorLiveData.postValue("Camera toggle failed: ${e.message}")
+            viewModelScope.launch(defaultDispatcher) {
+                videoSourceMutex.withLock {
+                    try {
+                        // Add delay before switching camera to allow previous camera to fully release
+                        // This prevents resource conflicts when hot-swapping cameras
+                        delay(300)
+                        currentStreamer.setNextCameraId(application)
+                        Log.i(TAG, "Camera toggled successfully")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to toggle camera", e)
+                        _streamerErrorLiveData.postValue("Camera toggle failed: ${e.message}")
+                    }
                 }
             }
         } else {

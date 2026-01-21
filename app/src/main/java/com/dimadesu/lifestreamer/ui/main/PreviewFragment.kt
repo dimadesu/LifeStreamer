@@ -615,7 +615,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
         
-        requestCameraAndMicrophonePermissions()
+        // NOTE: Permission request moved to onResume() to fix preview freeze when quickly
+        // going to settings and back (StreamPack fix 78f1dc28c)
     }
 
     override fun onPause() {
@@ -635,6 +636,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
+        
+        // Request permissions in onResume() instead of onStart() to fix preview freeze
+        // when quickly going to settings and back (StreamPack fix 78f1dc28c)
+        requestCameraAndMicrophonePermissions()
         
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
