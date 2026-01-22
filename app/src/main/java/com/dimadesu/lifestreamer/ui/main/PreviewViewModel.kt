@@ -95,6 +95,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -3305,15 +3306,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                try {
+                settings.exposure.let {
                     viewModelScope.launch {
-                        if (settings.isActiveFlow.value) {
-                            settings.exposure.setCompensation((value / settings.exposure.availableCompensationStep.toFloat()).toInt())
+                        try {
+                            if (settings.isActiveFlow.value) {
+                                it.setCompensation((value / it.availableCompensationStep.toFloat()).toInt())
+                            }
+                            notifyPropertyChanged(BR.exposureCompensation)
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Setting exposure compensation failed (camera session may be closed): ${t.message}")
                         }
                     }
-                    notifyPropertyChanged(BR.exposureCompensation)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Setting exposure compensation failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
@@ -3325,21 +3328,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     val isZoomAvailable = MutableLiveData(false)
     val zoomRatioRange = MutableLiveData<Range<Float>>()
-    private var _zoomRatio: Float = 1f
     var zoomRatio: Float
-        @Bindable get() = _zoomRatio
+        @Bindable get() {
+            val settings = cameraSettings
+            return if (settings != null && settings.isActiveFlow.value) {
+                runBlocking {
+                    settings.zoom.getZoomRatio()
+                }
+            } else {
+                1f
+            }
+        }
         set(value) {
             cameraSettings?.let { settings ->
-                try {
-                    viewModelScope.launch {
+                viewModelScope.launch {
+                    try {
                         if (settings.isActiveFlow.value) {
                             settings.zoom.setZoomRatio(value)
-                            _zoomRatio = value
                         }
+                        notifyPropertyChanged(BR.zoomRatio)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Setting zoom failed (camera session may be closed): ${t.message}")
                     }
-                    notifyPropertyChanged(BR.zoomRatio)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Setting zoom failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
@@ -3397,15 +3407,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                try {
+                settings.focus.let {
                     viewModelScope.launch {
-                        if (settings.isActiveFlow.value) {
-                            settings.focus.setLensDistance(value)
+                        try {
+                            if (settings.isActiveFlow.value) {
+                                it.setLensDistance(value)
+                            }
+                            notifyPropertyChanged(BR.lensDistance)
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Setting lens distance failed (camera session may be closed): ${t.message}")
                         }
                     }
-                    notifyPropertyChanged(BR.lensDistance)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Setting lens distance failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
