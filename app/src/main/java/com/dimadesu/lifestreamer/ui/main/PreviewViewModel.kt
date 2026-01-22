@@ -3306,15 +3306,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                try {
+                settings.exposure.let {
                     viewModelScope.launch {
-                        if (settings.isActiveFlow.value) {
-                            settings.exposure.setCompensation((value / settings.exposure.availableCompensationStep.toFloat()).toInt())
+                        try {
+                            if (settings.isActiveFlow.value) {
+                                it.setCompensation((value / it.availableCompensationStep.toFloat()).toInt())
+                            }
+                            notifyPropertyChanged(BR.exposureCompensation)
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Setting exposure compensation failed (camera session may be closed): ${t.message}")
                         }
                     }
-                    notifyPropertyChanged(BR.exposureCompensation)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Setting exposure compensation failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
@@ -3405,15 +3407,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         set(value) {
             cameraSettings?.let { settings ->
-                try {
+                settings.focus.let {
                     viewModelScope.launch {
-                        if (settings.isActiveFlow.value) {
-                            settings.focus.setLensDistance(value)
+                        try {
+                            if (settings.isActiveFlow.value) {
+                                it.setLensDistance(value)
+                            }
+                            notifyPropertyChanged(BR.lensDistance)
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Setting lens distance failed (camera session may be closed): ${t.message}")
                         }
                     }
-                    notifyPropertyChanged(BR.lensDistance)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Setting lens distance failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
