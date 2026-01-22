@@ -615,7 +615,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
         
-        requestCameraAndMicrophonePermissions()
+        // NOTE: Permission request moved to onResume() to fix preview freeze when quickly
+        // going to settings and back (StreamPack fix 78f1dc28c)
     }
 
     override fun onPause() {
@@ -635,6 +636,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
+        
+        // Request permissions in onResume() instead of onStart() to fix preview freeze
+        // when quickly going to settings and back (StreamPack fix 78f1dc28c)
+        requestCameraAndMicrophonePermissions()
         
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
@@ -718,15 +723,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     @RequiresPermission(Manifest.permission.CAMERA)
     private fun inflateStreamerPreview() {
         val streamer = previewViewModel.streamerLiveData.value
-        if (streamer is SingleStreamer) {
+        if (streamer is IWithVideoSource) {
             inflateStreamerPreview(streamer)
         } else {
-            Log.e(TAG, "Can't start preview, streamer is not a SingleStreamer")
+            Log.e(TAG, "Can't start preview, streamer is not a video streamer")
         }
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
-    private fun inflateStreamerPreview(streamer: SingleStreamer) {
+    private fun inflateStreamerPreview(streamer: IWithVideoSource) {
         val preview = binding.preview
         // Set camera settings button when camera is started
         preview.listener = object : PreviewView.Listener {
@@ -740,130 +745,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         // If the preview already uses the same streamer, no need to set it again.
-        var assignedStreamer = false
-        if (preview.streamer == streamer) {
-            Log.d(TAG, "Preview already bound to streamer - skipping set")
-            assignedStreamer = true
-        } else {
-            // Set the streamer on the preview. Since all sources support dual output
-            // (preview + encoder), we can safely set the preview even if streaming is active.
-            // Wait till streamer exists to set it to the SurfaceView. Setting the
-            // `streamer` property requires the PreviewView to have its internal
-            // coroutine scope (set in onAttachedToWindow). If the view is not yet
-            // attached, posting the assignment ensures it happens on the UI
-            // thread after attachment, preventing "lifecycleScope is not
-            // available" errors.
+        lifecycleScope.launch {
             try {
-                if (preview.isAttachedToWindow) {
-                    preview.streamer = streamer
-                    assignedStreamer = true
-                } else {
-                    preview.post {
-                        try {
-                            preview.streamer = streamer
-                            Log.d(TAG, "Preview streamer assigned via post after attach")
-                            // Start preview asynchronously after assignment
-                            lifecycleScope.launch {
-                                try {
-                                    startPreviewWhenReady(preview, streamer, posted = true)
-                                } catch (t: Throwable) {
-                                    Log.w(TAG, "Posted preview start failed: ${t.message}")
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to set streamer on preview (posted): ${t.message}")
-                        }
-                    }
-                    // We optimistically mark as assigned since assignment will occur shortly
-                    assignedStreamer = true
-                }
-            } catch (e: IllegalArgumentException) {
-                // Defensive catch: if PreviewView rejects the streamer for any reason,
-                // log and continue without crashing.
-                Log.w(TAG, "Failed to set streamer on preview: ${e.message}")
+                preview.setVideoSourceProvider(streamer)
+                Log.d(TAG, "Preview streamer assigned")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to set video source provider: ${e.message}")
             }
-        }
-
-        // Only start preview if we actually have the streamer assigned (or it was
-        // already assigned). This prevents calling startPreview() when the view
-        // hasn't been bound and would throw "Streamer is not set".
-        // If streamer was assigned, try to start preview when both the UI surface and
-        // the video source are ready. This adds an app-level readiness gate without
-        // modifying StreamPack.
-        if (assignedStreamer && PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            // Retry starting preview locally without modifying StreamPack.
-            // Check common surface readiness signals (view attached + surface holder valid)
-            lifecycleScope.launch {
-                startPreviewWhenReady(preview, streamer, posted = false)
-            }
-        } else if (!PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
-            Log.e(TAG, "Camera permission not granted. Preview will not start.")
-        } else {
-            Log.d(TAG, "Preview streamer not assigned - skipping startPreview()")
-        }
-    }
-
-    // Helper: tries to start preview when the view is attached and sized.
-    // If `posted` is true, the helper logs slightly different messages to
-    // make the log traces easier to read. Behavior mirrors the previous loops
-    // (same delays and attempt counts).
-    private suspend fun startPreviewWhenReady(preview: PreviewView, streamer: SingleStreamer, posted: Boolean) {
-        val maxAttempts = if (posted) 6 else 10
-        var attempt = 1
-        var started = false
-        val source = streamer.videoInput?.sourceFlow?.value as? IPreviewableSource
-
-        while (attempt <= maxAttempts && !started) {
-            try {
-                val isAttached = preview.isAttachedToWindow
-                val hasSize = preview.width > 0 && preview.height > 0
-                val isVisible = preview.visibility == View.VISIBLE
-                val windowVisible = preview.windowVisibility == View.VISIBLE
-                
-                if (!isAttached || !hasSize) {
-                    val which = if (posted) "posted start" else "start"
-                    Log.d(TAG, "Preview not attached or has no size ($which attempt=$attempt) - will retry")
-                } else if (!isVisible || !windowVisible) {
-                    // View or window not visible yet - wait for it to become visible
-                    // This is normal during activity resume, so keep retrying
-                    Log.d(TAG, "Preview or window not visible yet (view=$isVisible, window=$windowVisible, attempt=$attempt) - will retry")
-                } else {
-                    // Wait a bit longer on first attempt to give the PreviewView's surfaceFlow time to update
-                    // This prevents race condition where surface is recreated but flow hasn't updated yet
-                    if (attempt == 1) {
-                        Log.d(TAG, "First attempt - waiting for surface flow to update")
-                        delay(150)
-                    }
-                    
-                    // Always try to start preview, even if source reports it's already previewing
-                    // This is important after returning from background when the surface was recreated
-                    // The camera session needs to be updated with the new surface reference
-                    try {
-                        preview.startPreview()
-                        Log.d(TAG, "Preview started (${if (posted) "posted " else ""}attempt=$attempt)")
-                        started = true
-                        break
-                    } catch (e: IllegalArgumentException) {
-                        // Surface was abandoned - likely window went invisible mid-operation
-                        if (e.message?.contains("Surface was abandoned") == true) {
-                            Log.w(TAG, "Surface abandoned during preview start (attempt=$attempt) - window may have gone invisible")
-                            // Continue retrying in case window becomes visible again
-                        } else {
-                            Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${e.message}")
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "startPreview ${if (posted) "(posted)" else ""} attempt=$attempt failed: ${t.message}")
-                    }
-                }
-            } catch (t: Throwable) {
-                Log.w(TAG, "Error checking/starting preview on attempt=$attempt: ${t.message}")
-            }
-            attempt++
-            delay(250)
-        }
-
-        if (!started) {
-            Log.e(TAG, "Failed to start preview after $maxAttempts attempts")
         }
     }
 

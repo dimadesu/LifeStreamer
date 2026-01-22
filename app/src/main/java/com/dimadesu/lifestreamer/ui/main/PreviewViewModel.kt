@@ -57,12 +57,13 @@ import com.dimadesu.lifestreamer.utils.setNextCameraId
 import com.dimadesu.lifestreamer.utils.toggleBackToFront
 import com.dimadesu.lifestreamer.utils.ReconnectTimer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameras
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameraManager
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.IAudioRecordSource
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSourceFactory
-import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFrameRateSupported
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFpsSupported
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
@@ -112,8 +113,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val mediaProjectionHelper = MediaProjectionHelper(application)
     private val buildStreamerUseCase = BuildStreamerUseCase(application, storageRepository)
 
+    // Dispatcher for camera/video source operations to avoid blocking Main thread with mutex
+    private val defaultDispatcher = Dispatchers.IO
+
     // Mutex to prevent race conditions on rapid start/stop operations
     private val streamOperationMutex = Mutex()
+
+    // Mutex to prevent race conditions on video source operations (camera switch, etc.)
+    private val videoSourceMutex = Mutex()
 
     // Service binding for background streaming
     /**
@@ -1063,7 +1070,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 ) == PackageManager.PERMISSION_GRANTED
             ) {
                 Log.i(TAG, "Camera permission granted, setting video source")
-                currentStreamer.setVideoSource(CameraSourceFactory())
+                currentStreamer.setVideoSource(CameraSourceFactory(application))
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }
@@ -1333,7 +1340,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         ) == PackageManager.PERMISSION_GRANTED
                     ) {
                         config?.let {
-                            serviceStreamer?.setAudioConfig(it)
+                            try {
+                                serviceStreamer?.setAudioConfig(it)
+                            } catch (t: Throwable) {
+                                Log.e(TAG, "setAudioConfig failed", t)
+                                _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
+                            }
                         } ?: Log.i(TAG, "Audio is disabled")
                     }
                 }
@@ -1348,7 +1360,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
 
                     config?.let {
-                        serviceStreamer?.setVideoConfig(it)
+                        try {
+                            serviceStreamer?.setVideoConfig(it)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "setVideoConfig failed", t)
+                            _streamerErrorLiveData.postValue("setVideoConfig: ${t.message ?: t::class.java.simpleName}")
+                        }
                     } ?: Log.i(TAG, "Video is disabled")
                 }
         }
@@ -1363,7 +1380,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             val currentStreamer = serviceStreamer
             if (currentStreamer?.videoInput?.sourceFlow?.value == null) {
-                currentStreamer?.setVideoSource(CameraSourceFactory())
+                currentStreamer?.setVideoSource(CameraSourceFactory(application))
             } else {
                 Log.i(TAG, "Camera source already set")
             }
@@ -1488,7 +1505,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "startStream failed: ${e.message}, isReconnecting=${service?.isReconnecting?.value}", e)
                 // Don't show error dialog if reconnection will handle it
                 if (service?.isReconnecting?.value != true) {
-                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: "Unknown error"}")
+                    _streamerErrorLiveData.postValue("startStream: ${e.message ?: e::class.java.simpleName}")
                 }
                 // Check if reconnection was triggered by the exception
                 if (service?.isReconnecting?.value == true) {
@@ -1594,7 +1611,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 service?.setStreamStatus(StreamStatus.STREAMING)
                 onSuccess()
             } catch (e: Throwable) {
-                val error = "Stream start failed: ${e.message ?: "Unknown error"}"
+                val error = "Stream start failed: ${e.message ?: e::class.java.simpleName}"
                 Log.e(TAG, "STREAM START EXCEPTION: $error", e)
                 
                 // Check if user stopped manually - if so, don't trigger reconnection
@@ -2280,8 +2297,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
          */
         val videoSource = streamer?.videoInput?.sourceFlow?.value
         if (videoSource is ICameraSource) {
-            viewModelScope.launch {
-                streamer?.toggleBackToFront(application)
+            viewModelScope.launch(defaultDispatcher) {
+                videoSourceMutex.withLock {
+                    streamer?.toggleBackToFront(application)
+                }
             }
         }
         return true
@@ -2303,16 +2322,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         val videoSource = currentStreamer.videoInput?.sourceFlow?.value
         if (videoSource is ICameraSource) {
-            viewModelScope.launch {
-                try {
-                    // Add delay before switching camera to allow previous camera to fully release
-                    // This prevents resource conflicts when hot-swapping cameras
-                    delay(300)
-                    currentStreamer.setNextCameraId(application)
-                    Log.i(TAG, "Camera toggled successfully")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to toggle camera", e)
-                    _streamerErrorLiveData.postValue("Camera toggle failed: ${e.message}")
+            viewModelScope.launch(defaultDispatcher) {
+                videoSourceMutex.withLock {
+                    try {
+                        // Add delay before switching camera to allow previous camera to fully release
+                        // This prevents resource conflicts when hot-swapping cameras
+                        delay(300)
+                        currentStreamer.setNextCameraId(application)
+                        Log.i(TAG, "Camera toggled successfully")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to toggle camera", e)
+                        _streamerErrorLiveData.postValue("Camera toggle failed: ${e.message}")
+                    }
                 }
             }
         } else {
@@ -2790,13 +2811,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Switch to camera sources - restore last used camera if available
                     val cameraId = lastUsedCameraId
-                    currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
-                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                     if (cameraId != null) {
+                        currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
                         Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) with BT-aware audio")
                     } else {
+                        currentStreamer.setVideoSource(CameraSourceFactory(application))
                         Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
                     }
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                     
                     // Re-add bitrate regulator if streaming with SRT
                     readdBitrateRegulatorIfNeeded()
@@ -2906,7 +2928,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Switch back to camera (audio unchanged)
                         delay(300)
-                        currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
+                        currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -2925,18 +2947,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         lastUsedCameraId = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
-                        // Clean up existing UVC camera helper if it exists (might be stale after UvcTestActivity)
-                        uvcCameraHelper?.let { existingHelper ->
-                            try {
-                                Log.d(TAG, "Releasing existing UVC camera helper")
-                                existingHelper.stopPreview()
-                                existingHelper.closeCamera()
-                                existingHelper.release()
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Error releasing existing helper: ${e.message}")
-                            }
-                            uvcCameraHelper = null
-                        }
+                        // Note: Don't try to cleanup old CameraHelper here - it was already released
+                        // when the UvcVideoSource was released by StreamPack during setVideoSource().
+                        // The CameraHelper's internal Handler thread is dead at this point.
+                        // Just clear our reference.
+                        uvcCameraHelper = null
+                        
+                        // Track whether we've already done the source switch synchronously
+                        // (when permission is already granted). This prevents double-switch
+                        // when onDeviceOpen is called. Use AtomicBoolean for thread-safe visibility.
+                        val sourceSwitchedSynchronously = java.util.concurrent.atomic.AtomicBoolean(false)
                         
                         // Always create a fresh CameraHelper instance
                         uvcCameraHelper = com.herohan.uvcapp.CameraHelper().apply {
@@ -2946,10 +2966,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 
                                 override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
-                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen)")
+                                    val alreadySwitched = sourceSwitchedSynchronously.get()
+                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen, alreadySwitched=$alreadySwitched)")
                                     
-                                    // If this is first open after permission grant, switch video source now
-                                    if (isFirstOpen) {
+                                    // If this is first open after permission grant AND we haven't already switched
+                                    // synchronously (i.e., permission was just granted via dialog), switch video source now.
+                                    if (isFirstOpen && !alreadySwitched) {
                                         Log.i(TAG, "First open after permission grant - switching to UVC source")
                                         viewModelScope.launch {
                                             try {
@@ -2978,6 +3000,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 _streamerErrorLiveData.postValue("Failed to switch to UVC: ${e.message}")
                                             }
                                         }
+                                    } else if (isFirstOpen) {
+                                        Log.d(TAG, "Skipping source switch in onDeviceOpen - already switched synchronously")
                                     }
                                     
                                     // Open the camera after device is opened - use saved video config if available
@@ -2988,8 +3012,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 
                                 override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
                                     Log.i(TAG, "UVC camera opened and ready")
-                                    // Camera is now ready and streaming
-                                    startPreview()
+                                    // Camera is now ready - notify the UvcVideoSource so it can
+                                    // re-add surfaces and start preview properly
+                                    val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    if (videoSource is UvcVideoSource) {
+                                        videoSource.onCameraReady()
+                                    } else {
+                                        // Fallback: just call startPreview on CameraHelper directly
+                                        Log.d(TAG, "Video source is not UvcVideoSource, calling startPreview directly")
+                                        startPreview()
+                                    }
                                 }
                                 
                                 override fun onCameraClose(device: android.hardware.usb.UsbDevice) {
@@ -3068,6 +3100,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // We have permission - proceed with source switch
                         Log.d(TAG, "USB permission already granted - switching source now")
                         
+                        // Mark that we're doing the source switch synchronously (not in onDeviceOpen)
+                        sourceSwitchedSynchronously.set(true)
+                        
                         // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
                         _userToggledUvc.postValue(true)
                         _userToggledRtmp.postValue(false)
@@ -3104,7 +3139,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         removeBitrateRegulatorIfNeeded()
                         
                         delay(300)
-                        currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameras.firstOrNull() ?: "0"))
+                        currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
@@ -3201,14 +3236,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isFlashAvailable = MutableLiveData(false)
     fun toggleFlash() {
         cameraSettings?.let {
-            try {
-                it.flash.enable = !it.flash.enable
-                
-                // Show toast with flash state
-                val message = if (it.flash.enable) "Torch: On" else "Torch: Off"
-                _toastMessageLiveData.postValue(message)
-            } catch (t: Throwable) {
-                Log.w(TAG, "toggleFlash failed (camera session may be closed): ${t.message}")
+            viewModelScope.launch {
+                try {
+                    val isCurrentlyEnabled = it.flash.isEnable
+                    it.flash.setIsEnable(!isCurrentlyEnabled)
+                    
+                    // Show toast with flash state
+                    val message = if (!isCurrentlyEnabled) "Torch: On" else "Torch: Off"
+                    _toastMessageLiveData.postValue(message)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "toggleFlash failed (camera session may be closed): ${t.message}")
+                }
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
     }
@@ -3216,17 +3254,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isAutoWhiteBalanceAvailable = MutableLiveData(false)
     fun toggleAutoWhiteBalanceMode() {
         cameraSettings?.let { settings ->
-            try {
-                val awbModes = settings.whiteBalance.availableAutoModes
-                val index = awbModes.indexOf(settings.whiteBalance.autoMode)
-                val newMode = awbModes[(index + 1) % awbModes.size]
-                settings.whiteBalance.autoMode = newMode
-                
-                // Show toast with white balance mode name
-                val modeName = getWhiteBalanceModeName(newMode)
-                _toastMessageLiveData.postValue("White Balance: $modeName")
-            } catch (t: Throwable) {
-                Log.w(TAG, "toggleAutoWhiteBalanceMode failed (camera session may be closed): ${t.message}")
+            viewModelScope.launch {
+                try {
+                    val awbModes = settings.whiteBalance.availableAutoModes
+                    val index = awbModes.indexOf(settings.whiteBalance.autoMode)
+                    val newMode = awbModes[(index + 1) % awbModes.size]
+                    settings.whiteBalance.setAutoMode(newMode)
+                    
+                    // Show toast with white balance mode name
+                    val modeName = getWhiteBalanceModeName(newMode)
+                    _toastMessageLiveData.postValue("White Balance: $modeName")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "toggleAutoWhiteBalanceMode failed (camera session may be closed): ${t.message}")
+                }
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
     }
@@ -3266,14 +3306,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         set(value) {
             cameraSettings?.let { settings ->
                 try {
-                    settings.exposure.let {
+                    viewModelScope.launch {
                         if (settings.isActiveFlow.value) {
-                            it.compensation = (value / it.availableCompensationStep.toFloat()).toInt()
+                            settings.exposure.setCompensation((value / settings.exposure.availableCompensationStep.toFloat()).toInt())
                         }
-                        notifyPropertyChanged(BR.exposureCompensation)
                     }
+                    notifyPropertyChanged(BR.exposureCompensation)
                 } catch (t: Throwable) {
-                    Log.w(TAG, "Setting exposure failed (camera session may be closed): ${t.message}")
+                    Log.w(TAG, "Setting exposure compensation failed (camera session may be closed): ${t.message}")
                 }
             } ?: Log.e(TAG, "Camera settings is not accessible")
         }
@@ -3285,20 +3325,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     val isZoomAvailable = MutableLiveData(false)
     val zoomRatioRange = MutableLiveData<Range<Float>>()
+    private var _zoomRatio: Float = 1f
     var zoomRatio: Float
-        @Bindable get() {
-            val settings = cameraSettings
-            return if (settings != null && settings.isActiveFlow.value) {
-                settings.zoom.zoomRatio
-            } else {
-                1f
-            }
-        }
+        @Bindable get() = _zoomRatio
         set(value) {
             cameraSettings?.let { settings ->
                 try {
-                    if (settings.isActiveFlow.value) {
-                        settings.zoom.zoomRatio = value
+                    viewModelScope.launch {
+                        if (settings.isActiveFlow.value) {
+                            settings.zoom.setZoomRatio(value)
+                            _zoomRatio = value
+                        }
                     }
                     notifyPropertyChanged(BR.zoomRatio)
                 } catch (t: Throwable) {
@@ -3310,23 +3347,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isAutoFocusModeAvailable = MutableLiveData(false)
     fun toggleAutoFocusMode() {
         cameraSettings?.let {
-            try {
-                val afModes = it.focus.availableAutoModes
-                val index = afModes.indexOf(it.focus.autoMode)
-                val newMode = afModes[(index + 1) % afModes.size]
-                it.focus.autoMode = newMode
-                
-                // Show toast with auto focus mode name
-                val modeName = getAutoFocusModeName(newMode)
-                _toastMessageLiveData.postValue("Focus: $modeName")
-                
-                if (it.focus.autoMode == CaptureResult.CONTROL_AF_MODE_OFF) {
-                    showLensDistanceSlider.postValue(true)
-                } else {
-                    showLensDistanceSlider.postValue(false)
+            viewModelScope.launch {
+                try {
+                    val afModes = it.focus.availableAutoModes
+                    val index = afModes.indexOf(it.focus.autoMode)
+                    val newMode = afModes[(index + 1) % afModes.size]
+                    it.focus.setAutoMode(newMode)
+                    
+                    // Show toast with auto focus mode name
+                    val modeName = getAutoFocusModeName(newMode)
+                    _toastMessageLiveData.postValue("Focus: $modeName")
+                    
+                    if (it.focus.autoMode == CaptureResult.CONTROL_AF_MODE_OFF) {
+                        showLensDistanceSlider.postValue(true)
+                    } else {
+                        showLensDistanceSlider.postValue(false)
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "toggleAutoFocusMode failed (camera session may be closed): ${t.message}")
                 }
-            } catch (t: Throwable) {
-                Log.w(TAG, "toggleAutoFocusMode failed (camera session may be closed): ${t.message}")
             }
         } ?: Log.e(TAG, "Camera settings is not accessible")
     }
@@ -3359,12 +3398,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         set(value) {
             cameraSettings?.let { settings ->
                 try {
-                    settings.focus.let {
+                    viewModelScope.launch {
                         if (settings.isActiveFlow.value) {
-                            it.lensDistance = value
+                            settings.focus.setLensDistance(value)
                         }
-                        notifyPropertyChanged(BR.lensDistance)
                     }
+                    notifyPropertyChanged(BR.lensDistance)
                 } catch (t: Throwable) {
                     Log.w(TAG, "Setting lens distance failed (camera session may be closed): ${t.message}")
                 }
@@ -3388,11 +3427,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val settings = videoSource.settings
         // Set optical stabilization first
         // Do not set both video and optical stabilization at the same time
-        if (settings.isActiveFlow.value) {
-            if (settings.stabilization.isOpticalAvailable) {
-                settings.stabilization.enableOptical = true
-            } else {
-                settings.stabilization.enableVideo = true
+        viewModelScope.launch {
+            if (settings.isActiveFlow.value) {
+                if (settings.stabilization.isOpticalAvailable) {
+                    settings.stabilization.setIsEnableOptical(true)
+                } else {
+                    settings.stabilization.setIsEnableVideo(true)
+                }
             }
         }
 

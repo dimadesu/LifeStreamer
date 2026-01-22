@@ -23,10 +23,9 @@ import androidx.media3.common.VideoSize
 import io.github.thibaultbee.streampack.core.elements.processing.video.ISurfaceProcessorInternal
 import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
 import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.SurfaceOutput
-import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.ViewPortUtils
-import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.AspectRatioMode
 import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
 import io.github.thibaultbee.streampack.core.pipelines.outputs.SurfaceDescriptor
+import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
 import android.graphics.Rect
 
 class RTMPVideoSource (
@@ -36,6 +35,8 @@ class RTMPVideoSource (
     companion object {
         private const val TAG = "RTMPVideoSource"
     }
+
+    override val timebase = Timebase.UPTIME
 
     init {
         // Register format listener immediately to catch format changes as soon as possible
@@ -255,7 +256,7 @@ class RTMPVideoSource (
         }
     }
 
-    override fun release() {
+    override suspend fun release() {
         Handler(Looper.getMainLooper()).post {
             try {
                 // Clear surfaces first
@@ -305,9 +306,6 @@ class RTMPVideoSource (
     }
 
     // AbstractPreviewableSource required members (stubbed for RTMP source)
-    override val timestampOffsetInNs: Long
-        get() = 0L
-
     private val _isPreviewingFlow = MutableStateFlow(false)
     override val isPreviewingFlow: StateFlow<Boolean>
         get() = _isPreviewingFlow
@@ -575,7 +573,7 @@ class RTMPVideoSource (
                 // Create input surface that ExoPlayer will render to
                 val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
                 val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
-                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timestampOffsetInNs)
+                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timebase)
 
                 Log.d(TAG, "Created input surface: $inputSurface with size ${width}x${height}")
 
@@ -610,7 +608,7 @@ class RTMPVideoSource (
                 // remove and recreate it so the processor uses the new Surface.
                 if (outputSurfaceOutput != null) {
                     try {
-                        val existingSurface = outputSurfaceOutput?.descriptor?.surface
+                        val existingSurface = outputSurfaceOutput?.targetSurface
                         if (existingSurface != surface) {
                             processor.removeOutputSurface(outputSurfaceOutput!!)
                             outputSurfaceOutput = null
@@ -623,23 +621,14 @@ class RTMPVideoSource (
                 if (outputSurfaceOutput == null) {
                     val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
-                    val surfaceDescriptor = SurfaceDescriptor(
-                        surface = surface,
-                        resolution = Size(width, height),
-                        targetRotation = 0,
-                        isEncoderInputSurface = true
-                    )
-                    val transformationInfo = SurfaceOutput.TransformationInfo(
-                        aspectRatioMode = AspectRatioMode.PRESERVE,
-                        targetRotation = 0,
-                        cropRect = Rect(0, 0, width, height),
-                        needMirroring = false,
-                        infoProvider = _infoProviderFlow.value
-                    )
                     outputSurfaceOutput = SurfaceOutput(
-                        surfaceDescriptor,
-                        { _isStreamingFlow.value },
-                        transformationInfo
+                        targetSurface = surface,
+                        targetResolution = Size(width, height),
+                        targetRotation = 0,
+                        isStreaming = { _isStreamingFlow.value },
+                        sourceResolution = Size(width, height),
+                        needMirroring = false,
+                        sourceInfoProvider = _infoProviderFlow.value
                     )
                     processor.addOutputSurface(outputSurfaceOutput!!)
                     Log.d(TAG, "Added output surface to processor: $surface")
@@ -653,7 +642,7 @@ class RTMPVideoSource (
                 // new Surface instance.
                 if (previewSurfaceOutput != null) {
                     try {
-                        val existingSurface = previewSurfaceOutput?.descriptor?.surface
+                        val existingSurface = previewSurfaceOutput?.targetSurface
                         if (existingSurface != surface) {
                             processor.removeOutputSurface(previewSurfaceOutput!!)
                             previewSurfaceOutput = null
@@ -666,23 +655,14 @@ class RTMPVideoSource (
                 if (previewSurfaceOutput == null) {
                     val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
-                    val surfaceDescriptor = SurfaceDescriptor(
-                        surface = surface,
-                        resolution = Size(width, height),
-                        targetRotation = 0,
-                        isEncoderInputSurface = false
-                    )
-                    val transformationInfo = SurfaceOutput.TransformationInfo(
-                        aspectRatioMode = AspectRatioMode.PRESERVE,
-                        targetRotation = 0,
-                        cropRect = Rect(0, 0, width, height),
-                        needMirroring = false,
-                        infoProvider = _infoProviderFlow.value
-                    )
                     previewSurfaceOutput = SurfaceOutput(
-                        surfaceDescriptor,
-                        { _isPreviewingFlow.value },
-                        transformationInfo
+                        targetSurface = surface,
+                        targetResolution = Size(width, height),
+                        targetRotation = 0,
+                        isStreaming = { _isPreviewingFlow.value },
+                        sourceResolution = Size(width, height),
+                        needMirroring = false,
+                        sourceInfoProvider = _infoProviderFlow.value
                     )
                     processor.addOutputSurface(previewSurfaceOutput!!)
                     Log.d(TAG, "Added preview surface to processor: $surface")

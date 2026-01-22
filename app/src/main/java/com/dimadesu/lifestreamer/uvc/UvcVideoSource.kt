@@ -12,8 +12,8 @@ import io.github.thibaultbee.streampack.core.elements.processing.video.source.IS
 import io.github.thibaultbee.streampack.core.elements.processing.video.ISurfaceProcessorInternal
 import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
 import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.SurfaceOutput
-import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.AspectRatioMode
 import io.github.thibaultbee.streampack.core.elements.sources.video.AbstractPreviewableSource
+import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.VideoSourceConfig
 import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
@@ -93,12 +93,45 @@ class UvcVideoSource(
     // Pending cleanup management
     private var pendingCleanupRunnable: Runnable? = null
 
-    override val timestampOffsetInNs: Long = 0L
+    // Track if this source has been released to avoid calling methods on dead CameraHelper
+    @Volatile
+    private var isReleased = false
+
+    // Track if camera is ready (opened)
+    @Volatile
+    private var isCameraReady = false
+
+    override val timebase = Timebase.UPTIME
 
     init {
         Log.d(TAG, "UvcVideoSource initialized")
         // Get initial camera format if available
         updateCachedFormat()
+    }
+
+    /**
+     * Called when the UVC camera has opened and is ready to stream.
+     * This re-adds surfaces and starts the preview to ensure frames flow properly.
+     */
+    fun onCameraReady() {
+        Log.d(TAG, "onCameraReady() called")
+        isCameraReady = true
+        
+        mainHandler.post {
+            try {
+                // Re-add the input surface and start preview now that camera is ready
+                inputSurface?.let { surface ->
+                    Log.d(TAG, "Re-adding input surface after camera ready")
+                    cameraHelper.addSurface(surface, true)
+                    cameraHelper.startPreview()
+                    Log.i(TAG, "Camera preview started after camera ready")
+                } ?: run {
+                    Log.w(TAG, "No input surface available in onCameraReady")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onCameraReady: ${e.message}", e)
+            }
+        }
     }
 
     override suspend fun startStream() {
@@ -113,15 +146,26 @@ class UvcVideoSource(
                 // Update cached format from current camera settings
                 updateCachedFormat()
 
-                // Attach camera to appropriate surface
+                // Add surface for streaming - if camera is already previewing, 
+                // the surface will start receiving frames. If camera isn't open yet,
+                // the surface will be used when onCameraOpen->startPreview() is called.
                 if (surfaceProcessor != null && inputSurface != null) {
-                    Log.d(TAG, "Attaching camera to surface processor input")
+                    Log.d(TAG, "Adding surface processor input for streaming")
                     cameraHelper.addSurface(inputSurface, true)
-                    cameraHelper.startPreview()
+                    // If camera is already open and running, start preview to ensure frames flow
+                    try {
+                        cameraHelper.startPreview()
+                    } catch (e: Exception) {
+                        Log.d(TAG, "startPreview in startStream: ${e.message} (may be normal if camera not ready)")
+                    }
                 } else if (outputSurface != null) {
-                    Log.d(TAG, "Attaching camera directly to output surface")
+                    Log.d(TAG, "Adding output surface directly for streaming")
                     cameraHelper.addSurface(outputSurface, true)
-                    cameraHelper.startPreview()
+                    try {
+                        cameraHelper.startPreview()
+                    } catch (e: Exception) {
+                        Log.d(TAG, "startPreview in startStream: ${e.message} (may be normal if camera not ready)")
+                    }
                 } else {
                     Log.w(TAG, "No surface available for streaming")
                 }
@@ -168,8 +212,15 @@ class UvcVideoSource(
         updateCachedFormat()
     }
 
-    override fun release() {
+    override suspend fun release() {
         Log.d(TAG, "release() called")
+        
+        // Mark as released FIRST to prevent any pending operations
+        isReleased = true
+        
+        // Cancel any pending cleanup to avoid double-release
+        cancelPendingCleanup("release")
+        
         mainHandler.post {
             try {
                 // Stop camera preview
@@ -219,11 +270,11 @@ class UvcVideoSource(
             try {
                 cancelPendingCleanup("setOutput")
                 
-                // Attach camera to input surface if processor is ready
+                // Just set up the surface - don't start preview yet.
+                // The camera might not be open yet; onCameraOpen callback will start preview.
                 inputSurface?.let { input ->
                     cameraHelper.addSurface(input, true)
-                    cameraHelper.startPreview()
-                    Log.d(TAG, "Attached camera to surface processor input")
+                    Log.d(TAG, "Added input surface to CameraHelper (preview will start when camera opens)")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting output: ${e.message}", e)
@@ -250,15 +301,15 @@ class UvcVideoSource(
 
             mainHandler.post {
                 try {
-                    // Start camera preview to appropriate surface
+                    // Just add the surface - don't call cameraHelper.startPreview() here.
+                    // The camera might not be open yet; onCameraOpen callback handles starting preview.
+                    // If camera is already open and streaming, adding the surface will receive frames.
                     if (surfaceProcessor != null && inputSurface != null) {
                         cameraHelper.addSurface(inputSurface, false)
-                        cameraHelper.startPreview()
-                        Log.d(TAG, "Started preview with surface processor")
+                        Log.d(TAG, "Added input surface for preview (camera will start when ready)")
                     } else if (previewSurface != null) {
                         cameraHelper.addSurface(previewSurface, false)
-                        cameraHelper.startPreview()
-                        Log.d(TAG, "Started preview directly")
+                        Log.d(TAG, "Added preview surface directly (camera will start when ready)")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error starting preview: ${e.message}", e)
@@ -375,7 +426,7 @@ class UvcVideoSource(
                 // Create input surface for camera
                 val width = cachedWidth.get()
                 val height = cachedHeight.get()
-                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timestampOffsetInNs)
+                inputSurface = surfaceProcessor!!.createInputSurface(Size(width, height), timebase)
 
                 Log.d(TAG, "Created input surface: $inputSurface with size ${width}x${height}")
 
@@ -404,7 +455,7 @@ class UvcVideoSource(
             outputSurface?.let { surface ->
                 if (outputSurfaceOutput != null) {
                     try {
-                        val existingSurface = outputSurfaceOutput?.descriptor?.surface
+                        val existingSurface = outputSurfaceOutput?.targetSurface
                         if (existingSurface != surface) {
                             processor.removeOutputSurface(outputSurfaceOutput!!)
                             outputSurfaceOutput = null
@@ -415,23 +466,14 @@ class UvcVideoSource(
                 }
 
                 if (outputSurfaceOutput == null) {
-                    val surfaceDescriptor = SurfaceDescriptor(
-                        surface = surface,
-                        resolution = Size(width, height),
-                        targetRotation = 0,
-                        isEncoderInputSurface = true
-                    )
-                    val transformationInfo = SurfaceOutput.TransformationInfo(
-                        aspectRatioMode = AspectRatioMode.PRESERVE,
-                        targetRotation = 0,
-                        cropRect = Rect(0, 0, width, height),
-                        needMirroring = false,
-                        infoProvider = _infoProviderFlow.value
-                    )
                     outputSurfaceOutput = SurfaceOutput(
-                        surfaceDescriptor,
-                        { _isStreamingFlow.value },
-                        transformationInfo
+                        targetSurface = surface,
+                        targetResolution = Size(width, height),
+                        targetRotation = 0,
+                        isStreaming = { _isStreamingFlow.value },
+                        sourceResolution = Size(width, height),
+                        needMirroring = false,
+                        sourceInfoProvider = _infoProviderFlow.value
                     )
                     processor.addOutputSurface(outputSurfaceOutput!!)
                     Log.d(TAG, "Added output surface to processor")
@@ -442,7 +484,7 @@ class UvcVideoSource(
             previewSurface?.let { surface ->
                 if (previewSurfaceOutput != null) {
                     try {
-                        val existingSurface = previewSurfaceOutput?.descriptor?.surface
+                        val existingSurface = previewSurfaceOutput?.targetSurface
                         if (existingSurface != surface) {
                             processor.removeOutputSurface(previewSurfaceOutput!!)
                             previewSurfaceOutput = null
@@ -453,23 +495,14 @@ class UvcVideoSource(
                 }
 
                 if (previewSurfaceOutput == null) {
-                    val surfaceDescriptor = SurfaceDescriptor(
-                        surface = surface,
-                        resolution = Size(width, height),
-                        targetRotation = 0,
-                        isEncoderInputSurface = false
-                    )
-                    val transformationInfo = SurfaceOutput.TransformationInfo(
-                        aspectRatioMode = AspectRatioMode.PRESERVE,
-                        targetRotation = 0,
-                        cropRect = Rect(0, 0, width, height),
-                        needMirroring = false,
-                        infoProvider = _infoProviderFlow.value
-                    )
                     previewSurfaceOutput = SurfaceOutput(
-                        surfaceDescriptor,
-                        { _isPreviewingFlow.value },
-                        transformationInfo
+                        targetSurface = surface,
+                        targetResolution = Size(width, height),
+                        targetRotation = 0,
+                        isStreaming = { _isPreviewingFlow.value },
+                        sourceResolution = Size(width, height),
+                        needMirroring = false,
+                        sourceInfoProvider = _infoProviderFlow.value
                     )
                     processor.addOutputSurface(previewSurfaceOutput!!)
                     Log.d(TAG, "Added preview surface to processor")
@@ -490,6 +523,11 @@ class UvcVideoSource(
         cancelPendingCleanup("scheduling new cleanup")
         val runnable = Runnable {
             try {
+                // Don't execute cleanup if already released
+                if (isReleased) {
+                    Log.d(TAG, "Skipping scheduled cleanup - already released")
+                    return@Runnable
+                }
                 action()
             } catch (e: Exception) {
                 Log.e(TAG, "Error in scheduled cleanup: ${e.message}", e)
