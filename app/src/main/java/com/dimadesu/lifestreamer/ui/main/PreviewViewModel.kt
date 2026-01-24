@@ -2576,6 +2576,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         monitorRtmpConnection(player)
                         // Reset guard flag when successfully reconnected
                         isHandlingDisconnection = false
+                        // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                        viewModelScope.launch {
+                            readdBitrateRegulatorIfNeeded()
+                        }
                     }
                 )
             } catch (e: Exception) {
@@ -2718,7 +2722,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         streamingMediaProjection = streamingMediaProjection,
                                         postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                                         postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                                        onRtmpConnected = { player -> monitorRtmpConnection(player) }
+                                        onRtmpConnected = { player -> 
+                                            monitorRtmpConnection(player)
+                                            // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                                            viewModelScope.launch {
+                                                readdBitrateRegulatorIfNeeded()
+                                            }
+                                        }
                                     )
                                 }
                             }
@@ -2751,11 +2761,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             streamingMediaProjection = streamingMediaProjection,
                             postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                             postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                            onRtmpConnected = { player -> monitorRtmpConnection(player) }
+                            onRtmpConnected = { player -> 
+                                monitorRtmpConnection(player)
+                                // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                                viewModelScope.launch {
+                                    readdBitrateRegulatorIfNeeded()
+                                }
+                            }
                         )
-                        
-                        // Re-add bitrate regulator if streaming with SRT
-                        readdBitrateRegulatorIfNeeded()
                     }
                 }
                 else -> {
