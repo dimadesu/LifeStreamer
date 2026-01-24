@@ -4,7 +4,7 @@ Live streaming app for Android designed for IRL streaming based on [StreamPack S
 
 ## Become alpha tester
 
-To download app from Google Play store please join alpha testing first. This will also help to eventually publish app publicly. More details [here](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566).
+To download app from Google Play Store please join alpha testing first. This will also help to eventually publish app publicly. More details [here](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566).
 
 ## Features
 
