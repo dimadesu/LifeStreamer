@@ -65,7 +65,7 @@ If you already have older .apk version from GitHub installed, you need to uninst
 
 I used to publish only "debug" builds on GitHub. It was possible to install new version as an update on top of the old one without losing settings.
 
-Once you switch over to "release" builds, it will be possible to update w/o losing settings too.
+Once you switch over to "release" builds, it will be possible to update without losing settings (as long as you keep using "release" builds).
 
 ## My goals
 
