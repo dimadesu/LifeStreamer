@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import com.dimadesu.lifestreamer.audio.BluetoothAudioSource
 import com.dimadesu.lifestreamer.audio.ScoOrchestrator
 
 /**
@@ -1463,7 +1464,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
     /**
      * Stop audio passthrough.
-     * Delegates Bluetooth/SCO cleanup to BluetoothAudioManager.
+     * Delegates Bluetooth/SCO cleanup to BluetoothAudioManager only if streaming is not using BT.
      */
     fun stopAudioPassthrough() {
         serviceScope.launch(Dispatchers.Default) {
@@ -1472,8 +1473,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 _isPassthroughRunning.tryEmit(false)
                 Log.i(TAG, "Audio passthrough stopped")
                 
-                // Stop SCO if started for passthrough
-                bluetoothAudioManager.stopScoForPassthrough()
+                // Only stop SCO if streaming is NOT currently using Bluetooth
+                // Check if streamer is streaming and using BluetoothAudioSource
+                val isStreaming = streamer?.isStreamingFlow?.value == true
+                val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
+                val isStreamingWithBluetooth = isStreaming && currentAudioSource is BluetoothAudioSource
+                
+                if (isStreamingWithBluetooth) {
+                    Log.i(TAG, "Streaming is using Bluetooth - keeping SCO active")
+                } else {
+                    // Stop SCO if started for passthrough and streaming is not using BT
+                    bluetoothAudioManager.stopScoForPassthrough()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop audio passthrough: ${e.message}", e)
             }
