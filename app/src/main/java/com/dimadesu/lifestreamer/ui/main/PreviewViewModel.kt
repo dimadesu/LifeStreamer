@@ -622,6 +622,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.startStream()
             }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
+            
+            // Add bitrate regulator for SRT streams
+            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                if (bitrateRegulatorConfig != null) {
+                    val selectedMode = storageRepository.regulatorModeFlow.first()
+                    currentStreamer.addBitrateRegulatorController(
+                        AdaptiveSrtBitrateRegulatorController.Factory(
+                            bitrateRegulatorConfig = bitrateRegulatorConfig,
+                            mode = selectedMode
+                        )
+                    )
+                }
+            }
+            
             true
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
@@ -705,21 +720,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 service?.triggerBluetoothMicActivation()
             } else {
                 Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
-            }
-            
-            // Add bitrate regulator for SRT streams
-            if (descriptor.type.sinkType == MediaSinkType.SRT) {
-                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                if (bitrateRegulatorConfig != null) {
-                    Log.i(TAG, "doStartStream: Adding bitrate regulator controller")
-                    val selectedMode = storageRepository.regulatorModeFlow.first()
-                    currentStreamer.addBitrateRegulatorController(
-                        AdaptiveSrtBitrateRegulatorController.Factory(
-                            bitrateRegulatorConfig = bitrateRegulatorConfig,
-                            mode = selectedMode
-                        )
-                    )
-                }
             }
             
             return true
@@ -2576,6 +2576,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         monitorRtmpConnection(player)
                         // Reset guard flag when successfully reconnected
                         isHandlingDisconnection = false
+                        // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                        viewModelScope.launch {
+                            readdBitrateRegulatorIfNeeded()
+                        }
                     }
                 )
             } catch (e: Exception) {
@@ -2718,7 +2722,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         streamingMediaProjection = streamingMediaProjection,
                                         postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                                         postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                                        onRtmpConnected = { player -> monitorRtmpConnection(player) }
+                                        onRtmpConnected = { player -> 
+                                            monitorRtmpConnection(player)
+                                            // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                                            viewModelScope.launch {
+                                                readdBitrateRegulatorIfNeeded()
+                                            }
+                                        }
                                     )
                                 }
                             }
@@ -2751,11 +2761,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             streamingMediaProjection = streamingMediaProjection,
                             postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                             postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                            onRtmpConnected = { player -> monitorRtmpConnection(player) }
+                            onRtmpConnected = { player -> 
+                                monitorRtmpConnection(player)
+                                // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                                viewModelScope.launch {
+                                    readdBitrateRegulatorIfNeeded()
+                                }
+                            }
                         )
-                        
-                        // Re-add bitrate regulator if streaming with SRT
-                        readdBitrateRegulatorIfNeeded()
                     }
                 }
                 else -> {
