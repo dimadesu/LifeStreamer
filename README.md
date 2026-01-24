@@ -49,9 +49,21 @@ See the [demo video on YouTube](https://www.youtube.com/watch?v=_zlWsQYxrE4).
 
 ## How to install
 
-For now, I'll be releasing APK files using [GitHub releases](https://github.com/dimadesu/LifeStreamer/releases).
+I'm releasing .apk files using [GitHub releases](https://github.com/dimadesu/LifeStreamer/releases).
 
-Open [GitHub releases page](https://github.com/dimadesu/LifeStreamer/releases) on your phone, download APK and install.
+Open [GitHub releases page](https://github.com/dimadesu/LifeStreamer/releases) on your phone, download .apk file and install.
+
+Alternatively, [sign up for alpha testing](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566) and download app from Google Play Store.
+
+⚠️ Note: I am in the process of switching GitHub releases to "release" builds from "debug" builds. They have much better performance.
+
+Starting from version [1.20.0](https://github.com/dimadesu/LifeStreamer/releases/tag/v1.20.0) I plan to publish "release" .apk builds via GitHub releases.
+
+If you already have older .apk version from GitHub installed, you need to uninstall previous "debug" version first before installing "release" .apk as they are incompatible. Settings from "debug" build cannot be transferred to "release" build.
+
+I used to publish only "debug" builds on GitHub. It was possible to install new version as an update on top of the old one without losing settings.
+
+Once you switch over to "release" builds it will be possible to update w/o losing settings too.
 
 ## My goals
 
