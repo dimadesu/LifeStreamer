@@ -622,6 +622,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.startStream()
             }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
+            
+            // Add bitrate regulator for SRT streams
+            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                if (bitrateRegulatorConfig != null) {
+                    val selectedMode = storageRepository.regulatorModeFlow.first()
+                    currentStreamer.addBitrateRegulatorController(
+                        AdaptiveSrtBitrateRegulatorController.Factory(
+                            bitrateRegulatorConfig = bitrateRegulatorConfig,
+                            mode = selectedMode
+                        )
+                    )
+                }
+            }
+            
             true
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "startServiceStreaming failed: Timeout opening connection to ${descriptor.uri}")
@@ -705,21 +720,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 service?.triggerBluetoothMicActivation()
             } else {
                 Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
-            }
-            
-            // Add bitrate regulator for SRT streams
-            if (descriptor.type.sinkType == MediaSinkType.SRT) {
-                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                if (bitrateRegulatorConfig != null) {
-                    Log.i(TAG, "doStartStream: Adding bitrate regulator controller")
-                    val selectedMode = storageRepository.regulatorModeFlow.first()
-                    currentStreamer.addBitrateRegulatorController(
-                        AdaptiveSrtBitrateRegulatorController.Factory(
-                            bitrateRegulatorConfig = bitrateRegulatorConfig,
-                            mode = selectedMode
-                        )
-                    )
-                }
             }
             
             return true
