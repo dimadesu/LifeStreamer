@@ -12,7 +12,7 @@ To download app from Google Play Store please join alpha testing first. This wil
 - Can use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
 - Can use feed from any RTMP or SRT server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
 - USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: phones can lower USB audio quality when USB video is used.
-- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. (Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings and bitrate.)
+- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. (Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings and bitrate. **Note: performance has improved significantly since switching from "debug" to "release" builds.**)
 - Aggressive infinite reconnect when app loses connection.
 - Audio monitoring for all audio sources.
 - Switch between all video and audio sources while streaming.
@@ -55,7 +55,9 @@ Open [GitHub releases page](https://github.com/dimadesu/LifeStreamer/releases) o
 
 Alternatively, [sign up for alpha testing](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566) and download app from Google Play Store.
 
-⚠️ Note: I am in the process of switching GitHub releases to "release" builds from "debug" builds. They have much better performance.
+### ⚠️ Note on "debug" VS. "release" builds
+
+I am in the process of switching GitHub releases to "release" builds from "debug" builds. They have much better performance. This actually fixed "background mode" performance issues.
 
 Starting from version [1.20.0](https://github.com/dimadesu/LifeStreamer/releases/tag/v1.20.0) I plan to publish "release" .apk builds via GitHub releases.
 
@@ -63,7 +65,7 @@ If you already have older .apk version from GitHub installed, you need to uninst
 
 I used to publish only "debug" builds on GitHub. It was possible to install new version as an update on top of the old one without losing settings.
 
-Once you switch over to "release" builds it will be possible to update w/o losing settings too.
+Once you switch over to "release" builds, it will be possible to update w/o losing settings too.
 
 ## My goals
 
