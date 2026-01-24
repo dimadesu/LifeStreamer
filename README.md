@@ -12,7 +12,7 @@ To download app from Google Play Store please join alpha testing first. This wil
 - Can use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
 - Can use feed from any RTMP or SRT server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
 - USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: phones can lower USB audio quality when USB video is used.
-- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. (Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings and bitrate. **Note: performance has improved significantly since switching from "debug" to "release" builds.**)
+- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings and bitrate. Note: Performance has improved significantly since switching from "debug" to "release" builds.
 - Aggressive infinite reconnect when app loses connection.
 - Audio monitoring for all audio sources.
 - Switch between all video and audio sources while streaming.
