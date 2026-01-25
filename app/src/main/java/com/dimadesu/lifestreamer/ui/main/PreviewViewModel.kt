@@ -23,6 +23,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.hardware.camera2.CaptureResult
 import android.media.projection.MediaProjection
@@ -878,6 +879,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // The factory creates mic source initially, and BluetoothAudioManager switches to BT if enabled
             Log.i(TAG, "Camera video detected, using ConditionalAudioSourceFactory (BT-aware)")
             currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+        }
+    }
+
+    /**
+     * Switch to bitmap fallback for UVC source disconnect.
+     * Only switches video - audio stays on microphone (already set for UVC).
+     */
+    private suspend fun switchToUvcBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
+        try {
+            // Add delay before switching sources to allow previous sources to fully release
+            kotlinx.coroutines.delay(300)
+            
+            // Set video to bitmap - audio stays unchanged (already on microphone for UVC)
+            streamer.setVideoSource(BitmapSourceFactory(bitmap))
+            Log.i(TAG, "Switched to UVC bitmap fallback (audio unchanged)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to set UVC bitmap fallback source: ${e.message}", e)
         }
     }
 
@@ -3132,11 +3150,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     Log.w(TAG, "UVC toggle is ON - switching to fallback (toggle stays ON)")
                                     viewModelScope.launch {
                                         try {
-                                            RtmpSourceSwitchHelper.switchToBitmapFallback(
+                                            // Use UVC-specific fallback that keeps microphone audio
+                                            // (not MediaProjection which is for RTMP player audio)
+                                            switchToUvcBitmapFallback(
                                                 currentStreamer,
-                                                testBitmap,
-                                                streamingMediaProjection,
-                                                mediaProjectionHelper
+                                                testBitmap
                                             )
                                             // Keep UVC toggle ON - user can plug cable back in
                                             // and toggle will reconnect automatically

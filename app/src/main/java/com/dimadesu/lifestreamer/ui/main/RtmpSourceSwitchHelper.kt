@@ -121,6 +121,10 @@ internal object RtmpSourceSwitchHelper {
         }
     }
 
+    /**
+     * Switch to bitmap fallback for RTMP source.
+     * Uses MediaProjection audio to capture RTMP player audio.
+     */
     suspend fun switchToBitmapFallback(
         streamer: SingleStreamer,
         bitmap: Bitmap,
