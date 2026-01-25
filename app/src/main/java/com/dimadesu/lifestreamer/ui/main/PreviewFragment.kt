@@ -621,6 +621,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     override fun onPause() {
         super.onPause()
+        previewViewModel.onUiPaused()
         // DO NOT stop streaming when going to background - the service should continue streaming
         // DO NOT stop preview either when the camera is being used for streaming -
         // the camera source is shared between preview and streaming, so stopping preview
@@ -635,6 +636,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     override fun onResume() {
         super.onResume()
+        previewViewModel.onUiResumed()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
         // Request permissions in onResume() instead of onStart() to fix preview freeze
