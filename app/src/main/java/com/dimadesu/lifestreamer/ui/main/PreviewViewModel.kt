@@ -75,6 +75,8 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.Camer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.IBitmapSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
+import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
+import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
@@ -172,6 +174,61 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Encoder stats display
     private val _encoderStatsLiveData = MutableLiveData<String?>(null)
     val encoderStatsLiveData: LiveData<String?> get() = _encoderStatsLiveData
+
+    // Track whether the UI is in foreground (to avoid camera operations when paused)
+    @Volatile
+    private var isUiInForeground = true
+    
+    // Pending video/audio config to apply when UI resumes
+    @Volatile
+    private var pendingVideoConfig: VideoConfig? = null
+    @Volatile
+    private var pendingAudioConfig: AudioConfig? = null
+    
+    fun onUiResumed() {
+        isUiInForeground = true
+        // Apply any pending configs that were skipped while in background
+        val savedVideoConfig = pendingVideoConfig
+        val savedAudioConfig = pendingAudioConfig
+        pendingVideoConfig = null
+        pendingAudioConfig = null
+        
+        if (savedVideoConfig != null || savedAudioConfig != null) {
+            viewModelScope.launch {
+                // Wait for service to be ready before applying config
+                _serviceReady.first { it }
+                val streamer = serviceStreamer
+                if (streamer != null && streamer.isStreamingFlow.value != true) {
+                    savedVideoConfig?.let { config ->
+                        try {
+                            Log.i(TAG, "Applying pending video config after UI resumed")
+                            streamer.setVideoConfig(config)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "setVideoConfig failed (deferred)", t)
+                            _streamerErrorLiveData.postValue("setVideoConfig: ${t.message ?: t::class.java.simpleName}")
+                        }
+                    }
+                    savedAudioConfig?.let { config ->
+                        try {
+                            Log.i(TAG, "Applying pending audio config after UI resumed")
+                            streamer.setAudioConfig(config)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "setAudioConfig failed (deferred)", t)
+                            _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
+                        }
+                    }
+                } else if (streamer == null) {
+                    Log.w(TAG, "Cannot apply pending configs - streamer is null even after service ready")
+                } else {
+                    Log.i(TAG, "Skipping pending configs - streamer is streaming")
+                }
+            }
+        }
+    }
+    
+    fun onUiPaused() {
+        isUiInForeground = false
+    }
 
     fun clearBluetoothConnectRequest() {
         _bluetoothConnectRequestLiveData.postValue(null)
@@ -1334,6 +1391,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "Skipping audio config change - streamer is currently streaming")
                         return@collect
                     }
+                    
+                    // Don't change audio config when UI is in background - defer until resume
+                    if (!isUiInForeground) {
+                        Log.i(TAG, "Deferring audio config change - UI is in background")
+                        pendingAudioConfig = config
+                        return@collect
+                    }
 
                     if (ActivityCompat.checkSelfPermission(
                             application,
@@ -1357,6 +1421,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Don't change video config while streaming to avoid configuration conflicts
                     if (serviceStreamer?.isStreamingFlow?.value == true) {
                         Log.i(TAG, "Skipping video config change - streamer is currently streaming")
+                        return@collect
+                    }
+                    
+                    // Don't change video config when UI is in background - surfaces may be invalid
+                    // Save it to apply when UI resumes
+                    if (!isUiInForeground) {
+                        Log.i(TAG, "Deferring video config change - UI is in background")
+                        pendingVideoConfig = config
                         return@collect
                     }
 
