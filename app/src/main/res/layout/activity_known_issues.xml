@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:app="http://schemas.android.com/apk/res-auto"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:fillViewport="true"
+  android:fitsSystemWindows="true">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:paddingBottom="48dp">
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Known issues and workarounds"
+      android:textSize="28sp"
+      android:textStyle="bold"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Exclude an app from battery optimisations"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="To make sure Android does not limit the app in any way when it's running in the background, go to Settings > Apps > [Select App] > Battery > Unrestricted."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="If you plan to use LifeStreamer with MediaSrvr (Android RTMP server) or Bond Bunny (SRTLA bonding app) make sure to exclude those apps from battery optimisations as well."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Stopping RTMP source can disrupt SRT playback in OBS (no audio)"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="This is something I'd like to fix, but so far I haven't been successful."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="When? RTMP source in LifeStreamer app is toggled ON and RTMP plays fine. User re-streams RTMP as SRT using LifeStreamer app. SRT stream is played in OBS using media source. User stops RTMP stream on purpose or it gets disconnected."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="The issue. There is a high chance that SRT playback in OBS will be disrupted and might end up without audio and won't be able to recover automatically."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Workaround 1. Before stopping RTMP source stream please change source inside LifeStreamer app from RTMP to any other source."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Workaround 2. Monitor final stream for this issue. Restart SRT playback in OBS to fix it: either stop and start publishing SRT stream from LifeStreamer app or change scene in OBS to the one without SRT source and back."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Recommended solutions to most issues"
+      android:textSize="20sp"
+      android:textStyle="bold"
+      android:paddingTop="8dp"
+      android:paddingBottom="8dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="General workaround for issues: kill LifeStreamer app/service and start fresh."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Sometimes something in settings glitches out - wipe app data or reinstall."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="Settings can be changed during the stream, but some won't apply until you restart the stream."
+      android:textSize="16sp"
+      android:lineSpacingMultiplier="1.2"
+      android:paddingBottom="16dp" />
+
+  </LinearLayout>
+
+</ScrollView>

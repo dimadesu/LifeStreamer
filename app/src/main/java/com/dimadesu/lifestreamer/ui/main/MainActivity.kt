@@ -26,6 +26,7 @@ import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainActivityBinding
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
 import com.dimadesu.lifestreamer.ui.help.FaqHelpActivity
+import com.dimadesu.lifestreamer.ui.help.KnownIssuesActivity
 import com.dimadesu.lifestreamer.ui.help.RtmpHelpActivity
 import com.dimadesu.lifestreamer.ui.help.SrtHelpActivity
 import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
@@ -118,6 +119,10 @@ class MainActivity : AppCompatActivity() {
                     goToFaqHelpActivity()
                     true
                 }
+                R.id.action_known_issues -> {
+                    goToKnownIssuesActivity()
+                    true
+                }
                 else -> {
                     Log.e(TAG, "Unknown menu item ${it.itemId}")
                     false
@@ -148,6 +153,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun goToFaqHelpActivity() {
         val intent = Intent(this, FaqHelpActivity::class.java)
+        startActivity(intent)
+    }
+
+    private fun goToKnownIssuesActivity() {
+        val intent = Intent(this, KnownIssuesActivity::class.java)
         startActivity(intent)
     }
 

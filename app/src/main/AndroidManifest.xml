@@ -59,6 +59,7 @@
         <activity android:name=".ui.help.SrtHelpActivity" />
         <activity android:name=".ui.help.UvcHelpActivity" />
         <activity android:name=".ui.help.FaqHelpActivity" />
+        <activity android:name=".ui.help.KnownIssuesActivity" />
 
         <!-- UVC Camera Test Activity -->
         <activity
