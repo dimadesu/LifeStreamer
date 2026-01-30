@@ -89,7 +89,7 @@ StreamPack includes 2 great demo apps that can use phone cameras or screen recor
 
 ## Recommended solutions to most issues
 
-**There are bugs. General workaround for all of them: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
+**General workaround for issues: kill LifeStreamer app/service and start fresh. Sometimes something in settings glitches out - wipe app data or reinstall.**
 
 **Settings can be changed during the stream, but won't apply until you restart the stream.**
 

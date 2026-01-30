@@ -6,6 +6,7 @@
     <string name="action_srt_help">How to use SRT as source</string>
     <string name="action_uvc_help">How to use USB source</string>
     <string name="action_faq">FAQ</string>
+    <string name="action_known_issues">Known issues and workarounds</string>
     <string name="menu_actions">Menu actions</string>
 
     <!-- Camera Streaming Service -->
