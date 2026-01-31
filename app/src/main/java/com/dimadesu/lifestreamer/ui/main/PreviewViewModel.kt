@@ -2610,6 +2610,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Handle RTMP disconnection by either:
      * - Restarting the stream (when rtmpSourceRestartOnDisconnect is true) - recommended, fixes OBS issues
      * - Hot-swapping video source (when false) - original behavior
+     * Also handles fallback to bitmap when not streaming.
      */
     private fun handleRtmpDisconnection() {
         val currentStreamer = serviceStreamer ?: return
@@ -2620,23 +2621,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
         
-        // Only do this if actually streaming
-        if (currentStreamer.isStreamingFlow.value != true) {
-            Log.d(TAG, "Not streaming, skipping RTMP disconnection handling")
-            return
-        }
+        val isStreaming = currentStreamer.isStreamingFlow.value == true
         
         isHandlingDisconnection = true
         
         viewModelScope.launch {
             try {
-                // Check if we should restart the stream (recommended) or use original hot-swap behavior
-                val shouldRestartStream = storageRepository.rtmpSourceRestartOnDisconnectFlow.first()
-                
-                if (shouldRestartStream) {
-                    handleRtmpDisconnectionWithRestart(currentStreamer)
+                if (!isStreaming) {
+                    // Not streaming - use hot-swap behavior (no bitrate regulator to manage)
+                    handleRtmpDisconnectionWithHotSwap(currentStreamer, isStreaming = false)
                 } else {
-                    handleRtmpDisconnectionWithHotSwap(currentStreamer)
+                    // Streaming - check if we should restart the stream (recommended) or use original hot-swap behavior
+                    val shouldRestartStream = storageRepository.rtmpSourceRestartOnDisconnectFlow.first()
+                    
+                    if (shouldRestartStream) {
+                        handleRtmpDisconnectionWithRestart(currentStreamer)
+                    } else {
+                        handleRtmpDisconnectionWithHotSwap(currentStreamer, isStreaming = true)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling RTMP disconnection: ${e.message}", e)
@@ -2731,23 +2733,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Handle RTMP disconnection with hot-swap (original behavior).
      * Switches only video source to bitmap without restarting the stream.
-     * May cause audio sync issues in OBS.
+     * May cause audio sync issues in OBS when streaming.
+     * 
+     * @param isStreaming If true, handles bitrate regulator; if false, skips it
      */
-    private suspend fun handleRtmpDisconnectionWithHotSwap(currentStreamer: SingleStreamer) {
-        Log.i(TAG, "Handling RTMP disconnection - falling back to bitmap and retrying (hot-swap)")
+    private suspend fun handleRtmpDisconnectionWithHotSwap(currentStreamer: SingleStreamer, isStreaming: Boolean) {
+        Log.i(TAG, "Handling RTMP disconnection - falling back to bitmap and retrying (hot-swap, streaming=$isStreaming)")
         
         // Cancel existing retry job if any
         rtmpRetryJob?.cancel()
         
         // Remove bitrate regulator if streaming with SRT
-        removeBitrateRegulatorIfNeeded()
+        if (isStreaming) {
+            removeBitrateRegulatorIfNeeded()
+        }
         
         // Switch only VIDEO to bitmap - keep existing audio source to avoid glitches
         currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
         Log.i(TAG, "Switched to bitmap fallback (video only, keeping current audio source)")
         
         // Re-add bitrate regulator if streaming with SRT
-        readdBitrateRegulatorIfNeeded()
+        if (isStreaming) {
+            readdBitrateRegulatorIfNeeded()
+        }
         
         // Small delay to let the video source release complete and surface processor cleanup
         delay(100)
@@ -2777,11 +2785,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
             onRtmpConnected = { player -> 
                 monitorRtmpConnection(player)
-                // Reset guard flag when successfully reconnected
                 isHandlingDisconnection = false
-                // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
-                viewModelScope.launch {
-                    readdBitrateRegulatorIfNeeded()
+                if (isStreaming) {
+                    // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                    viewModelScope.launch {
+                        readdBitrateRegulatorIfNeeded()
+                    }
                 }
             }
         )
