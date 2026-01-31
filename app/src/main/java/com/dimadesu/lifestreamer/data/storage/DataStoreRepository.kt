@@ -190,6 +190,12 @@ class DataStoreRepository(
             ?: context.getString(R.string.rtmp_source_default_url)
     }.distinctUntilChanged()
 
+    // Flow for RTMP source restart on disconnect setting
+    val rtmpSourceRestartOnDisconnectFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[booleanPreferencesKey(context.getString(R.string.rtmp_source_restart_on_disconnect_key))]
+            ?: true // Default to true (recommended)
+    }.distinctUntilChanged()
+
     val bitrateRegulatorConfigFlow: Flow<BitrateRegulatorConfig?> =
         dataStore.data.map { preferences ->
             val isBitrateRegulatorEnable =
