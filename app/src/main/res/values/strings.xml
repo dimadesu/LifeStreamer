@@ -183,6 +183,9 @@
     <string name="rtmp_source_title">RTMP Source URL (example: rtmp://localhost:1935/publish/live)</string>
     <string name="rtmp_source_url_key">rtmp_source_url_key</string>
     <string name="rtmp_source_default_url">rtmp://localhost:1935/publish/live</string>
+    <string name="rtmp_source_restart_on_disconnect_key">rtmp_source_restart_on_disconnect_key</string>
+    <string name="rtmp_source_restart_on_disconnect_title">Restart stream on RTMP source disconnect</string>
+    <string name="rtmp_source_restart_on_disconnect_summary">Recommended! Fixes media source playback issues in OBS when RTMP source disconnects</string>
 
     <string name="file_endpoint_key">file_endpoint_key</string>
     <string name="file">File</string>

@@ -2607,8 +2607,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
     
     /**
-     * Handle RTMP disconnection by stopping stream, switching to bitmap, and restarting
-     * This resets the SRT connection to clear any timestamp discontinuity issues
+     * Handle RTMP disconnection by either:
+     * - Restarting the stream (when rtmpSourceRestartOnDisconnect is true) - recommended, fixes OBS issues
+     * - Hot-swapping video source (when false) - original behavior
      */
     private fun handleRtmpDisconnection() {
         val currentStreamer = serviceStreamer ?: return
@@ -2625,89 +2626,165 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
         
-        Log.i(TAG, "Handling RTMP disconnection - stopping stream, switching to bitmap, restarting")
         isHandlingDisconnection = true
         
         viewModelScope.launch {
             try {
-                // Cancel existing retry job if any
-                rtmpRetryJob?.cancel()
+                // Check if we should restart the stream (recommended) or use original hot-swap behavior
+                val shouldRestartStream = storageRepository.rtmpSourceRestartOnDisconnectFlow.first()
                 
-                // Release the old ExoPlayer
-                currentRtmpPlayer?.let { player ->
-                    try {
-                        Log.i(TAG, "Releasing old RTMP ExoPlayer")
-                        player.stop()
-                        player.release()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error releasing old ExoPlayer: ${e.message}")
-                    }
-                }
-                currentRtmpPlayer = null
-                
-                // Stop the SRT stream
-                Log.i(TAG, "Stopping SRT stream...")
-                try {
-                    currentStreamer.stopStream()
-                    currentStreamer.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping stream: ${e.message}")
-                }
-                
-                // Small delay
-                delay(500)
-                
-                // Switch to bitmap source, but keep MediaProjection audio
-                Log.i(TAG, "Switching to bitmap source with MediaProjection audio...")
-                currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
-                
-                // Keep MediaProjection audio to avoid audio source switch
-                val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    try {
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory(projection))
-                        Log.i(TAG, "Kept MediaProjection audio source")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "MediaProjection audio failed, falling back to mic: ${e.message}")
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                    }
+                if (shouldRestartStream) {
+                    handleRtmpDisconnectionWithRestart(currentStreamer)
                 } else {
-                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                    Log.i(TAG, "No MediaProjection available, using mic")
+                    handleRtmpDisconnectionWithHotSwap(currentStreamer)
                 }
-                
-                // Restart the stream
-                Log.i(TAG, "Restarting SRT stream...")
-                val descriptor = storageRepository.endpointDescriptorFlow.first()
-                currentStreamer.open(descriptor)
-                currentStreamer.startStream()
-                
-                Log.i(TAG, "Stream restarted with bitmap source")
-                _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with camera")
-                
-                // Start retry loop to reconnect RTMP
-                rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-                    application = application,
-                    currentStreamer = currentStreamer,
-                    testBitmap = testBitmap,
-                    storageRepository = storageRepository,
-                    mediaProjectionHelper = mediaProjectionHelper,
-                    streamingMediaProjection = streamingMediaProjection,
-                    postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-                    postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                    onRtmpConnected = { player -> 
-                        monitorRtmpConnection(player)
-                        isHandlingDisconnection = false
-                        viewModelScope.launch {
-                            readdBitrateRegulatorIfNeeded()
-                        }
-                    }
-                )
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling RTMP disconnection: ${e.message}", e)
                 isHandlingDisconnection = false
             }
         }
+    }
+    
+    /**
+     * Handle RTMP disconnection by stopping stream, switching to bitmap, and restarting.
+     * This resets the SRT connection to clear any timestamp discontinuity issues.
+     * Recommended approach - fixes OBS media source playback issues.
+     */
+    private suspend fun handleRtmpDisconnectionWithRestart(currentStreamer: SingleStreamer) {
+        Log.i(TAG, "Handling RTMP disconnection - stopping stream, switching to bitmap, restarting")
+        
+        // Cancel existing retry job if any
+        rtmpRetryJob?.cancel()
+        
+        // Release the old ExoPlayer
+        currentRtmpPlayer?.let { player ->
+            try {
+                Log.i(TAG, "Releasing old RTMP ExoPlayer")
+                player.stop()
+                player.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing old ExoPlayer: ${e.message}")
+            }
+        }
+        currentRtmpPlayer = null
+        
+        // Stop the SRT stream
+        Log.i(TAG, "Stopping SRT stream...")
+        try {
+            currentStreamer.stopStream()
+            currentStreamer.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping stream: ${e.message}")
+        }
+        
+        // Small delay
+        delay(500)
+        
+        // Switch to bitmap source, but keep MediaProjection audio
+        Log.i(TAG, "Switching to bitmap source with MediaProjection audio...")
+        currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
+        
+        // Keep MediaProjection audio to avoid audio source switch
+        val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+        if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            try {
+                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory(projection))
+                Log.i(TAG, "Kept MediaProjection audio source")
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaProjection audio failed, falling back to mic: ${e.message}")
+                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+            }
+        } else {
+            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+            Log.i(TAG, "No MediaProjection available, using mic")
+        }
+        
+        // Restart the stream
+        Log.i(TAG, "Restarting SRT stream...")
+        val descriptor = storageRepository.endpointDescriptorFlow.first()
+        currentStreamer.open(descriptor)
+        currentStreamer.startStream()
+        
+        Log.i(TAG, "Stream restarted with bitmap source")
+        _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
+        
+        // Start retry loop to reconnect RTMP
+        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+            application = application,
+            currentStreamer = currentStreamer,
+            testBitmap = testBitmap,
+            storageRepository = storageRepository,
+            mediaProjectionHelper = mediaProjectionHelper,
+            streamingMediaProjection = streamingMediaProjection,
+            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+            onRtmpConnected = { player -> 
+                monitorRtmpConnection(player)
+                isHandlingDisconnection = false
+                viewModelScope.launch {
+                    readdBitrateRegulatorIfNeeded()
+                }
+            }
+        )
+    }
+    
+    /**
+     * Handle RTMP disconnection with hot-swap (original behavior).
+     * Switches only video source to bitmap without restarting the stream.
+     * May cause audio sync issues in OBS.
+     */
+    private suspend fun handleRtmpDisconnectionWithHotSwap(currentStreamer: SingleStreamer) {
+        Log.i(TAG, "Handling RTMP disconnection - falling back to bitmap and retrying (hot-swap)")
+        
+        // Cancel existing retry job if any
+        rtmpRetryJob?.cancel()
+        
+        // Remove bitrate regulator if streaming with SRT
+        removeBitrateRegulatorIfNeeded()
+        
+        // Switch only VIDEO to bitmap - keep existing audio source to avoid glitches
+        currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
+        Log.i(TAG, "Switched to bitmap fallback (video only, keeping current audio source)")
+        
+        // Re-add bitrate regulator if streaming with SRT
+        readdBitrateRegulatorIfNeeded()
+        
+        // Small delay to let the video source release complete and surface processor cleanup
+        delay(100)
+        
+        // Now release the old ExoPlayer to prevent multiple instances playing simultaneously
+        // (which causes audio echo when captured by MediaProjection)
+        currentRtmpPlayer?.let { player ->
+            try {
+                Log.i(TAG, "Releasing old RTMP ExoPlayer to prevent audio echo")
+                player.stop()
+                player.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing old ExoPlayer: ${e.message}")
+            }
+        }
+        currentRtmpPlayer = null
+        
+        // Start retry loop
+        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+            application = application,
+            currentStreamer = currentStreamer,
+            testBitmap = testBitmap,
+            storageRepository = storageRepository,
+            mediaProjectionHelper = mediaProjectionHelper,
+            streamingMediaProjection = streamingMediaProjection,
+            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+            onRtmpConnected = { player -> 
+                monitorRtmpConnection(player)
+                // Reset guard flag when successfully reconnected
+                isHandlingDisconnection = false
+                // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
+                viewModelScope.launch {
+                    readdBitrateRegulatorIfNeeded()
+                }
+            }
+        )
     }
 
     /**
