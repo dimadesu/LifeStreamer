@@ -231,11 +231,13 @@ class UvcVideoSource(
                 outputSurface?.let { cameraHelper.removeSurface(it) }
                 previewSurface?.let { cameraHelper.removeSurface(it) }
                 
-                // Close camera and release CameraHelper
-                cameraHelper.closeCamera()
-                cameraHelper.release()
+                // NOTE: Do NOT close/release CameraHelper here!
+                // The CameraHelper is shared and managed by PreviewViewModel.
+                // It needs to stay alive to receive onAttach callbacks for reconnection
+                // after USB disconnect/reconnect cycles.
+                // See UVC_SOURCE_INTEGRATION.md: "Don't release CameraHelper in UvcVideoSource.release()"
                 
-                Log.d(TAG, "UVC camera released")
+                Log.d(TAG, "UVC video source released (CameraHelper kept alive for reconnection)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error releasing: ${e.message}", e)
             }

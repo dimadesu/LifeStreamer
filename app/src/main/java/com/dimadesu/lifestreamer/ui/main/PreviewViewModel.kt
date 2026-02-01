@@ -3151,6 +3151,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
+                        // Now explicitly release the CameraHelper since user toggled UVC OFF
+                        // (UvcVideoSource.release() no longer releases it to allow reconnection)
+                        uvcCameraHelper?.let { helper ->
+                            try {
+                                helper.closeCamera()
+                                helper.release()
+                                Log.d(TAG, "Released CameraHelper after user toggled UVC OFF")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error releasing CameraHelper: ${e.message}")
+                            }
+                        }
+                        uvcCameraHelper = null
+                        
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
                         
@@ -3168,10 +3181,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         lastUsedCameraId = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
-                        // Note: Don't try to cleanup old CameraHelper here - it was already released
-                        // when the UvcVideoSource was released by StreamPack during setVideoSource().
-                        // The CameraHelper's internal Handler thread is dead at this point.
-                        // Just clear our reference.
+                        // Release any existing CameraHelper before creating a new one
+                        uvcCameraHelper?.let { oldHelper ->
+                            try {
+                                oldHelper.closeCamera()
+                                oldHelper.release()
+                                Log.d(TAG, "Released old CameraHelper before creating new one")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error releasing old CameraHelper: ${e.message}")
+                            }
+                        }
                         uvcCameraHelper = null
                         
                         // Track whether we've already done the source switch synchronously
