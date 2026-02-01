@@ -2279,6 +2279,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
     private var streamingStateObserverJob: kotlinx.coroutines.Job? = null
     
+    // VU meter effect for audio level monitoring
+    private var vuMeterEffect: com.dimadesu.lifestreamer.audio.VuMeterEffect? = null
+    
     /**
      * Set up audio level monitoring on the streamer's audio processor.
      * This works for ALL audio sources (mic, Bluetooth, ExoPlayer/MediaProjection).
@@ -2290,6 +2293,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
         
+        // Create VU meter effect if not already created
+        if (vuMeterEffect == null) {
+            vuMeterEffect = com.dimadesu.lifestreamer.audio.VuMeterEffect { levels ->
+                // Update the flow (this is called from a separate coroutine, so it's safe)
+                _audioLevelFlow.value = levels
+            }
+        }
+        
+        // Add the effect to the processor (it implements MutableList<IAudioEffect>)
+        val effect = vuMeterEffect!!
+        val processorList = audioProcessor as? MutableList<*>
+        if (processorList != null) {
+            @Suppress("UNCHECKED_CAST")
+            (processorList as MutableList<Any>).apply {
+                if (!contains(effect)) {
+                    add(effect)
+                    Log.i(TAG, "VuMeterEffect added to audio processor")
+                }
+            }
+        } else {
+            Log.w(TAG, "Audio processor does not support effects list")
+        }
+        
         // Observe the streamer's audioConfigFlow for channel count changes
         audioConfigObserverJob?.cancel()
         audioConfigObserverJob = viewModelScope.launch {
@@ -2297,11 +2323,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (audioConfig != null) {
                     try {
                         val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
-                        audioProcessor.channelCount = channelCount
+                        effect.channelCount = channelCount
                         Log.i(TAG, "Audio level monitoring: channelCount=$channelCount")
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to get channel count: ${t.message}")
-                        audioProcessor.channelCount = 1
+                        effect.channelCount = 1
                     }
                 }
             }
@@ -2319,17 +2345,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
-        audioProcessor.audioLevelCallback = { levels ->
-            // Update the flow (this is called from audio thread, so be efficient)
-            _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(
-                rms = levels.rmsLeft,
-                peak = levels.peakLeft,
-                rmsRight = levels.rmsRight,
-                peakRight = levels.peakRight,
-                isStereo = levels.isStereo
-            )
-        }
-        
         Log.i(TAG, "Audio level monitoring enabled")
     }
     
@@ -2342,7 +2357,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             audioConfigObserverJob = null
             streamingStateObserverJob?.cancel()
             streamingStateObserverJob = null
-            serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
+            
+            // Remove VU meter effect from processor
+            val audioProcessor = serviceStreamer?.audioInput?.processor
+            val effect = vuMeterEffect
+            if (audioProcessor != null && effect != null) {
+                val processorList = audioProcessor as? MutableList<*>
+                if (processorList != null) {
+                    @Suppress("UNCHECKED_CAST")
+                    (processorList as MutableList<Any>).remove(effect)
+                    Log.d(TAG, "VuMeterEffect removed from audio processor")
+                }
+            }
+            vuMeterEffect?.close()
+            vuMeterEffect = null
+            
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
         } catch (_: Throwable) {}
     }
