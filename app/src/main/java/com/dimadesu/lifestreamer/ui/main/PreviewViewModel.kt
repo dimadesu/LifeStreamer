@@ -258,6 +258,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * UVC Camera helper for USB camera access
      */
     private var uvcCameraHelper: com.herohan.uvcapp.CameraHelper? = null
+    
+    /**
+     * Flag to prevent duplicate UVC reconnection attempts.
+     * Set when reconnection starts, cleared when complete or failed.
+     */
+    @Volatile
+    private var uvcReconnectionInProgress = false
 
     /**
      * User intent flags - track what the user toggled ON (not what fallback is active)
@@ -3151,6 +3158,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
+                        // Now explicitly release the CameraHelper since user toggled UVC OFF
+                        // (UvcVideoSource.release() no longer releases it to allow reconnection)
+                        uvcCameraHelper?.let { helper ->
+                            try {
+                                helper.closeCamera()
+                                helper.release()
+                                Log.d(TAG, "Released CameraHelper after user toggled UVC OFF")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error releasing CameraHelper: ${e.message}")
+                            }
+                        }
+                        uvcCameraHelper = null
+                        
                         // Re-add bitrate regulator if streaming with SRT
                         readdBitrateRegulatorIfNeeded()
                         
@@ -3168,10 +3188,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         lastUsedCameraId = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
-                        // Note: Don't try to cleanup old CameraHelper here - it was already released
-                        // when the UvcVideoSource was released by StreamPack during setVideoSource().
-                        // The CameraHelper's internal Handler thread is dead at this point.
-                        // Just clear our reference.
+                        // Release any existing CameraHelper before creating a new one
+                        uvcCameraHelper?.let { oldHelper ->
+                            try {
+                                oldHelper.closeCamera()
+                                oldHelper.release()
+                                Log.d(TAG, "Released old CameraHelper before creating new one")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error releasing old CameraHelper: ${e.message}")
+                            }
+                        }
                         uvcCameraHelper = null
                         
                         // Track whether we've already done the source switch synchronously
@@ -3184,15 +3210,66 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             setStateCallback(object : com.herohan.uvcapp.ICameraHelper.StateCallback {
                                 override fun onAttach(device: android.hardware.usb.UsbDevice) {
                                     Log.d(TAG, "UVC camera attached: ${device.deviceName}")
+                                    
+                                    // Check if we should auto-reconnect to UVC after a disconnect
+                                    val isUvcToggleOn = _userToggledUvc.value ?: false
+                                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val isOnBitmapFallback = currentVideoSource is IBitmapSource
+                                    
+                                    if (isUvcToggleOn && isOnBitmapFallback && !uvcReconnectionInProgress) {
+                                        Log.i(TAG, "UVC camera re-attached while on bitmap fallback - auto-reconnecting")
+                                        uvcReconnectionInProgress = true
+                                        // Select device to trigger onDeviceOpen -> onCameraOpen flow
+                                        // This will switch back to UVC source automatically
+                                        selectDevice(device)
+                                    } else if (uvcReconnectionInProgress) {
+                                        Log.d(TAG, "UVC reconnection already in progress, ignoring duplicate attach")
+                                    }
                                 }
                                 
                                 override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
                                     val alreadySwitched = sourceSwitchedSynchronously.get()
-                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen, alreadySwitched=$alreadySwitched)")
+                                    Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen, alreadySwitched=$alreadySwitched, reconnecting=$uvcReconnectionInProgress)")
                                     
+                                    // Check if we're reconnecting after a disconnect (on bitmap fallback)
+                                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val isOnBitmapFallback = currentVideoSource is IBitmapSource
+                                    val isUvcToggleOn = _userToggledUvc.value ?: false
+                                    
+                                    // Handle reconnection: if we're on bitmap fallback, UVC toggle is still ON,
+                                    // and reconnection is in progress (to prevent duplicate switches)
+                                    if (isOnBitmapFallback && isUvcToggleOn && uvcReconnectionInProgress) {
+                                        Log.i(TAG, "UVC device reopened while on bitmap fallback - switching back to UVC source")
+                                        viewModelScope.launch {
+                                            try {
+                                                // Remove bitrate regulator if streaming with SRT
+                                                removeBitrateRegulatorIfNeeded()
+                                                
+                                                // Switch back to UVC source
+                                                delay(300)
+                                                currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
+                                                
+                                                // Re-add bitrate regulator if streaming with SRT
+                                                readdBitrateRegulatorIfNeeded()
+                                                
+                                                // Reapply audio monitoring if toggle is ON
+                                                if (_isMonitorAudioOn.value == true) {
+                                                    applyMonitorAudioState()
+                                                }
+                                                
+                                                Log.i(TAG, "Switched back to UVC source after reconnection")
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "Error switching back to UVC after reconnection: ${e.message}", e)
+                                                _streamerErrorLiveData.postValue("Failed to reconnect UVC: ${e.message}")
+                                            } finally {
+                                                uvcReconnectionInProgress = false
+                                            }
+                                        }
+                                    }
                                     // If this is first open after permission grant AND we haven't already switched
                                     // synchronously (i.e., permission was just granted via dialog), switch video source now.
-                                    if (isFirstOpen && !alreadySwitched) {
+                                    // Skip if reconnection is in progress (will be handled above)
+                                    else if (isFirstOpen && !alreadySwitched && !uvcReconnectionInProgress) {
                                         Log.i(TAG, "First open after permission grant - switching to UVC source")
                                         viewModelScope.launch {
                                             try {
@@ -3256,6 +3333,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 override fun onDetach(device: android.hardware.usb.UsbDevice) {
                                     Log.w(TAG, "UVC camera detached - device=${device.deviceName}")
                                     
+                                    // Clear reconnection flag since device is detached
+                                    uvcReconnectionInProgress = false
+                                    
                                     // Only switch to fallback if UVC source is actually active
                                     // If UVC toggle is OFF, this detach might be from UvcTestActivity or other code
                                     val isUvcActive = _userToggledUvc.value ?: false
@@ -3283,6 +3363,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 
                                 override fun onCancel(device: android.hardware.usb.UsbDevice) {
                                     Log.d(TAG, "UVC camera permission cancelled")
+                                    // Clear reconnection flag since permission was cancelled
+                                    uvcReconnectionInProgress = false
                                     _toastMessageLiveData.postValue("USB permission denied")
                                 }
                             })
