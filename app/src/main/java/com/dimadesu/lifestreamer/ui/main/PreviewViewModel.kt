@@ -3184,15 +3184,59 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             setStateCallback(object : com.herohan.uvcapp.ICameraHelper.StateCallback {
                                 override fun onAttach(device: android.hardware.usb.UsbDevice) {
                                     Log.d(TAG, "UVC camera attached: ${device.deviceName}")
+                                    
+                                    // Check if we should auto-reconnect to UVC after a disconnect
+                                    val isUvcToggleOn = _userToggledUvc.value ?: false
+                                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val isOnBitmapFallback = currentVideoSource is IBitmapSource
+                                    
+                                    if (isUvcToggleOn && isOnBitmapFallback) {
+                                        Log.i(TAG, "UVC camera re-attached while on bitmap fallback - auto-reconnecting")
+                                        // Select device to trigger onDeviceOpen -> onCameraOpen flow
+                                        // This will switch back to UVC source automatically
+                                        selectDevice(device)
+                                    }
                                 }
                                 
                                 override fun onDeviceOpen(device: android.hardware.usb.UsbDevice, isFirstOpen: Boolean) {
                                     val alreadySwitched = sourceSwitchedSynchronously.get()
                                     Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen, alreadySwitched=$alreadySwitched)")
                                     
+                                    // Check if we're reconnecting after a disconnect (on bitmap fallback)
+                                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val isOnBitmapFallback = currentVideoSource is IBitmapSource
+                                    val isUvcToggleOn = _userToggledUvc.value ?: false
+                                    
+                                    // Handle reconnection: if we're on bitmap fallback and UVC toggle is still ON
+                                    if (!isFirstOpen && isOnBitmapFallback && isUvcToggleOn) {
+                                        Log.i(TAG, "UVC device reopened while on bitmap fallback - switching back to UVC source")
+                                        viewModelScope.launch {
+                                            try {
+                                                // Remove bitrate regulator if streaming with SRT
+                                                removeBitrateRegulatorIfNeeded()
+                                                
+                                                // Switch back to UVC source
+                                                delay(300)
+                                                currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
+                                                
+                                                // Re-add bitrate regulator if streaming with SRT
+                                                readdBitrateRegulatorIfNeeded()
+                                                
+                                                // Reapply audio monitoring if toggle is ON
+                                                if (_isMonitorAudioOn.value == true) {
+                                                    applyMonitorAudioState()
+                                                }
+                                                
+                                                Log.i(TAG, "Switched back to UVC source after reconnection")
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "Error switching back to UVC after reconnection: ${e.message}", e)
+                                                _streamerErrorLiveData.postValue("Failed to reconnect UVC: ${e.message}")
+                                            }
+                                        }
+                                    }
                                     // If this is first open after permission grant AND we haven't already switched
                                     // synchronously (i.e., permission was just granted via dialog), switch video source now.
-                                    if (isFirstOpen && !alreadySwitched) {
+                                    else if (isFirstOpen && !alreadySwitched) {
                                         Log.i(TAG, "First open after permission grant - switching to UVC source")
                                         viewModelScope.launch {
                                             try {
