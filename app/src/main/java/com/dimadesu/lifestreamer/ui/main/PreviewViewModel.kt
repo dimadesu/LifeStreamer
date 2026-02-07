@@ -210,6 +210,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                     }
                     savedAudioConfig?.let { config ->
+                        // Check permission before applying audio config
+                        if (ActivityCompat.checkSelfPermission(
+                                application,
+                                Manifest.permission.RECORD_AUDIO
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            Log.i(TAG, "Skipping pending audio config - RECORD_AUDIO permission not granted")
+                            return@let
+                        }
                         try {
                             Log.i(TAG, "Applying pending audio config after UI resumed")
                             streamer.setAudioConfig(config)
