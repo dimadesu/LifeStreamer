@@ -953,11 +953,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.initializeVideoSource()
             // Load available cameras for button creation
             previewViewModel.loadAvailableCameras()
-        } else if (permissions[Manifest.permission.RECORD_AUDIO] == true) {
-            // Don't call configureAudio() here - it will be handled by service connection
-            // when the service is ready and only if not already streaming
-            // previewViewModel.configureAudio()
-            Log.d(TAG, "RECORD_AUDIO permission granted - audio will be configured via service")
+        }
+        if (permissions[Manifest.permission.RECORD_AUDIO] == true) {
+            // Apply any pending audio config now that permission is granted
+            previewViewModel.applyPendingAudioConfig()
+            Log.d(TAG, "RECORD_AUDIO permission granted - applying pending audio config")
         }
         // POST_NOTIFICATIONS is optional for preview; if granted, we can create
         // or update our notification channel. If not granted, continue normally.

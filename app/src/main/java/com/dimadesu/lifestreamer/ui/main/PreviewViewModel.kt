@@ -216,7 +216,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 Manifest.permission.RECORD_AUDIO
                             ) != PackageManager.PERMISSION_GRANTED
                         ) {
-                            Log.i(TAG, "Skipping pending audio config - RECORD_AUDIO permission not granted")
+                            Log.i(TAG, "Re-queuing pending audio config - RECORD_AUDIO permission not granted yet")
+                            pendingAudioConfig = config  // Re-queue so it's applied after permission granted
                             return@let
                         }
                         try {
@@ -238,6 +239,39 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun onUiPaused() {
         isUiInForeground = false
+    }
+
+    /**
+     * Apply pending audio config after RECORD_AUDIO permission is granted.
+     * Called from permission callback in PreviewFragment.
+     */
+    fun applyPendingAudioConfig() {
+        val config = pendingAudioConfig ?: return
+        pendingAudioConfig = null
+        
+        if (ActivityCompat.checkSelfPermission(
+                application,
+                Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "applyPendingAudioConfig called but permission still not granted")
+            pendingAudioConfig = config  // Re-queue
+            return
+        }
+        
+        viewModelScope.launch {
+            _serviceReady.first { it }
+            val streamer = serviceStreamer
+            if (streamer != null && streamer.isStreamingFlow.value != true) {
+                try {
+                    Log.i(TAG, "Applying pending audio config after permission granted")
+                    streamer.setAudioConfig(config)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "setAudioConfig failed (after permission)", t)
+                    _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
+                }
+            }
+        }
     }
 
     fun clearBluetoothConnectRequest() {
@@ -1446,6 +1480,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
                             }
                         } ?: Log.i(TAG, "Audio is disabled")
+                    } else {
+                        // Permission not granted - defer until permission is granted
+                        Log.i(TAG, "Deferring audio config - RECORD_AUDIO permission not granted yet")
+                        pendingAudioConfig = config
                     }
                 }
         }
