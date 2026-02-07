@@ -100,7 +100,11 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
-    implementation("androidx.media3:media3-datasource-rtmp:1.8.0")
+    implementation("androidx.media3:media3-datasource-rtmp:1.8.0") {
+        exclude(group = "io.antmedia", module = "rtmp-client")
+    }
+    // Use JitPack version with 16KB page alignment fix (PR #110 merged Sep 2025)
+    implementation("com.github.mcxinyu:LibRtmp-Client-for-Android:v3.2.0.m2")
 
     testImplementation(libs.junit)
 
