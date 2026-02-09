@@ -1,10 +1,8 @@
-# LifeStreamer Android app
+# LifeStreamer - Android app for IRL live streaming
 
-Live streaming app for Android designed for IRL streaming based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
+LifeStreamer is an Android app designed for IRL live streaming based on [StreamPack SDK](https://github.com/ThibaultBee/StreamPack).
 
-## Become alpha tester
-
-To download app from Google Play Store please join alpha testing first. This will also help to eventually publish app publicly. More details [here](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566).
+[<img src="docs/google-play-store.svg">](https://play.google.com/store/apps/details?id=com.dimadesu.lifestreamer)
 
 ## Features
 
@@ -49,13 +47,23 @@ See the [demo video on YouTube](https://www.youtube.com/watch?v=_zlWsQYxrE4).
 
 ## How to install
 
-I'm releasing .apk files using [GitHub releases](https://github.com/dimadesu/LifeStreamer/releases).
+### Google Play Store
+
+You can install app from Google Play Store. Follow [this link](https://play.google.com/store/apps/details?id=com.dimadesu.lifestreamer).
+
+#### Become alpha tester (aka "closed testing")
+
+Please join alpha testing to test early versions of the app. More details [here](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566).
+
+Note: Now that app is published publicly on the Play Store there is also "open testing" (beta?) - I'm still figuring out how it works.
+
+### GitHub releases
+
+I was originally releasing .apk files using [GitHub releases](https://github.com/dimadesu/LifeStreamer/releases). I plan to continue releasing on GitHub as a backup.
 
 Open [GitHub releases page](https://github.com/dimadesu/LifeStreamer/releases) on your phone, download .apk file and install.
 
-Alternatively, [sign up for alpha testing](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566) and download app from Google Play Store.
-
-### ⚠️ Note on "debug" VS. "release" builds
+#### ⚠️ Note on "debug" VS. "release" builds
 
 I am in the process of switching GitHub releases to "release" builds from "debug" builds. They have much better performance. This actually fixed "background mode" performance issues.
 
