@@ -2279,6 +2279,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
                         }
                     }
+                    
+                    // If reconnected with bitmap source and user had RTMP toggled,
+                    // restart the RTMP source retry loop so it eventually switches back to RTMP video.
+                    // This handles the case where RTMP disconnect restart failed, we fell through
+                    // to handleDisconnection -> attemptReconnection, and the publishing stream
+                    // recovered but the RTMP source retry was never started.
+                    ensureRtmpRetryRunning(currentStreamer)
                 } else {
                     // Check if user stopped before showing failure message (using service state)
                     val userStopped = service?.userStoppedManually?.value ?: false
@@ -2290,6 +2297,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     Log.w(TAG, "Reconnection attempt failed - will retry again in 5 seconds")
                     service?.setReconnectionMessage("Reconnection failed. Retrying in 5 seconds")
+                    
+                    // While SRT publishing is retrying, also try to restore RTMP source in parallel.
+                    // If RTMP comes back before SRT, the video source switches from bitmap to RTMP,
+                    // so when SRT finally reconnects it streams RTMP video instead of bitmap.
+                    ensureRtmpRetryRunning(currentStreamer)
                     
                     // Keep isReconnecting = true for retry attempt
                     // Schedule another reconnection attempt directly (don't call handleDisconnection as it would be blocked)
@@ -2311,6 +2323,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "Reconnection attempt threw exception: ${e.message}", e)
                 _reconnectionStatusLiveData.postValue("Reconnection failed. Retrying in 5 seconds")
                 
+                // While SRT publishing is retrying, also try to restore RTMP source in parallel
+                serviceStreamer?.let { ensureRtmpRetryRunning(it) }
+                
                 // Keep isReconnecting = true for retry attempt
                 // Schedule another reconnection attempt directly
                 reconnectTimer.startSingleShot(timeoutSeconds = 5) {
@@ -2319,6 +2334,35 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
                 return@launch
             }
+        }
+    }
+    
+    /**
+     * Start the RTMP source retry loop if it's not already running,
+     * the video source is bitmap, and the user toggled RTMP ON.
+     * This allows RTMP playback to recover in parallel with SRT publishing reconnection.
+     */
+    private suspend fun ensureRtmpRetryRunning(currentStreamer: SingleStreamer) {
+        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        if (videoSource is IBitmapSource && _userToggledRtmp.value == true && rtmpRetryJob?.isActive != true) {
+            Log.i(TAG, "Starting RTMP source retry in parallel with SRT reconnection")
+            rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+                application = application,
+                currentStreamer = currentStreamer,
+                testBitmap = testBitmap,
+                storageRepository = storageRepository,
+                mediaProjectionHelper = mediaProjectionHelper,
+                streamingMediaProjection = streamingMediaProjection,
+                postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+                onRtmpConnected = { player ->
+                    monitorRtmpConnection(player)
+                    isHandlingDisconnection = false
+                    viewModelScope.launch {
+                        readdBitrateRegulatorIfNeeded()
+                    }
+                }
+            )
         }
     }
     
@@ -2709,6 +2753,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun handleRtmpDisconnectionWithRestart(currentStreamer: SingleStreamer) {
         Log.i(TAG, "Handling RTMP disconnection - stopping stream, switching to bitmap, restarting")
         
+        // Signal reconnecting state BEFORE stopping stream to prevent orientation unlock.
+        // When isStreamingFlow becomes false, Fragment observers check isReconnecting
+        // and will keep orientation locked if true.
+        val reconnecting = service?.beginReconnection("RTMP stream playback stopped. Restarting stream") ?: false
+        if (reconnecting) {
+            service?.setReconnectionMessage("RTMP stream playback stopped. Restarting stream")
+            Log.i(TAG, "Set reconnecting state to preserve orientation during RTMP restart")
+        } else {
+            Log.w(TAG, "Could not set reconnecting state - orientation may unlock during restart")
+        }
+        
         // Cancel existing retry job if any
         rtmpRetryJob?.cancel()
         
@@ -2755,14 +2810,44 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "No MediaProjection available, using mic")
         }
         
+        // Apply saved rotation BEFORE restarting stream to maintain original orientation
+        service?.getSavedStreamingOrientation()?.let { savedRotation ->
+            Log.i(TAG, "Applying saved rotation $savedRotation before RTMP restart")
+            try {
+                currentStreamer.setTargetRotation(savedRotation)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to apply saved rotation: ${e.message}")
+            }
+        }
+        
         // Restart the stream
         Log.i(TAG, "Restarting SRT stream...")
-        val descriptor = storageRepository.endpointDescriptorFlow.first()
-        currentStreamer.open(descriptor)
-        currentStreamer.startStream()
-        
-        Log.i(TAG, "Stream restarted with bitmap source")
-        _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
+        try {
+            val descriptor = storageRepository.endpointDescriptorFlow.first()
+            currentStreamer.open(descriptor)
+            currentStreamer.startStream()
+            
+            // Clear reconnecting state now that stream is back up
+            if (reconnecting) {
+                service?.completeReconnection()
+                Log.i(TAG, "Cleared reconnecting state after successful RTMP restart")
+            }
+            
+            Log.i(TAG, "Stream restarted with bitmap source (orientation preserved)")
+            _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restart stream after RTMP disconnect: ${e.message}", e)
+            // Cancel current reconnecting state so handleDisconnection can begin fresh
+            if (reconnecting) {
+                service?.cancelReconnection()
+            }
+            isHandlingDisconnection = false
+            // Delegate to standard reconnection handler - will retry with 5-second intervals
+            // Sources (bitmap video + audio) are already configured, so attemptReconnection
+            // will just retry open() + startStream()
+            handleDisconnection("RTMP restart failed: ${e.message}")
+            return
+        }
         
         // Start retry loop to reconnect RTMP
         rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
