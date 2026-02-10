@@ -2756,9 +2756,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Signal reconnecting state BEFORE stopping stream to prevent orientation unlock.
         // When isStreamingFlow becomes false, Fragment observers check isReconnecting
         // and will keep orientation locked if true.
-        val reconnecting = service?.beginReconnection("RTMP source disconnected. Restarting stream.") ?: false
+        val reconnecting = service?.beginReconnection("RTMP stream playback stopped. Restarting stream") ?: false
         if (reconnecting) {
-            service?.setReconnectionMessage("RTMP source disconnected. Restarting stream.")
+            service?.setReconnectionMessage("RTMP stream playback stopped. Restarting stream")
             Log.i(TAG, "Set reconnecting state to preserve orientation during RTMP restart")
         } else {
             Log.w(TAG, "Could not set reconnecting state - orientation may unlock during restart")
