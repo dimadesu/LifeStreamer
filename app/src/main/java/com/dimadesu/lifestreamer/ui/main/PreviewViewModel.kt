@@ -2709,6 +2709,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun handleRtmpDisconnectionWithRestart(currentStreamer: SingleStreamer) {
         Log.i(TAG, "Handling RTMP disconnection - stopping stream, switching to bitmap, restarting")
         
+        // Signal reconnecting state BEFORE stopping stream to prevent orientation unlock.
+        // When isStreamingFlow becomes false, Fragment observers check isReconnecting
+        // and will keep orientation locked if true.
+        val reconnecting = service?.beginReconnection("RTMP source disconnected. Restarting stream.") ?: false
+        if (reconnecting) {
+            service?.setReconnectionMessage("RTMP source disconnected. Restarting stream.")
+            Log.i(TAG, "Set reconnecting state to preserve orientation during RTMP restart")
+        } else {
+            Log.w(TAG, "Could not set reconnecting state - orientation may unlock during restart")
+        }
+        
         // Cancel existing retry job if any
         rtmpRetryJob?.cancel()
         
@@ -2755,14 +2766,41 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "No MediaProjection available, using mic")
         }
         
+        // Apply saved rotation BEFORE restarting stream to maintain original orientation
+        service?.getSavedStreamingOrientation()?.let { savedRotation ->
+            Log.i(TAG, "Applying saved rotation $savedRotation before RTMP restart")
+            try {
+                currentStreamer.setTargetRotation(savedRotation)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to apply saved rotation: ${e.message}")
+            }
+        }
+        
         // Restart the stream
         Log.i(TAG, "Restarting SRT stream...")
-        val descriptor = storageRepository.endpointDescriptorFlow.first()
-        currentStreamer.open(descriptor)
-        currentStreamer.startStream()
-        
-        Log.i(TAG, "Stream restarted with bitmap source")
-        _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
+        try {
+            val descriptor = storageRepository.endpointDescriptorFlow.first()
+            currentStreamer.open(descriptor)
+            currentStreamer.startStream()
+            
+            // Clear reconnecting state now that stream is back up
+            if (reconnecting) {
+                service?.completeReconnection()
+                Log.i(TAG, "Cleared reconnecting state after successful RTMP restart")
+            }
+            
+            Log.i(TAG, "Stream restarted with bitmap source (orientation preserved)")
+            _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restart stream after RTMP disconnect: ${e.message}", e)
+            if (reconnecting) {
+                service?.cancelReconnection()
+                Log.i(TAG, "Cancelled reconnecting state after failed RTMP restart")
+            }
+            isHandlingDisconnection = false
+            _streamerErrorLiveData.postValue("Stream restart failed: ${e.message}")
+            return
+        }
         
         // Start retry loop to reconnect RTMP
         rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
