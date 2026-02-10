@@ -2279,6 +2279,33 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
                         }
                     }
+                    
+                    // If reconnected with bitmap source and user had RTMP toggled,
+                    // restart the RTMP source retry loop so it eventually switches back to RTMP video.
+                    // This handles the case where RTMP disconnect restart failed, we fell through
+                    // to handleDisconnection -> attemptReconnection, and the publishing stream
+                    // recovered but the RTMP source retry was never started.
+                    val reconnectedVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                    if (reconnectedVideoSource is IBitmapSource && _userToggledRtmp.value == true) {
+                        Log.i(TAG, "Reconnected with bitmap source while RTMP toggled - restarting RTMP source retry loop")
+                        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+                            application = application,
+                            currentStreamer = currentStreamer,
+                            testBitmap = testBitmap,
+                            storageRepository = storageRepository,
+                            mediaProjectionHelper = mediaProjectionHelper,
+                            streamingMediaProjection = streamingMediaProjection,
+                            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+                            onRtmpConnected = { player ->
+                                monitorRtmpConnection(player)
+                                isHandlingDisconnection = false
+                                viewModelScope.launch {
+                                    readdBitrateRegulatorIfNeeded()
+                                }
+                            }
+                        )
+                    }
                 } else {
                     // Check if user stopped before showing failure message (using service state)
                     val userStopped = service?.userStoppedManually?.value ?: false
@@ -2793,12 +2820,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restart stream after RTMP disconnect: ${e.message}", e)
+            // Cancel current reconnecting state so handleDisconnection can begin fresh
             if (reconnecting) {
                 service?.cancelReconnection()
-                Log.i(TAG, "Cancelled reconnecting state after failed RTMP restart")
             }
             isHandlingDisconnection = false
-            _streamerErrorLiveData.postValue("Stream restart failed: ${e.message}")
+            // Delegate to standard reconnection handler - will retry with 5-second intervals
+            // Sources (bitmap video + audio) are already configured, so attemptReconnection
+            // will just retry open() + startStream()
+            handleDisconnection("RTMP restart failed: ${e.message}")
             return
         }
         
