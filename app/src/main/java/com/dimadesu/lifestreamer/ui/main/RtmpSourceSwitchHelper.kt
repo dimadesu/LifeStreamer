@@ -31,7 +31,6 @@ import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
-    private const val DEFAULT_BUFFER_FOR_PLAYBACK_MS = 2500
 
     /**
      * Check if the URL is an SRT URL.
@@ -219,7 +218,7 @@ internal object RtmpSourceSwitchHelper {
                             storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
                         }
                     } catch (e: Exception) {
-                        DEFAULT_BUFFER_FOR_PLAYBACK_MS
+                        application.getString(com.dimadesu.lifestreamer.R.string.default_rtmp_buffer_for_playback_ms).toInt()
                     }
 
                     val exoPlayerInstance = try {
