@@ -649,6 +649,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         previewViewModel.onUiResumed()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
+        // Reapply RTMP button visibility (observer won't re-fire if value unchanged)
+        updateRtmpButtonColors(previewViewModel.activeRtmpIndex.value)
+        
         // Request permissions in onResume() instead of onStart() to fix preview freeze
         // when quickly going to settings and back (StreamPack fix 78f1dc28c)
         requestCameraAndMicrophonePermissions()
@@ -1078,6 +1081,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 )
                 val activeIndex = previewViewModel.activeRtmpIndex.value
                 backgroundTintList = getButtonColorStateList(requireContext(), activeIndex == i)
+                visibility = if (activeIndex != null && activeIndex != i) View.GONE else View.VISIBLE
                 setOnClickListener {
                     previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = i)
                 }
