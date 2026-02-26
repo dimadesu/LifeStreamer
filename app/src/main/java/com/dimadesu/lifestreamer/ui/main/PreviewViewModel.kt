@@ -40,6 +40,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.asLiveData
+import androidx.lifecycle.map
 import androidx.lifecycle.viewModelScope
 import com.dimadesu.lifestreamer.BR
 import com.dimadesu.lifestreamer.R
@@ -313,7 +314,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * User intent flags - track what the user toggled ON (not what fallback is active)
      * These allow buttons to show correct state even when source falls back to bitmap
      */
-    private val _userToggledRtmp = MutableLiveData<Boolean>(false)
+    private val _activeRtmpIndex = MutableLiveData<Int?>(null)
     private val _userToggledUvc = MutableLiveData<Boolean>(false)
 
     /**
@@ -2344,12 +2345,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private suspend fun ensureRtmpRetryRunning(currentStreamer: SingleStreamer) {
         val videoSource = currentStreamer.videoInput?.sourceFlow?.value
-        if (videoSource is IBitmapSource && _userToggledRtmp.value == true && rtmpRetryJob?.isActive != true) {
-            Log.i(TAG, "Starting RTMP source retry in parallel with SRT reconnection")
+        val activeIndex = _activeRtmpIndex.value
+        if (videoSource is IBitmapSource && activeIndex != null && rtmpRetryJob?.isActive != true) {
+            Log.i(TAG, "Starting RTMP source retry in parallel with SRT reconnection (index=$activeIndex)")
+            val rtmpUrl = storageRepository.rtmpSourceUrlFlow(activeIndex).first()
             rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
                 application = application,
                 currentStreamer = currentStreamer,
                 testBitmap = testBitmap,
+                videoSourceUrl = rtmpUrl,
                 storageRepository = storageRepository,
                 mediaProjectionHelper = mediaProjectionHelper,
                 streamingMediaProjection = streamingMediaProjection,
@@ -2850,10 +2854,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         
         // Start retry loop to reconnect RTMP
+        val activeIndexRestart = _activeRtmpIndex.value ?: 1
+        val rtmpUrlRestart = storageRepository.rtmpSourceUrlFlow(activeIndexRestart).first()
         rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
             application = application,
             currentStreamer = currentStreamer,
             testBitmap = testBitmap,
+            videoSourceUrl = rtmpUrlRestart,
             storageRepository = storageRepository,
             mediaProjectionHelper = mediaProjectionHelper,
             streamingMediaProjection = streamingMediaProjection,
@@ -2913,10 +2920,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         currentRtmpPlayer = null
         
         // Start retry loop
+        val activeIndexHotSwap = _activeRtmpIndex.value ?: 1
+        val rtmpUrlHotSwap = storageRepository.rtmpSourceUrlFlow(activeIndexHotSwap).first()
         rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
             application = application,
             currentStreamer = currentStreamer,
             testBitmap = testBitmap,
+            videoSourceUrl = rtmpUrlHotSwap,
             storageRepository = storageRepository,
             mediaProjectionHelper = mediaProjectionHelper,
             streamingMediaProjection = streamingMediaProjection,
@@ -2989,7 +2999,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)
-    fun toggleVideoSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null) {
+    fun toggleVideoSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null, rtmpIndex: Int = 1) {
         val currentStreamer = serviceStreamer
         if (currentStreamer == null) {
             Log.e(TAG, "Streamer service not available for video source toggle")
@@ -3001,127 +3011,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Prefer the streamer's own state flow for an up-to-date streaming state.
     val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
 
+        // If a different RTMP source is already active, do nothing (user must deactivate current first)
+        val currentActiveIndex = _activeRtmpIndex.value
+        if (currentActiveIndex != null && currentActiveIndex != rtmpIndex) {
+            Log.i(TAG, "RTMP source $currentActiveIndex is active, deactivate it before switching to $rtmpIndex")
+            return
+        }
+
         viewModelScope.launch {
-            when (videoSource) {
-                is ICameraSource -> {
-                    Log.i(TAG, "Switching from Camera to RTMP source (streaming: $isCurrentlyStreaming)")
-                    
-                    // Mark that user toggled RTMP ON
-                    _userToggledRtmp.postValue(true)
-                    _userToggledUvc.postValue(false)
-                    
-                    // Suppress passthrough observer updates during source switch
-                    // to prevent monitor toggle from resetting to OFF
-                    suppressPassthroughObserver = true
-                    
-                    // Stop mic passthrough when switching to RTMP (RTMP uses ExoPlayer for audio monitoring)
-                    // Keep monitor toggle state - it will control ExoPlayer volume instead
-                    if (_isMonitorAudioOn.value == true) {
-                        service?.stopAudioPassthrough()
-                        Log.i(TAG, "Stopped mic passthrough when switching to RTMP (will use ExoPlayer volume instead)")
-                    }
-                    
-                    // Remember current camera ID before switching away
-                    lastUsedCameraId = videoSource.cameraId
-                    Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
-
-                    // Hide camera-specific sliders when switching away from camera
-                    showZoomSlider.value = false
-                    showExposureSlider.value = false
-                    showLensDistanceSlider.value = false
-
-                    // Only request MediaProjection when switching to RTMP while streaming.
-                    // Requesting projection while not streaming leads to poor UX (unexpected
-                    // permission prompts). If not streaming, skip the request — audio can be
-                    // upgraded later when the user starts streaming or explicitly requests it.
-                    val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
-                            && isCurrentlyStreaming
-                            && streamingMediaProjection == null
-                            && mediaProjectionHelper.getMediaProjection() == null
-
-                    if (needProjection) {
-                        if (mediaProjectionLauncher != null) {
-                            Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
-                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
-                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
-                                viewModelScope.launch {
-                                    streamingMediaProjection = projection
-                                    if (projection == null) {
-                                        // Permission denied - turn off RTMP toggle (BT toggle stays visible)
-                                        _userToggledRtmp.postValue(false)
-                                        _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
-                                        return@launch
-                                    }
-                                    
-                                    // Permission granted - now hide BT toggle (RTMP uses MediaProjection audio)
-                                    _showBluetoothToggle.postValue(false)
-
-                                    // Now that we have projection, perform the RTMP source switch
-                                    // Cancel any existing retry job first
-                                    rtmpRetryJob?.cancel()
-                                    rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-                                        application = application,
-                                        currentStreamer = currentStreamer,
-                                        testBitmap = testBitmap,
-                                        storageRepository = storageRepository,
-                                        mediaProjectionHelper = mediaProjectionHelper,
-                                        streamingMediaProjection = streamingMediaProjection,
-                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-                                        postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                                        onRtmpConnected = { player -> 
-                                            monitorRtmpConnection(player)
-                                            // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
-                                            viewModelScope.launch {
-                                                readdBitrateRegulatorIfNeeded()
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                            // Return early; the actual switch will happen in the projection callback
-                            return@launch
-                        } else {
-                            Log.w(TAG, "MediaProjection required but no launcher available to request it")
-                            _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
-                            return@launch
-                        }
-                    } else {
-                        if (!isCurrentlyStreaming) {
-                            Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
-                        }
-                        
-                        // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
-                        _showBluetoothToggle.postValue(false)
-
-                        // Remove bitrate regulator if streaming with SRT
-                        removeBitrateRegulatorIfNeeded()
-                        
-                        // Cancel any existing retry job first
-                        rtmpRetryJob?.cancel()
-                        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-                            application = application,
-                            currentStreamer = currentStreamer,
-                            testBitmap = testBitmap,
-                            storageRepository = storageRepository,
-                            mediaProjectionHelper = mediaProjectionHelper,
-                            streamingMediaProjection = streamingMediaProjection,
-                            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-                            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                            onRtmpConnected = { player -> 
-                                monitorRtmpConnection(player)
-                                // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
-                                viewModelScope.launch {
-                                    readdBitrateRegulatorIfNeeded()
-                                }
-                            }
-                        )
-                    }
+            // Resolve the URL for this RTMP source index
+            val rtmpUrl = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    storageRepository.rtmpSourceUrlFlow(rtmpIndex).first()
                 }
-                else -> {
-                    Log.i(TAG, "Switching from RTMP back to Camera source (streaming: $isCurrentlyStreaming)")
+            } catch (e: Exception) {
+                storageRepository.defaultRtmpSourceUrl(rtmpIndex)
+            }
+
+            when {
+                // If this exact RTMP index is active, switch back to camera
+                currentActiveIndex == rtmpIndex -> {
+                    Log.i(TAG, "Switching from RTMP $rtmpIndex back to Camera source (streaming: $isCurrentlyStreaming)")
 
                     // Mark that user toggled RTMP OFF (back to camera)
-                    _userToggledRtmp.postValue(false)
+                    _activeRtmpIndex.postValue(null)
                     
                     // Show BT toggle - Camera uses microphone audio
                     _showBluetoothToggle.postValue(true)
@@ -3186,6 +3099,120 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Reapply audio monitoring if toggle is ON
                     if (_isMonitorAudioOn.value == true) {
                         applyMonitorAudioState()
+                    }
+                }
+                // Switch from camera (or bitmap fallback) to RTMP source
+                else -> {
+                    Log.i(TAG, "Switching to RTMP source $rtmpIndex: $rtmpUrl (streaming: $isCurrentlyStreaming)")
+                    
+                    // Mark that user toggled RTMP ON with this index
+                    _activeRtmpIndex.postValue(rtmpIndex)
+                    _userToggledUvc.postValue(false)
+                    
+                    // Suppress passthrough observer updates during source switch
+                    // to prevent monitor toggle from resetting to OFF
+                    suppressPassthroughObserver = true
+                    
+                    // Stop mic passthrough when switching to RTMP (RTMP uses ExoPlayer for audio monitoring)
+                    // Keep monitor toggle state - it will control ExoPlayer volume instead
+                    if (_isMonitorAudioOn.value == true) {
+                        service?.stopAudioPassthrough()
+                        Log.i(TAG, "Stopped mic passthrough when switching to RTMP (will use ExoPlayer volume instead)")
+                    }
+                    
+                    // Remember current camera ID before switching away
+                    if (videoSource is ICameraSource) {
+                        lastUsedCameraId = videoSource.cameraId
+                        Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
+                    }
+
+                    // Hide camera-specific sliders when switching away from camera
+                    showZoomSlider.value = false
+                    showExposureSlider.value = false
+                    showLensDistanceSlider.value = false
+
+                    // Only request MediaProjection when switching to RTMP while streaming.
+                    val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+                            && isCurrentlyStreaming
+                            && streamingMediaProjection == null
+                            && mediaProjectionHelper.getMediaProjection() == null
+
+                    if (needProjection) {
+                        if (mediaProjectionLauncher != null) {
+                            Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
+                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
+                                viewModelScope.launch {
+                                    streamingMediaProjection = projection
+                                    if (projection == null) {
+                                        // Permission denied - turn off RTMP toggle (BT toggle stays visible)
+                                        _activeRtmpIndex.postValue(null)
+                                        _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
+                                        return@launch
+                                    }
+                                    
+                                    // Permission granted - now hide BT toggle (RTMP uses MediaProjection audio)
+                                    _showBluetoothToggle.postValue(false)
+
+                                    // Now that we have projection, perform the RTMP source switch
+                                    // Cancel any existing retry job first
+                                    rtmpRetryJob?.cancel()
+                                    rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+                                        application = application,
+                                        currentStreamer = currentStreamer,
+                                        testBitmap = testBitmap,
+                                        videoSourceUrl = rtmpUrl,
+                                        storageRepository = storageRepository,
+                                        mediaProjectionHelper = mediaProjectionHelper,
+                                        streamingMediaProjection = streamingMediaProjection,
+                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                                        postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+                                        onRtmpConnected = { player -> 
+                                            monitorRtmpConnection(player)
+                                            viewModelScope.launch {
+                                                readdBitrateRegulatorIfNeeded()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            // Return early; the actual switch will happen in the projection callback
+                            return@launch
+                        } else {
+                            Log.w(TAG, "MediaProjection required but no launcher available to request it")
+                            _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
+                            return@launch
+                        }
+                    } else {
+                        if (!isCurrentlyStreaming) {
+                            Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
+                        }
+                        
+                        // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
+                        _showBluetoothToggle.postValue(false)
+
+                        // Remove bitrate regulator if streaming with SRT
+                        removeBitrateRegulatorIfNeeded()
+                        
+                        // Cancel any existing retry job first
+                        rtmpRetryJob?.cancel()
+                        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+                            application = application,
+                            currentStreamer = currentStreamer,
+                            testBitmap = testBitmap,
+                            videoSourceUrl = rtmpUrl,
+                            storageRepository = storageRepository,
+                            mediaProjectionHelper = mediaProjectionHelper,
+                            streamingMediaProjection = streamingMediaProjection,
+                            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+                            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+                            onRtmpConnected = { player -> 
+                                monitorRtmpConnection(player)
+                                viewModelScope.launch {
+                                    readdBitrateRegulatorIfNeeded()
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -3407,7 +3434,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                             try {
                                                 // Mark that user toggled UVC ON
                                                 _userToggledUvc.postValue(true)
-                                                _userToggledRtmp.postValue(false)
+                                                _activeRtmpIndex.postValue(null)
                                                 
                                                 // Remove bitrate regulator if streaming with SRT
                                                 removeBitrateRegulatorIfNeeded()
@@ -3540,7 +3567,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
                         _userToggledUvc.postValue(true)
-                        _userToggledRtmp.postValue(false)
+                        _activeRtmpIndex.postValue(null)
                         
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
@@ -3615,9 +3642,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isUvcSource: LiveData<Boolean> = _userToggledUvc
 
     /**
-     * Expose user toggle state for RTMP button
+     * Expose user toggle state for RTMP button.
+     * True when any RTMP source is active.
      */
-    val isRtmpSource: LiveData<Boolean> = _userToggledRtmp
+    val isRtmpSource: LiveData<Boolean> = _activeRtmpIndex.map { it != null }
+
+    /**
+     * Expose which RTMP source index is active (1-based), or null if not on RTMP.
+     */
+    val activeRtmpIndex: LiveData<Int?> = _activeRtmpIndex
+
+    /**
+     * Number of configured RTMP source URLs.
+     */
+    val rtmpSourceCount: LiveData<Int> = storageRepository.rtmpSourceCountFlow.asLiveData()
 
     /**
      * Show camera controls only when on camera source (neither RTMP nor UVC toggle is ON)
@@ -3625,11 +3663,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val showCameraControls: LiveData<Boolean> = MediatorLiveData<Boolean>().apply {
         value = true // Initial value: show controls when both toggles are OFF
         
-        var rtmpOn = _userToggledRtmp.value ?: false
+        var rtmpOn = _activeRtmpIndex.value != null
         var uvcOn = _userToggledUvc.value ?: false
         
-        addSource(_userToggledRtmp) { 
-            rtmpOn = it ?: false
+        addSource(_activeRtmpIndex) { 
+            rtmpOn = it != null
             value = !rtmpOn && !uvcOn
         }
         addSource(_userToggledUvc) { 

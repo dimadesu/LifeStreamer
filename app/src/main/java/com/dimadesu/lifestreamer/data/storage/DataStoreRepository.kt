@@ -184,11 +184,65 @@ class DataStoreRepository(
         }
     }.distinctUntilChanged()
 
-    // Flow for RTMP video source URL
+    // Flow for RTMP video source URL (primary, index 1)
     val rtmpVideoSourceUrlFlow: Flow<String> = dataStore.data.map { preferences ->
         preferences[stringPreferencesKey(context.getString(R.string.rtmp_source_url_key))]
             ?: context.getString(R.string.rtmp_source_default_url)
     }.distinctUntilChanged()
+
+    // Flow for RTMP source count (number of configured RTMP source URLs)
+    val rtmpSourceCountFlow: Flow<Int> = dataStore.data.map { preferences ->
+        preferences[intPreferencesKey(context.getString(R.string.rtmp_source_count_key))]
+            ?: 1
+    }.distinctUntilChanged()
+
+    /**
+     * Get the DataStore key for an RTMP source URL at the given 1-based index.
+     * Index 1 uses the original key for backward compatibility.
+     */
+    fun rtmpSourceUrlKey(index: Int): String {
+        val baseKey = context.getString(R.string.rtmp_source_url_key)
+        return if (index == 1) baseKey else "${baseKey}_$index"
+    }
+
+    /**
+     * Get the default URL for an RTMP source at the given 1-based index.
+     * Index 1 returns the base default URL; higher indices append the index number.
+     */
+    fun defaultRtmpSourceUrl(index: Int): String {
+        val baseUrl = context.getString(R.string.rtmp_source_default_url)
+        return if (index == 1) baseUrl else "$baseUrl$index"
+    }
+
+    /**
+     * Flow for RTMP source URL at a specific 1-based index.
+     */
+    fun rtmpSourceUrlFlow(index: Int): Flow<String> {
+        val key = rtmpSourceUrlKey(index)
+        return dataStore.data.map { preferences ->
+            preferences[stringPreferencesKey(key)]
+                ?: defaultRtmpSourceUrl(index)
+        }.distinctUntilChanged()
+    }
+
+    /**
+     * Set the RTMP source count.
+     */
+    suspend fun setRtmpSourceCount(count: Int) {
+        dataStore.edit { preferences ->
+            preferences[intPreferencesKey(context.getString(R.string.rtmp_source_count_key))] = count
+        }
+    }
+
+    /**
+     * Remove the RTMP source URL at the given 1-based index from DataStore.
+     */
+    suspend fun removeRtmpSourceUrl(index: Int) {
+        val key = rtmpSourceUrlKey(index)
+        dataStore.edit { preferences ->
+            preferences.remove(stringPreferencesKey(key))
+        }
+    }
 
     // Flow for RTMP source restart on disconnect setting
     val rtmpSourceRestartOnDisconnectFlow: Flow<Boolean> = dataStore.data.map { preferences ->

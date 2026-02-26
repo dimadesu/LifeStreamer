@@ -175,6 +175,7 @@ internal object RtmpSourceSwitchHelper {
         application: Application,
         currentStreamer: SingleStreamer,
         testBitmap: Bitmap,
+        videoSourceUrl: String,
         storageRepository: DataStoreRepository,
         mediaProjectionHelper: MediaProjectionHelper,
         streamingMediaProjection: MediaProjection?,
@@ -199,18 +200,10 @@ internal object RtmpSourceSwitchHelper {
                     // Show status message
                     if (isFirstAttempt) {
                         postRtmpStatus("Playing RTMP")
-                        Log.i(TAG, "Attempting to connect to RTMP source (first attempt)")
+                        Log.i(TAG, "Attempting to connect to RTMP source: $videoSourceUrl (first attempt)")
                     } else {
                         postRtmpStatus("Trying to play RTMP")
-                        Log.i(TAG, "Retrying RTMP connection (attempt $attemptCount)")
-                    }
-
-                    val videoSourceUrl = try {
-                        withContext(Dispatchers.IO) {
-                            storageRepository.rtmpVideoSourceUrlFlow.first()
-                        }
-                    } catch (e: Exception) {
-                        application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
+                        Log.i(TAG, "Retrying RTMP connection: $videoSourceUrl (attempt $attemptCount)")
                     }
 
                     val bufferForPlaybackMs = try {
