@@ -21,7 +21,7 @@
             android:max="6000"
             app:defaultValue="@string/default_rtmp_buffer_for_playback_ms"
             app:key="@string/rtmp_source_buffer_for_playback_ms_key"
-            app:min="2500"
+            app:min="500"
             app:showSeekBarValue="true"
             app:title="@string/rtmp_source_buffer_for_playback_ms_title"
             app:summary="@string/rtmp_source_buffer_for_playback_ms_summary" />
