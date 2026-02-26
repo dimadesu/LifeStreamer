@@ -243,12 +243,10 @@ internal object RtmpSourceSwitchHelper {
                     try {
                         // Prepare and wait for the RTMP player to be ready before touching streamer
                         // ExoPlayer operations must run on Main thread
-                        withTimeout(bufferForPlaybackMs.toLong() + 6500L) {
-                            exoPlayerInstance.prepare()
-                            exoPlayerInstance.playWhenReady = true
-                            val ready = awaitReady(exoPlayerInstance, bufferForPlaybackMs.toLong() + 4500L)
-                            if (!ready) throw Exception("ExoPlayer did not become ready")
-                        }
+                        exoPlayerInstance.prepare()
+                        exoPlayerInstance.playWhenReady = true
+                        val ready = awaitReady(exoPlayerInstance, bufferForPlaybackMs.toLong() + 5000L)
+                        if (!ready) throw Exception("ExoPlayer did not become ready")
 
                         // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {
