@@ -40,13 +40,13 @@ internal object RtmpSourceSwitchHelper {
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
-    suspend fun createExoPlayer(application: Application, url: String): ExoPlayer =
+    suspend fun createExoPlayer(application: Application, url: String, bufferForPlaybackMs: Int = 2500): ExoPlayer =
         withContext(Dispatchers.Main) {
             val loadControl = DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
                     DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,      // 50 seconds
                     DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,      // 50 seconds
-                    2500, // Start playback after 2.5s of buffering (more stable than 250ms)
+                    bufferForPlaybackMs, // Start playback after buffering this many ms
                     DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS  // 5 seconds
                 )
                 .build()
@@ -213,8 +213,16 @@ internal object RtmpSourceSwitchHelper {
                         application.getString(com.dimadesu.lifestreamer.R.string.rtmp_source_default_url)
                     }
 
+                    val bufferForPlaybackMs = try {
+                        withContext(Dispatchers.IO) {
+                            storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
+                        }
+                    } catch (e: Exception) {
+                        2500
+                    }
+
                     val exoPlayerInstance = try {
-                        createExoPlayer(application, videoSourceUrl)
+                        createExoPlayer(application, videoSourceUrl, bufferForPlaybackMs)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
                         null
@@ -235,7 +243,7 @@ internal object RtmpSourceSwitchHelper {
                     try {
                         // Prepare and wait for the RTMP player to be ready before touching streamer
                         // ExoPlayer operations must run on Main thread
-                        withTimeout(8000) { // Allow time for 2.5s buffer + connection overhead
+                        withTimeout((bufferForPlaybackMs + 5500).toLong()) { // Allow time for buffer + connection overhead
                             exoPlayerInstance.prepare()
                             exoPlayerInstance.playWhenReady = true
                             val ready = awaitReady(exoPlayerInstance)

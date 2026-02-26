@@ -159,6 +159,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<SeekBarPreference>(R.string.srt_server_video_min_bitrate_key) ?: error("srt_server_video_min_bitrate_key not found")
     }
 
+    private val rtmpSourceBufferForPlaybackMsPreference: SeekBarPreference by lazy {
+        findPreferenceSafe<SeekBarPreference>(R.string.rtmp_source_buffer_for_playback_ms_key) ?: error("rtmp_source_buffer_for_playback_ms_key not found")
+    }
+
     private val fileNamePreference: EditTextPreference by lazy {
         findPreferenceSafe<EditTextPreference>(R.string.file_name_key) ?: error("file_name_key not found")
     }
@@ -535,5 +539,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun loadPreferences() {
         loadEndpoint()
+        loadRtmpSourceSettings()
+    }
+
+    private fun loadRtmpSourceSettings() {
+        rtmpSourceBufferForPlaybackMsPreference.setOnPreferenceChangeListener { _, newValue ->
+            val rounded = roundBitrate(newValue as Int, step = 500)
+            if (rounded != newValue) {
+                rtmpSourceBufferForPlaybackMsPreference.value = rounded
+                false
+            } else {
+                true
+            }
+        }
     }
 }
