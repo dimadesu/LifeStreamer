@@ -119,7 +119,7 @@
     <string name="audio_profile_key">audio_profile_key</string>
 
     <!-- Audio Source -->
-    <string name="audio_source_type">Audio Source (try VC if USB audio is too loud/noisy)</string>
+    <string name="audio_source_type">Audio source (try VC if USB audio is too loud/noisy)</string>
     <string name="audio_source_type_key">audio_source_type_key</string>
 
     <!-- Endpoint -->
@@ -178,14 +178,18 @@
     <string name="server_url">URL</string>
 
     <!-- RTMP source -->
-    <string name="rtmp_source_category_title">RTMP Video/Audio Source</string>
+    <string name="rtmp_source_category_title">RTMP (or SRT) as source</string>
     <string name="rtmp_source_key">rtmp_source_key</string>
-    <string name="rtmp_source_title">RTMP Source URL (example: rtmp://localhost:1935/publish/live)</string>
+    <string name="rtmp_source_title">RTMP source URL (example: rtmp://localhost:1935/publish/live)</string>
     <string name="rtmp_source_url_key">rtmp_source_url_key</string>
     <string name="rtmp_source_default_url">rtmp://localhost:1935/publish/live</string>
     <string name="rtmp_source_restart_on_disconnect_key">rtmp_source_restart_on_disconnect_key</string>
     <string name="rtmp_source_restart_on_disconnect_title">Restart SRT stream on RTMP source disconnect</string>
-    <string name="rtmp_source_restart_on_disconnect_summary">Recommended. Fixes OBS media source playback issues when RTMP source disconnects</string>
+    <string name="rtmp_source_restart_on_disconnect_summary">Recommended. Fixes OBS media source playback issues when RTMP source disconnects.</string>
+    <string name="rtmp_source_buffer_for_playback_ms_key">rtmp_source_buffer_for_playback_ms_key</string>
+    <string name="rtmp_source_buffer_for_playback_ms_title">Player buffer (ms)</string>
+    <string name="rtmp_source_buffer_for_playback_ms_summary">Time in milliseconds to preload data before starting playback. Increase if playback is unstable. Default is 2500.</string>
+    <string name="default_rtmp_buffer_for_playback_ms">2500</string>
 
     <string name="file_endpoint_key">file_endpoint_key</string>
     <string name="file">File</string>
