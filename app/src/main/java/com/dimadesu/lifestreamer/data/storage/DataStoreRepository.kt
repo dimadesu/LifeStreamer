@@ -199,7 +199,7 @@ class DataStoreRepository(
     // Flow for RTMP source playback buffer duration in milliseconds
     val rtmpSourceBufferForPlaybackMsFlow: Flow<Int> = dataStore.data.map { preferences ->
         preferences[intPreferencesKey(context.getString(R.string.rtmp_source_buffer_for_playback_ms_key))]
-            ?: 2500
+            ?: context.getString(R.string.default_rtmp_buffer_for_playback_ms).toInt()
     }.distinctUntilChanged()
 
     val bitrateRegulatorConfigFlow: Flow<BitrateRegulatorConfig?> =

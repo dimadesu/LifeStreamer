@@ -31,6 +31,7 @@ import kotlinx.coroutines.isActive
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
+    private const val DEFAULT_BUFFER_FOR_PLAYBACK_MS = 2500
 
     /**
      * Check if the URL is an SRT URL.
@@ -40,7 +41,7 @@ internal object RtmpSourceSwitchHelper {
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
-    suspend fun createExoPlayer(application: Application, url: String, bufferForPlaybackMs: Int = 2500): ExoPlayer =
+    suspend fun createExoPlayer(application: Application, url: String, bufferForPlaybackMs: Int): ExoPlayer =
         withContext(Dispatchers.Main) {
             val loadControl = DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
@@ -218,7 +219,7 @@ internal object RtmpSourceSwitchHelper {
                             storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
                         }
                     } catch (e: Exception) {
-                        2500
+                        DEFAULT_BUFFER_FOR_PLAYBACK_MS
                     }
 
                     val exoPlayerInstance = try {

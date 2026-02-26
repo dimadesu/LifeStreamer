@@ -19,7 +19,7 @@
 
         <SeekBarPreference
             android:max="6000"
-            app:defaultValue="2500"
+            app:defaultValue="@string/default_rtmp_buffer_for_playback_ms"
             app:key="@string/rtmp_source_buffer_for_playback_ms_key"
             app:min="2500"
             app:showSeekBarValue="true"
