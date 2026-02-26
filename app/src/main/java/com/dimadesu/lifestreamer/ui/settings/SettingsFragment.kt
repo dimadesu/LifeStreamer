@@ -182,6 +182,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
         return (value / step) * step
     }
 
+    private fun loadRtmpSourceSettings() {
+        rtmpSourceBufferForPlaybackMsPreference.setOnPreferenceChangeListener { _, newValue ->
+            val rounded = roundBitrate(newValue as Int, step = 500)
+            if (rounded != newValue) {
+                rtmpSourceBufferForPlaybackMsPreference.value = rounded
+                false
+            } else {
+                true
+            }
+        }
+    }
+
     private fun loadVideoSettings() {
         // Inflates video encoders
         val supportedVideoEncoderName = mapOf(
@@ -538,19 +550,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun loadPreferences() {
-        loadEndpoint()
         loadRtmpSourceSettings()
-    }
-
-    private fun loadRtmpSourceSettings() {
-        rtmpSourceBufferForPlaybackMsPreference.setOnPreferenceChangeListener { _, newValue ->
-            val rounded = roundBitrate(newValue as Int, step = 500)
-            if (rounded != newValue) {
-                rtmpSourceBufferForPlaybackMsPreference.value = rounded
-                false
-            } else {
-                true
-            }
-        }
+        loadEndpoint()
     }
 }
