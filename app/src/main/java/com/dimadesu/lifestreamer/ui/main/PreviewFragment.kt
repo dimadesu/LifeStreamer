@@ -1087,14 +1087,17 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     /**
-     * Update background tint on all RTMP source buttons (including the first in XML)
+     * Update background tint and visibility on all RTMP source buttons (including the first in XML)
      * based on which RTMP source index is active.
+     * When an RTMP source is active, only the active button is shown; the rest are hidden.
      */
     private fun updateRtmpButtonColors(activeIndex: Int?) {
         val ctx = context ?: return
 
         // First button (index 1) from XML
         binding.switchSourceButton.backgroundTintList = getButtonColorStateList(ctx, activeIndex == 1)
+        binding.switchSourceButton.visibility =
+            if (activeIndex != null && activeIndex != 1) View.GONE else View.VISIBLE
 
         // Dynamic buttons (index 2, 3, ...)
         val container = binding.rtmpSourceButtonsContainer
@@ -1102,6 +1105,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             val button = container.getChildAt(i) as? android.widget.Button ?: continue
             val rtmpIndex = i + 2 // container child 0 = RTMP SRC 2, child 1 = RTMP SRC 3, etc.
             button.backgroundTintList = getButtonColorStateList(ctx, activeIndex == rtmpIndex)
+            button.visibility =
+                if (activeIndex != null && activeIndex != rtmpIndex) View.GONE else View.VISIBLE
         }
     }
 

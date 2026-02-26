@@ -200,7 +200,7 @@
                     android:layout_height="wrap_content"
                     android:text="RTMP SRC"
                     android:backgroundTint='@{viewmodel.isRtmpSource ? @color/active_button_green : @color/button_gray}'
-                    app:goneUnless="@{!viewmodel.isUvcSource}" />
+                    app:goneUnless="@{!viewmodel.isUvcSource &amp;&amp; (viewmodel.activeRtmpIndex == null || viewmodel.activeRtmpIndex == 1)}" />
 
                 <!-- Container for dynamically added RTMP source buttons (RTMP SRC 2, 3, ...) -->
                 <LinearLayout
