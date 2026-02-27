@@ -3029,80 +3029,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
 
             when {
-                // If this exact RTMP index is active, switch back to camera
-                currentActiveIndex == rtmpIndex -> {
-                    Log.i(TAG, "Switching from RTMP $rtmpIndex back to Camera source (streaming: $isCurrentlyStreaming)")
-
-                    // Mark that user toggled RTMP OFF (back to camera)
-                    _activeRtmpIndex.postValue(null)
-                    
-                    // Show BT toggle - Camera uses microphone audio
-                    _showBluetoothToggle.postValue(true)
-                    
-                    // Clear suppress flag (in case it was set and RTMP never connected)
-                    suppressPassthroughObserver = false
-
-                    // Clear RTMP status message FIRST before cancelling job
-                    // (job might be in middle of delay showing error message)
-                    // Use setValue for immediate effect since we're on main thread
-                    _rtmpStatusLiveData.value = null
-
-                    // Cancel any ongoing RTMP retry loop and reset disconnection flag
-                    rtmpRetryJob?.cancel()
-                    rtmpRetryJob = null
-                    isHandlingDisconnection = false // Reset flag when cancelling retry
-                    Log.i(TAG, "Cancelled RTMP retry loop and reset disconnection flag")
-                    
-                    // Cancel buffering check
-                    bufferingCheckJob?.cancel()
-                    bufferingCheckJob = null
-                    rtmpBufferingStartTime = 0L
-                    
-                    // Stop monitoring RTMP connection
-                    rtmpDisconnectListener?.let { listener ->
-                        try {
-                            currentRtmpPlayer?.removeListener(listener)
-                            Log.i(TAG, "Removed RTMP disconnect listener")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to remove RTMP listener: ${e.message}")
-                        }
-                    }
-                    rtmpDisconnectListener = null
-                    currentRtmpPlayer = null
-
-                    // Don't release streaming MediaProjection here - it's managed by stream lifecycle
-                    if (streamingMediaProjection == null) {
-                        mediaProjectionHelper.release()
-                    }
-
-                    // Add delay before switching sources to allow RTMP/ExoPlayer to fully release
-                    // This prevents resource conflicts when hot-swapping sources
-                    kotlinx.coroutines.delay(300)
-                    
-                    // Remove bitrate regulator if streaming with SRT
-                    removeBitrateRegulatorIfNeeded()
-                    
-                    // Switch to camera sources - restore last used camera if available
-                    val cameraId = lastUsedCameraId
-                    if (cameraId != null) {
-                        currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
-                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) with BT-aware audio")
-                    } else {
-                        currentStreamer.setVideoSource(CameraSourceFactory(application))
-                        Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
-                    }
-                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                    
-                    // Re-add bitrate regulator if streaming with SRT
-                    readdBitrateRegulatorIfNeeded()
-                    
-                    // Reapply audio monitoring if toggle is ON
-                    if (_isMonitorAudioOn.value == true) {
-                        applyMonitorAudioState()
-                    }
-                }
                 // Switch from camera (or bitmap fallback) to RTMP source
-                else -> {
+                currentActiveIndex != rtmpIndex -> {
                     Log.i(TAG, "Switching to RTMP source $rtmpIndex: $rtmpUrl (streaming: $isCurrentlyStreaming)")
                     
                     // Mark that user toggled RTMP ON with this index
@@ -3213,6 +3141,78 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                             }
                         )
+                    }
+                }
+                // If this exact RTMP index is active, switch back to camera
+                else -> {
+                    Log.i(TAG, "Switching from RTMP $rtmpIndex back to Camera source (streaming: $isCurrentlyStreaming)")
+
+                    // Mark that user toggled RTMP OFF (back to camera)
+                    _activeRtmpIndex.postValue(null)
+                    
+                    // Show BT toggle - Camera uses microphone audio
+                    _showBluetoothToggle.postValue(true)
+                    
+                    // Clear suppress flag (in case it was set and RTMP never connected)
+                    suppressPassthroughObserver = false
+
+                    // Clear RTMP status message FIRST before cancelling job
+                    // (job might be in middle of delay showing error message)
+                    // Use setValue for immediate effect since we're on main thread
+                    _rtmpStatusLiveData.value = null
+
+                    // Cancel any ongoing RTMP retry loop and reset disconnection flag
+                    rtmpRetryJob?.cancel()
+                    rtmpRetryJob = null
+                    isHandlingDisconnection = false // Reset flag when cancelling retry
+                    Log.i(TAG, "Cancelled RTMP retry loop and reset disconnection flag")
+                    
+                    // Cancel buffering check
+                    bufferingCheckJob?.cancel()
+                    bufferingCheckJob = null
+                    rtmpBufferingStartTime = 0L
+                    
+                    // Stop monitoring RTMP connection
+                    rtmpDisconnectListener?.let { listener ->
+                        try {
+                            currentRtmpPlayer?.removeListener(listener)
+                            Log.i(TAG, "Removed RTMP disconnect listener")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to remove RTMP listener: ${e.message}")
+                        }
+                    }
+                    rtmpDisconnectListener = null
+                    currentRtmpPlayer = null
+
+                    // Don't release streaming MediaProjection here - it's managed by stream lifecycle
+                    if (streamingMediaProjection == null) {
+                        mediaProjectionHelper.release()
+                    }
+
+                    // Add delay before switching sources to allow RTMP/ExoPlayer to fully release
+                    // This prevents resource conflicts when hot-swapping sources
+                    kotlinx.coroutines.delay(300)
+                    
+                    // Remove bitrate regulator if streaming with SRT
+                    removeBitrateRegulatorIfNeeded()
+                    
+                    // Switch to camera sources - restore last used camera if available
+                    val cameraId = lastUsedCameraId
+                    if (cameraId != null) {
+                        currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
+                        Log.i(TAG, "Switched back to camera video (restored camera: $cameraId) with BT-aware audio")
+                    } else {
+                        currentStreamer.setVideoSource(CameraSourceFactory(application))
+                        Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
+                    }
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                    
+                    // Re-add bitrate regulator if streaming with SRT
+                    readdBitrateRegulatorIfNeeded()
+                    
+                    // Reapply audio monitoring if toggle is ON
+                    if (_isMonitorAudioOn.value == true) {
+                        applyMonitorAudioState()
                     }
                 }
             }
