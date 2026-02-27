@@ -1072,7 +1072,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         val container = binding.rtmpSourceButtonsContainer
         container.removeAllViews()
 
-        for (i in 2..count) {
+        // Ensure the active RTMP source always has a button, even if it was removed from settings
+        val activeIndex = previewViewModel.activeRtmpIndex.value
+        val maxIndex = if (activeIndex != null && activeIndex > count) activeIndex else count
+
+        for (i in 2..maxIndex) {
             val button = android.widget.Button(requireContext()).apply {
                 text = "RTMP SRC $i"
                 layoutParams = android.widget.LinearLayout.LayoutParams(
