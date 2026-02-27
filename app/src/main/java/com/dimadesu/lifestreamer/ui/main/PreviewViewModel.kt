@@ -3010,13 +3010,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val videoSource = currentStreamer.videoInput?.sourceFlow?.value
         // Prefer the streamer's own state flow for an up-to-date streaming state.
         val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
-
-        // If a different RTMP source is already active, do nothing (user must deactivate current first)
         val currentActiveIndex = _activeRtmpIndex.value
-        if (currentActiveIndex != null && currentActiveIndex != rtmpIndex) {
-            Log.i(TAG, "RTMP source $currentActiveIndex is active, deactivate it before switching to $rtmpIndex")
-            return
-        }
 
         viewModelScope.launch {
             // Resolve the URL for this RTMP source index
