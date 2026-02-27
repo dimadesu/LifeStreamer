@@ -6,18 +6,21 @@
         app:title="@string/rtmp_source_category_title">
 
         <EditTextPreference
+            android:order="10"
             app:defaultValue="@string/rtmp_source_default_url"
             app:key="@string/rtmp_source_url_key"
             app:title="@string/rtmp_source_title"
             app:useSimpleSummaryProvider="true" />
 
         <SwitchPreference
+            android:order="900"
             app:defaultValue="true"
             app:key="@string/rtmp_source_restart_on_disconnect_key"
             app:title="@string/rtmp_source_restart_on_disconnect_title"
             app:summary="@string/rtmp_source_restart_on_disconnect_summary" />
 
         <SeekBarPreference
+            android:order="910"
             android:max="6000"
             app:defaultValue="@string/default_rtmp_buffer_for_playback_ms"
             app:key="@string/rtmp_source_buffer_for_playback_ms_key"

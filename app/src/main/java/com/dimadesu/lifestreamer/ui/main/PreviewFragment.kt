@@ -143,7 +143,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.switchSourceButton.setOnClickListener {
-            previewViewModel.toggleVideoSource(mediaProjectionLauncher)
+            previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = 1)
         }
 
         binding.toggleUvcButton.setOnClickListener {
@@ -161,6 +161,19 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         
         // Setup audio source spinner
         setupAudioSourceSpinner()
+
+        // Observe RTMP source count to dynamically add/remove RTMP SRC buttons
+        previewViewModel.rtmpSourceCount.observe(viewLifecycleOwner) { count ->
+            rebuildDynamicRtmpButtons(count)
+        }
+
+        // Observe active RTMP index to colorize all RTMP buttons and rebuild
+        // (rebuild is needed because the button count may change when a deleted source is toggled off)
+        previewViewModel.activeRtmpIndex.observe(viewLifecycleOwner) { activeIndex ->
+            val count = previewViewModel.rtmpSourceCount.value ?: 1
+            rebuildDynamicRtmpButtons(count)
+            updateRtmpButtonColors(activeIndex)
+        }
 
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
             error?.let {
@@ -639,6 +652,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         previewViewModel.onUiResumed()
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
+        // Reapply RTMP button visibility (observer won't re-fire if value unchanged)
+        updateRtmpButtonColors(previewViewModel.activeRtmpIndex.value)
+        
         // Request permissions in onResume() instead of onStart() to fix preview freeze
         // when quickly going to settings and back (StreamPack fix 78f1dc28c)
         requestCameraAndMicrophonePermissions()
@@ -1049,6 +1065,60 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             else 
                 androidx.core.content.ContextCompat.getColor(context, R.color.button_gray)
         )
+    }
+
+    /**
+     * Rebuild dynamic RTMP source buttons (RTMP SRC 2, 3, ...) in the container.
+     * The first RTMP SRC button is always in XML; this handles additional sources.
+     */
+    private fun rebuildDynamicRtmpButtons(count: Int) {
+        val container = binding.rtmpSourceButtonsContainer
+        container.removeAllViews()
+
+        // Ensure the active RTMP source always has a button, even if it was removed from settings
+        val activeIndex = previewViewModel.activeRtmpIndex.value
+        val maxIndex = if (activeIndex != null && activeIndex > count) activeIndex else count
+
+        for (i in 2..maxIndex) {
+            val button = android.widget.Button(requireContext()).apply {
+                text = "RTMP SRC $i"
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                val activeIndex = previewViewModel.activeRtmpIndex.value
+                backgroundTintList = getButtonColorStateList(requireContext(), activeIndex == i)
+                visibility = if (activeIndex != null && activeIndex != i) View.GONE else View.VISIBLE
+                setOnClickListener {
+                    previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = i)
+                }
+            }
+            container.addView(button)
+        }
+    }
+
+    /**
+     * Update background tint and visibility on all RTMP source buttons (including the first in XML)
+     * based on which RTMP source index is active.
+     * When an RTMP source is active, only the active button is shown; the rest are hidden.
+     */
+    private fun updateRtmpButtonColors(activeIndex: Int?) {
+        val ctx = context ?: return
+
+        // First button (index 1) from XML
+        binding.switchSourceButton.backgroundTintList = getButtonColorStateList(ctx, activeIndex == 1)
+        binding.switchSourceButton.visibility =
+            if (activeIndex != null && activeIndex != 1) View.GONE else View.VISIBLE
+
+        // Dynamic buttons (index 2, 3, ...)
+        val container = binding.rtmpSourceButtonsContainer
+        for (i in 0 until container.childCount) {
+            val button = container.getChildAt(i) as? android.widget.Button ?: continue
+            val rtmpIndex = i + 2 // container child 0 = RTMP SRC 2, child 1 = RTMP SRC 3, etc.
+            button.backgroundTintList = getButtonColorStateList(ctx, activeIndex == rtmpIndex)
+            button.visibility =
+                if (activeIndex != null && activeIndex != rtmpIndex) View.GONE else View.VISIBLE
+        }
     }
 
     companion object {

@@ -190,6 +190,10 @@
     <string name="rtmp_source_buffer_for_playback_ms_title">Player buffer (ms)</string>
     <string name="rtmp_source_buffer_for_playback_ms_summary">Time in milliseconds to preload data before starting playback. Increase if playback is unstable. Default is 2500.</string>
     <string name="default_rtmp_buffer_for_playback_ms">2500</string>
+    <string name="rtmp_source_count_key">rtmp_source_count_key</string>
+    <string name="rtmp_source_add_title">Add RTMP source URL</string>
+    <string name="rtmp_source_remove_title">Remove last RTMP source URL</string>
+    <string name="rtmp_source_url_title_numbered">RTMP source URL %d</string>
 
     <string name="file_endpoint_key">file_endpoint_key</string>
     <string name="file">File</string>

@@ -25,11 +25,13 @@ import android.text.InputType
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreference
 import com.dimadesu.lifestreamer.R
+import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.data.storage.PreferencesDataStoreAdapter
 import com.dimadesu.lifestreamer.models.EndpointFactory
 import com.dimadesu.lifestreamer.models.EndpointType
@@ -45,11 +47,14 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.exten
 import io.github.thibaultbee.streampack.core.streamers.infos.CameraStreamerConfigurationInfo
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.io.IOException
 
 class SettingsFragment : PreferenceFragmentCompat() {
     private lateinit var streamerInfo: CameraStreamerConfigurationInfo
     private val profileLevelDisplay by lazy { ProfileLevelDisplay(requireContext()) }
+    private val storageRepository by lazy { DataStoreRepository(requireContext(), requireContext().dataStore) }
 
     /**
      * Safe preference finder that logs error if preference not found instead of crashing
@@ -191,6 +196,86 @@ class SettingsFragment : PreferenceFragmentCompat() {
             } else {
                 true
             }
+        }
+
+        // Dynamic RTMP source URLs
+        val rtmpCategory = findPreferenceSafe<PreferenceCategory>(R.string.rtmp_source_key)
+        if (rtmpCategory != null) {
+            lifecycleScope.launch {
+                val count = storageRepository.rtmpSourceCountFlow.first()
+                rebuildRtmpSourceUrlPreferences(rtmpCategory, count)
+            }
+        }
+    }
+
+    /**
+     * Rebuild the dynamic RTMP source URL preferences (sources 2+) and add/remove buttons.
+     */
+    private fun rebuildRtmpSourceUrlPreferences(category: PreferenceCategory, count: Int) {
+        // Remove previously added dynamic preferences (URLs 2+, add/remove buttons)
+        // Identified by order: URL prefs have order 12..N, add=800, remove=801
+        val toRemove = mutableListOf<Preference>()
+        for (i in 0 until category.preferenceCount) {
+            val pref = category.getPreference(i)
+            val order = pref.order
+            if ((order in 12..899) || order == 800 || order == 801) {
+                toRemove.add(pref)
+            }
+        }
+        toRemove.forEach { category.removePreference(it) }
+
+        // Add EditTextPreference for each additional URL (index 2..count)
+        for (i in 2..count) {
+            val actualKey = storageRepository.rtmpSourceUrlKey(i)
+            val urlPref = EditTextPreference(requireContext()).apply {
+                key = actualKey
+                title = getString(R.string.rtmp_source_url_title_numbered, i)
+                order = 10 + i // after URL 1 (order=10), before shared settings (order=900)
+                summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
+            }
+            category.addPreference(urlPref)
+            // Set default if empty (must be done after adding to category so DataStore adapter is active)
+            if (urlPref.text.isNullOrEmpty()) {
+                urlPref.text = storageRepository.defaultRtmpSourceUrl(i)
+            }
+        }
+
+        // "Add RTMP source" button
+        val addPref = Preference(requireContext()).apply {
+            key = "rtmp_source_add_btn"
+            title = getString(R.string.rtmp_source_add_title)
+            order = 800
+            setOnPreferenceClickListener {
+                lifecycleScope.launch {
+                    val currentCount = storageRepository.rtmpSourceCountFlow.first()
+                    val newCount = currentCount + 1
+                    storageRepository.setRtmpSourceCount(newCount)
+                    rebuildRtmpSourceUrlPreferences(category, newCount)
+                }
+                true
+            }
+        }
+        category.addPreference(addPref)
+
+        // "Remove last RTMP source" button (only when count > 1)
+        if (count > 1) {
+            val removePref = Preference(requireContext()).apply {
+                key = "rtmp_source_remove_btn"
+                title = getString(R.string.rtmp_source_remove_title)
+                order = 801
+                setOnPreferenceClickListener {
+                    lifecycleScope.launch {
+                        val currentCount = storageRepository.rtmpSourceCountFlow.first()
+                        if (currentCount > 1) {
+                            storageRepository.removeRtmpSourceUrl(currentCount)
+                            storageRepository.setRtmpSourceCount(currentCount - 1)
+                            rebuildRtmpSourceUrlPreferences(category, currentCount - 1)
+                        }
+                    }
+                    true
+                }
+            }
+            category.addPreference(removePref)
         }
     }
 
