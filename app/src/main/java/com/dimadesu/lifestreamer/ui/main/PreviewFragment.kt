@@ -167,8 +167,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             rebuildDynamicRtmpButtons(count)
         }
 
-        // Observe active RTMP index to colorize all RTMP buttons
+        // Observe active RTMP index to colorize all RTMP buttons and rebuild
+        // (rebuild is needed because the button count may change when a deleted source is toggled off)
         previewViewModel.activeRtmpIndex.observe(viewLifecycleOwner) { activeIndex ->
+            val count = previewViewModel.rtmpSourceCount.value ?: 1
+            rebuildDynamicRtmpButtons(count)
             updateRtmpButtonColors(activeIndex)
         }
 
