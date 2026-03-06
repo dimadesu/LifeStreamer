@@ -201,10 +201,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         // Dynamic RTMP source URLs
         val rtmpCategory = findPreferenceSafe<PreferenceCategory>(R.string.rtmp_source_key)
         if (rtmpCategory != null) {
-            lifecycleScope.launch {
-                val count = storageRepository.rtmpSourceCountFlow.first()
-                rebuildRtmpSourceUrlPreferences(rtmpCategory, count)
-            }
+            // Read count synchronously (via PreferencesDataStoreAdapter) to avoid UI jump
+            val count = preferenceManager.preferenceDataStore?.getInt(
+                getString(R.string.rtmp_source_count_key), 1
+            ) ?: 1
+            rebuildRtmpSourceUrlPreferences(rtmpCategory, count)
         }
     }
 
