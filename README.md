@@ -37,6 +37,8 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 - Mics from Bluetooth headphones, earbuds, etc.
 - For RTMP and SRT sources app uses Media Projection Audio to record RTMP/SRT player audio - kind of like phone screen recorder.
 
+![LifeStreamer app: inputs and outputs diagram](docs/LifeStreamer-inputs-outputs-diagram.png)
+
 ## Apps that can work together
 
 See the [demo video on YouTube](https://www.youtube.com/watch?v=_zlWsQYxrE4).
