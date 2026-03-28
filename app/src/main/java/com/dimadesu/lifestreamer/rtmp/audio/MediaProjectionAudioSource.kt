@@ -55,8 +55,10 @@ class MediaProjectionAudioSourceFactory(
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {
-        // Check if it's the same type AND the same MediaProjection instance
-        // This is important because MediaProjection tokens expire and need to be replaced
-        return source is MediaProjectionAudioSource && source.mediaProjection === mediaProjection
+        // Always return false to force AudioRecord recreation.
+        // When ExoPlayer is replaced (RTMP reconnect), Android's AudioPlaybackCapture
+        // routing may not update for the existing AudioRecord, causing permanent silence.
+        // Recreating the AudioRecord guarantees fresh capture routing.
+        return false
     }
 }
