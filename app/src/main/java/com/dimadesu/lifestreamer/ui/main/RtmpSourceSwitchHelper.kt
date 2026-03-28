@@ -254,25 +254,21 @@ internal object RtmpSourceSwitchHelper {
                             // Set audio source: prefer MediaProjection if streaming, otherwise microphone
                             val isStreaming = currentStreamer.isStreamingFlow.value == true
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                            val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                            val currentAudioIsMediaProjection = currentAudioSource is io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
                             
                             if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                // Use MediaProjection audio when streaming
-                                // But check if we already have MediaProjection audio to avoid "audio policy" error
-                                if (currentAudioIsMediaProjection) {
-                                    Log.i(TAG, "MediaProjection audio already set, keeping it for RTMP")
-                                } else {
+                                // Always recreate MediaProjection audio when switching to RTMP.
+                                // After ExoPlayer replacement, Android's AudioPlaybackCapture routing
+                                // may not update for an existing AudioRecord, causing silent audio.
+                                // Force-recreating the AudioRecord guarantees fresh capture routing.
+                                try {
+                                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
+                                    Log.i(TAG, "Set MediaProjection audio for RTMP (fresh AudioRecord)")
+                                } catch (ae: Exception) {
+                                    Log.w(TAG, "MediaProjection audio failed, using conditional source: ${ae.message}")
                                     try {
-                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                                        Log.i(TAG, "Set MediaProjection audio for RTMP")
-                                    } catch (ae: Exception) {
-                                        Log.w(TAG, "MediaProjection audio failed, using conditional source: ${ae.message}")
-                                        try {
-                                            currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                                        } catch (micEx: Exception) {
-                                            Log.w(TAG, "Conditional source fallback failed: ${micEx.message}")
-                                        }
+                                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                                    } catch (micEx: Exception) {
+                                        Log.w(TAG, "Conditional source fallback failed: ${micEx.message}")
                                     }
                                 }
                             } else {
