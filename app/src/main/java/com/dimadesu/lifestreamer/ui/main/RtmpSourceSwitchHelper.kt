@@ -28,6 +28,7 @@ import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.player.SrtDataSourceFactory
 import com.dimadesu.lifestreamer.player.TsOnlyExtractorFactory
 import kotlinx.coroutines.isActive
+import kotlin.coroutines.cancellation.CancellationException
 
 internal object RtmpSourceSwitchHelper {
     private const val TAG = "RtmpSourceSwitchHelper"
@@ -210,12 +211,16 @@ internal object RtmpSourceSwitchHelper {
                         withContext(Dispatchers.IO) {
                             storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
                         }
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         application.getString(com.dimadesu.lifestreamer.R.string.default_rtmp_buffer_for_playback_ms).toInt()
                     }
 
                     val exoPlayerInstance = try {
                         createExoPlayer(application, videoSourceUrl, bufferForPlaybackMs)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to prepare ExoPlayer for RTMP preview: ${e.message}", e)
                         null
@@ -240,6 +245,37 @@ internal object RtmpSourceSwitchHelper {
                         exoPlayerInstance.playWhenReady = true
                         val ready = awaitReady(exoPlayerInstance, bufferForPlaybackMs.toLong() + 5000L)
                         if (!ready) throw Exception("ExoPlayer did not become ready")
+
+                        // FLV extractor locks tracks at FLV header time. If ExoPlayer
+                        // connected before the RTMP server had audio flowing, the header
+                        // has hasAudio=false and audio is permanently missing for this
+                        // instance. Release and retry — next attempt will likely have audio.
+                        val requireAudioTrack = try {
+                            withContext(Dispatchers.IO) {
+                                storageRepository.rtmpSourceRequireAudioTrackFlow.first()
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            true
+                        }
+                        if (requireAudioTrack) {
+                            val hasAudioTrack = exoPlayerInstance.currentTracks.groups.any { g ->
+                                (0 until g.length).any { g.getTrackFormat(it).sampleMimeType?.startsWith("audio/") == true }
+                            }
+                            if (!hasAudioTrack) {
+                                Log.w(TAG, "ExoPlayer has no audio tracks — RTMP server likely not sending audio yet. Retrying.")
+                                try { exoPlayerInstance.release() } catch (_: Exception) {}
+                                if (isFirstAttempt) {
+                                    switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
+                                }
+                                if (isActive) {
+                                    postRtmpStatus("No audio track detected. Retrying in 5 seconds")
+                                }
+                                delay(5000)
+                                continue
+                            }
+                        }
 
                         // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {
@@ -318,6 +354,12 @@ internal object RtmpSourceSwitchHelper {
                             
                             // Success - exit retry loop
                             return@launch
+                        } catch (e: CancellationException) {
+                            // Coroutine cancelled (e.g. user toggled RTMP off, or disconnect handler
+                            // is replacing this retry loop). Release ExoPlayer and propagate immediately.
+                            Log.i(TAG, "RTMP source attachment cancelled, releasing ExoPlayer")
+                            try { exoPlayerInstance.release() } catch (_: Exception) {}
+                            throw e
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to attach RTMP exoplayer to streamer: ${e.message}", e)
                             try { exoPlayerInstance.release() } catch (_: Exception) {}
@@ -332,6 +374,10 @@ internal object RtmpSourceSwitchHelper {
                             delay(5000)
                             continue
                         }
+                    } catch (e: CancellationException) {
+                        Log.i(TAG, "RTMP playback cancelled, releasing ExoPlayer")
+                        try { exoPlayerInstance.release() } catch (_: Exception) {}
+                        throw e
                     } catch (t: Throwable) {
                         Log.e(TAG, "RTMP playback failed or timed out: ${t.message}", t)
                         try { exoPlayerInstance.release() } catch (_: Exception) {}
@@ -346,6 +392,8 @@ internal object RtmpSourceSwitchHelper {
                         delay(5000)
                         continue
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "switchToRtmpSource unexpected error: ${e.message}", e)
                     // Wait and retry
