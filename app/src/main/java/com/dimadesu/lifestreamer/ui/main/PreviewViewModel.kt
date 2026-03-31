@@ -2778,6 +2778,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         rtmpRetryJob?.cancelAndJoin()
         rtmpRetryJob = null
         
+        // Cancel pending buffering check to prevent it from re-triggering
+        // handleRtmpDisconnection() during reconnection
+        bufferingCheckJob?.cancel()
+        bufferingCheckJob = null
+        rtmpBufferingStartTime = 0L
+        
+        // Remove disconnect listener before releasing ExoPlayer to prevent
+        // STATE_IDLE callbacks from re-triggering handleRtmpDisconnection()
+        rtmpDisconnectListener?.let { listener ->
+            try { currentRtmpPlayer?.removeListener(listener) } catch (_: Exception) {}
+        }
+        rtmpDisconnectListener = null
+        
         // Release the old ExoPlayer
         currentRtmpPlayer?.let { player ->
             try {
@@ -2900,6 +2913,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // actual completion, preventing races with the cleanup below.
         rtmpRetryJob?.cancelAndJoin()
         rtmpRetryJob = null
+        
+        // Cancel pending buffering check to prevent it from re-triggering
+        // handleRtmpDisconnection() during reconnection
+        bufferingCheckJob?.cancel()
+        bufferingCheckJob = null
+        rtmpBufferingStartTime = 0L
+        
+        // Remove disconnect listener before releasing ExoPlayer to prevent
+        // STATE_IDLE callbacks from re-triggering handleRtmpDisconnection()
+        rtmpDisconnectListener?.let { listener ->
+            try { currentRtmpPlayer?.removeListener(listener) } catch (_: Exception) {}
+        }
+        rtmpDisconnectListener = null
         
         // Remove bitrate regulator if streaming with SRT
         if (isStreaming) {
