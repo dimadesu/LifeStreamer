@@ -97,6 +97,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -2768,8 +2770,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.w(TAG, "Could not set reconnecting state - orientation may unlock during restart")
         }
         
-        // Cancel existing retry job if any
-        rtmpRetryJob?.cancel()
+        // Cancel existing retry job and wait for it to finish.
+        // The retry loop runs on a standalone CoroutineScope(Dispatchers.Main),
+        // so cancel() alone doesn't guarantee the old loop has stopped —
+        // it may be mid-ExoPlayer-attachment. cancelAndJoin() waits for
+        // actual completion, preventing races with the cleanup below.
+        rtmpRetryJob?.cancelAndJoin()
+        rtmpRetryJob = null
         
         // Release the old ExoPlayer
         currentRtmpPlayer?.let { player ->
@@ -2886,8 +2893,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun handleRtmpDisconnectionWithHotSwap(currentStreamer: SingleStreamer, isStreaming: Boolean) {
         Log.i(TAG, "Handling RTMP disconnection - falling back to bitmap and retrying (hot-swap, streaming=$isStreaming)")
         
-        // Cancel existing retry job if any
-        rtmpRetryJob?.cancel()
+        // Cancel existing retry job and wait for it to finish.
+        // The retry loop runs on a standalone CoroutineScope(Dispatchers.Main),
+        // so cancel() alone doesn't guarantee the old loop has stopped —
+        // it may be mid-ExoPlayer-attachment. cancelAndJoin() waits for
+        // actual completion, preventing races with the cleanup below.
+        rtmpRetryJob?.cancelAndJoin()
+        rtmpRetryJob = null
         
         // Remove bitrate regulator if streaming with SRT
         if (isStreaming) {
