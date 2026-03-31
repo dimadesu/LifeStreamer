@@ -246,6 +246,20 @@ internal object RtmpSourceSwitchHelper {
                         val ready = awaitReady(exoPlayerInstance, bufferForPlaybackMs.toLong() + 5000L)
                         if (!ready) throw Exception("ExoPlayer did not become ready")
 
+                        // FLV extractor locks tracks at FLV header time. If ExoPlayer
+                        // connected before the RTMP server had audio flowing, the header
+                        // has hasAudio=false and audio is permanently missing for this
+                        // instance. Release and retry — next attempt will likely have audio.
+                        val hasAudioTrack = exoPlayerInstance.currentTracks.groups.any { g ->
+                            (0 until g.length).any { g.getTrackFormat(it).sampleMimeType?.startsWith("audio/") == true }
+                        }
+                        if (!hasAudioTrack) {
+                            Log.w(TAG, "ExoPlayer has no audio tracks — RTMP server likely not sending audio yet. Retrying.")
+                            try { exoPlayerInstance.release() } catch (_: Exception) {}
+                            delay(2000)
+                            continue
+                        }
+
                         // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {
                             // Add delay before switching sources to allow previous sources to fully release
