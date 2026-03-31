@@ -250,14 +250,31 @@ internal object RtmpSourceSwitchHelper {
                         // connected before the RTMP server had audio flowing, the header
                         // has hasAudio=false and audio is permanently missing for this
                         // instance. Release and retry — next attempt will likely have audio.
-                        val hasAudioTrack = exoPlayerInstance.currentTracks.groups.any { g ->
-                            (0 until g.length).any { g.getTrackFormat(it).sampleMimeType?.startsWith("audio/") == true }
+                        val requireAudioTrack = try {
+                            withContext(Dispatchers.IO) {
+                                storageRepository.rtmpSourceRequireAudioTrackFlow.first()
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            true
                         }
-                        if (!hasAudioTrack) {
-                            Log.w(TAG, "ExoPlayer has no audio tracks — RTMP server likely not sending audio yet. Retrying.")
-                            try { exoPlayerInstance.release() } catch (_: Exception) {}
-                            delay(2000)
-                            continue
+                        if (requireAudioTrack) {
+                            val hasAudioTrack = exoPlayerInstance.currentTracks.groups.any { g ->
+                                (0 until g.length).any { g.getTrackFormat(it).sampleMimeType?.startsWith("audio/") == true }
+                            }
+                            if (!hasAudioTrack) {
+                                Log.w(TAG, "ExoPlayer has no audio tracks — RTMP server likely not sending audio yet. Retrying.")
+                                try { exoPlayerInstance.release() } catch (_: Exception) {}
+                                if (isFirstAttempt) {
+                                    switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
+                                }
+                                if (isActive) {
+                                    postRtmpStatus("No audio track detected. Retrying in 5 seconds")
+                                }
+                                delay(5000)
+                                continue
+                            }
                         }
 
                         // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.

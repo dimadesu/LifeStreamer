@@ -250,6 +250,12 @@ class DataStoreRepository(
             ?: true // Default to true (recommended)
     }.distinctUntilChanged()
 
+    // Flow for requiring audio track in RTMP source playback
+    val rtmpSourceRequireAudioTrackFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[booleanPreferencesKey(context.getString(R.string.rtmp_source_require_audio_track_key))]
+            ?: true // Default to true
+    }.distinctUntilChanged()
+
     // Flow for RTMP source playback buffer duration in milliseconds
     val rtmpSourceBufferForPlaybackMsFlow: Flow<Int> = dataStore.data.map { preferences ->
         preferences[intPreferencesKey(context.getString(R.string.rtmp_source_buffer_for_playback_ms_key))]
