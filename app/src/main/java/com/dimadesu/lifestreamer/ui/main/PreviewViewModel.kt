@@ -55,7 +55,9 @@ import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSo
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
+import com.dimadesu.lifestreamer.utils.blurForTransition
 import com.dimadesu.lifestreamer.utils.setNextCameraId
+import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import com.dimadesu.lifestreamer.utils.toggleBackToFront
 import com.dimadesu.lifestreamer.utils.ReconnectTimer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameras
@@ -2517,13 +2519,40 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         val videoSource = currentStreamer.videoInput?.sourceFlow?.value
         if (videoSource is ICameraSource) {
+            // Compute the next camera ID from the current one while we still hold a
+            // confirmed ICameraSource reference — avoids a race if another switch runs
+            // concurrently and replaces the source before we enter the mutex.
+            val cameraManager = application.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            val cameras = cameraManager.cameraIdList.toList()
+            val currentIndex = cameras.indexOf(videoSource.cameraId)
+            val newCameraId = cameras[(currentIndex + 1) % cameras.size]
             viewModelScope.launch(defaultDispatcher) {
                 videoSourceMutex.withLock {
                     try {
-                        // Add delay before switching camera to allow previous camera to fully release
-                        // This prevents resource conflicts when hot-swapping cameras
-                        delay(300)
-                        currentStreamer.setNextCameraId(application)
+                        if (currentStreamer.isStreamingFlow.value == true) {
+                            // While streaming: inject a blurred frozen frame so the encoder
+                            // keeps producing output during the camera switch gap.  OBS / the
+                            // SRT receiver always has frames to decode and shows a deliberate
+                            // visual transition instead of a glitch or dropout.
+                            val frozenBlurred = try {
+                                currentStreamer.videoInput?.takeSnapshot(0)?.blurForTransition()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Could not take snapshot for transition, falling back to plain delay", e)
+                                null
+                            }
+                            if (frozenBlurred != null) {
+                                currentStreamer.setVideoSource(BitmapSourceFactory(frozenBlurred))
+                                // Give BitmapSource one or two frames to reach the encoder
+                                // before we tear down the bitmap source and open the new camera.
+                                delay(50)
+                            } else {
+                                delay(300)
+                            }
+                        } else {
+                            // Not streaming (preview-only): plain delay is sufficient.
+                            delay(300)
+                        }
+                        currentStreamer.setCameraId(newCameraId)
                         Log.i(TAG, "Camera toggled successfully")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to toggle camera", e)

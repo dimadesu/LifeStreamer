@@ -18,6 +18,7 @@ package com.dimadesu.lifestreamer.utils
 import android.Manifest
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -33,20 +34,38 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.exten
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 
+/**
+ * Returns the camera ID that [setNextCameraId] would switch to, without performing the switch.
+ */
 @RequiresPermission(Manifest.permission.CAMERA)
-suspend fun IWithVideoSource.setNextCameraId(context: Context) {
+fun IWithVideoSource.getNextCameraId(context: Context): String {
     val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     val cameras = cameraManager.cameraIdList.toList()
     val videoSource = videoInput?.sourceFlow?.value
-
-    val newCameraId = if (videoSource is ICameraSource) {
-        val currentCameraIndex = cameras.indexOf(videoSource.cameraId)
-        (currentCameraIndex + 1) % cameras.size
+    val newCameraIndex = if (videoSource is ICameraSource) {
+        (cameras.indexOf(videoSource.cameraId) + 1) % cameras.size
     } else {
         0
     }
+    return cameras[newCameraIndex]
+}
 
-    setCameraId(cameras[newCameraId])
+@RequiresPermission(Manifest.permission.CAMERA)
+suspend fun IWithVideoSource.setNextCameraId(context: Context) {
+    setCameraId(getNextCameraId(context))
+}
+
+/**
+ * Returns a blurred copy of this bitmap suitable for use as a transition frame.
+ *
+ * Achieved by scaling down to 1/8 size and back up with bilinear filtering —
+ * fast, allocation-light, and works on API 24+.
+ */
+fun Bitmap.blurForTransition(): Bitmap {
+    val smallWidth = (width / 8).coerceAtLeast(1)
+    val smallHeight = (height / 8).coerceAtLeast(1)
+    val small = Bitmap.createScaledBitmap(this, smallWidth, smallHeight, true)
+    return Bitmap.createScaledBitmap(small, width, height, true)
 }
 
 @RequiresPermission(Manifest.permission.CAMERA)
