@@ -55,7 +55,6 @@ import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSo
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
-import com.dimadesu.lifestreamer.utils.blurForTransition
 import com.dimadesu.lifestreamer.utils.setNextCameraId
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import com.dimadesu.lifestreamer.utils.toggleBackToFront
@@ -2504,9 +2503,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
-     * Switch to a specific camera by ID, injecting a blurred frozen frame during the
+     * Switch to a specific camera by ID, injecting a black frame during the
      * transition so the encoder stays fed and OBS / SRT receivers see no gap.
-     * Falls back to a plain delay if snapshot fails or not currently streaming.
+     * The black frame is held long enough for the old camera to fully tear down
+     * and the new camera's 3A (auto-exposure, AWB) to converge.
      */
     @RequiresPermission(Manifest.permission.CAMERA)
     fun switchCameraWithTransition(cameraId: String) {
@@ -2521,21 +2521,24 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             videoSourceMutex.withLock {
                 try {
                     if (currentStreamer.isStreamingFlow.value == true) {
-                        val frozenBlurred = try {
-                            currentStreamer.videoInput?.takeSnapshot(0)?.blurForTransition()
+                        // Snapshot only to get current frame dimensions;
+                        // fall back to 1920×1080 if it fails.
+                        val snapshot = try {
+                            currentStreamer.videoInput?.takeSnapshot(0)
                         } catch (e: Exception) {
-                            Log.w(TAG, "Could not take snapshot for transition, falling back to plain delay", e)
+                            Log.w(TAG, "Could not take snapshot for transition frame size", e)
                             null
                         }
-                        if (frozenBlurred != null) {
-                            currentStreamer.setVideoSource(BitmapSourceFactory(frozenBlurred))
-                            // 400ms: camera2 session teardown is async and takes ~180-300ms.
-                            // This gives the old camera time to fully release while the
-                            // blurred frozen frame keeps the encoder fed throughout.
-                            delay(400)
-                        } else {
-                            delay(400)
-                        }
+                        val blackFrame = Bitmap.createBitmap(
+                            snapshot?.width ?: 1920,
+                            snapshot?.height ?: 1080,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        snapshot?.recycle()
+                        currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
+                        // 3s: covers camera2 teardown (~300ms) + new camera open +
+                        // 3A convergence (~1-1.5s) with margin to avoid any artifacts.
+                        delay(3000)
                     } else {
                         delay(300)
                     }
@@ -2576,25 +2579,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 videoSourceMutex.withLock {
                     try {
                         if (currentStreamer.isStreamingFlow.value == true) {
-                            // While streaming: inject a blurred frozen frame so the encoder
-                            // keeps producing output during the camera switch gap.  OBS / the
-                            // SRT receiver always has frames to decode and shows a deliberate
-                            // visual transition instead of a glitch or dropout.
-                            val frozenBlurred = try {
-                                currentStreamer.videoInput?.takeSnapshot(0)?.blurForTransition()
+                            // While streaming: inject a black frame so the encoder
+                            // keeps producing output during the camera switch gap.
+                            val snapshot = try {
+                                currentStreamer.videoInput?.takeSnapshot(0)
                             } catch (e: Exception) {
-                                Log.w(TAG, "Could not take snapshot for transition, falling back to plain delay", e)
+                                Log.w(TAG, "Could not take snapshot for transition frame size", e)
                                 null
                             }
-                            if (frozenBlurred != null) {
-                                currentStreamer.setVideoSource(BitmapSourceFactory(frozenBlurred))
-                                // 400ms: camera2 session teardown is async and takes ~180-300ms.
-                                // This gives the old camera time to fully release while the
-                                // blurred frozen frame keeps the encoder fed throughout.
-                                delay(400)
-                            } else {
-                                delay(400)
-                            }
+                            val blackFrame = Bitmap.createBitmap(
+                                snapshot?.width ?: 1920,
+                                snapshot?.height ?: 1080,
+                                Bitmap.Config.ARGB_8888
+                            )
+                            snapshot?.recycle()
+                            currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
+                            // 3s: covers camera2 teardown + new camera 3A convergence.
+                            delay(3000)
                         } else {
                             // Not streaming (preview-only): plain delay is sufficient.
                             delay(300)

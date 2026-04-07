@@ -55,18 +55,6 @@ suspend fun IWithVideoSource.setNextCameraId(context: Context) {
     setCameraId(getNextCameraId(context))
 }
 
-/**
- * Returns a blurred copy of this bitmap suitable for use as a transition frame.
- *
- * Achieved by scaling down to 1/8 size and back up with bilinear filtering —
- * fast, allocation-light, and works on API 24+.
- */
-fun Bitmap.blurForTransition(): Bitmap {
-    val smallWidth = (width / 8).coerceAtLeast(1)
-    val smallHeight = (height / 8).coerceAtLeast(1)
-    val small = Bitmap.createScaledBitmap(this, smallWidth, smallHeight, true)
-    return Bitmap.createScaledBitmap(small, width, height, true)
-}
 
 @RequiresPermission(Manifest.permission.CAMERA)
 suspend fun IWithVideoSource.toggleBackToFront(context: Context) {
