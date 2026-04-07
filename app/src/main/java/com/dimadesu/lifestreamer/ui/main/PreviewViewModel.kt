@@ -2556,9 +2556,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // callback before opening the new one — no "Max cameras in use" error.
                     currentStreamer.setCameraId(cameraId)
                     if (isStreaming) {
-                        // t² easing keeps alpha near 0 during hardware warmup
-                        // (~200-400ms before first frame arrives), so no explicit
-                        // delay is needed before starting the fade-in.
+                        // Wait for the new camera to deliver its first frame before ramping
+                        // alpha. setCameraId() returns after the device opens, but onFrameAvailable
+                        // fires only when hardware delivers the first frame (~200-400 ms later).
+                        delay(500)
                         fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
                     }
                     Log.i(TAG, "Switched to camera $cameraId successfully")
@@ -2610,9 +2611,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // callback before opening the new one — no "Max cameras in use" error.
                         currentStreamer.setCameraId(newCameraId)
                         if (isStreaming) {
-                            // t² easing keeps alpha near 0 during hardware warmup
-                            // (~200-400ms before first frame arrives), so no explicit
-                            // delay is needed before starting the fade-in.
+                            // Wait for the new camera to deliver its first frame before ramping
+                            // alpha. setCameraId() returns after the device opens, but onFrameAvailable
+                            // fires only when hardware delivers the first frame (~200-400 ms later).
+                            delay(500)
                             fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
                         }
                         Log.i(TAG, "Camera toggled successfully")
