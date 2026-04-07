@@ -2547,37 +2547,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 try {
                     val isStreaming = currentStreamer.isStreamingFlow.value == true
                     if (isStreaming) {
-                        // Snapshot only to get current frame dimensions;
-                        // fall back to 1920×1080 if it fails.
-                        val snapshot = try {
-                            currentStreamer.videoInput?.takeSnapshot(0)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Could not take snapshot for transition frame size", e)
-                            null
-                        }
-                        val blackFrame = Bitmap.createBitmap(
-                            snapshot?.width ?: 1920,
-                            snapshot?.height ?: 1080,
-                            Bitmap.Config.ARGB_8888
-                        )
-                        snapshot?.recycle()
-                        // Fade out — darken camera frames before the source switch so
-                        // dying-camera artifacts are never visible to the encoder.
+                        // Fade out while old camera is still running — no bitmap needed.
                         fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 250)
-                        currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
-                        // Black hold: covers camera2 teardown + new camera open.
-                        delay(500)
                     } else {
                         delay(300)
                     }
+                    // Camera→camera path properly waits for the old camera's onClosed
+                    // callback before opening the new one — no "Max cameras in use" error.
                     currentStreamer.setCameraId(cameraId)
                     if (isStreaming) {
-                        // Wait for the new camera to deliver its first frame before ramping
-                        // alpha. setCameraId() returns after the device opens, but onFrameAvailable
-                        // fires only when hardware delivers the first frame (~200-400 ms later).
-                        // Without this delay the coroutine advances alphaMultiplier while render()
-                        // is never called, making the start of the fade appear skipped.
-                        delay(500)
+                        // t² easing keeps alpha near 0 during hardware warmup
+                        // (~200-400ms before first frame arrives), so no explicit
+                        // delay is needed before starting the fade-in.
                         fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
                     }
                     Log.i(TAG, "Switched to camera $cameraId successfully")
@@ -2619,34 +2600,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     try {
                         val isStreaming = currentStreamer.isStreamingFlow.value == true
                         if (isStreaming) {
-                            // While streaming: inject a black frame so the encoder
-                            // keeps producing output during the camera switch gap.
-                            val snapshot = try {
-                                currentStreamer.videoInput?.takeSnapshot(0)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Could not take snapshot for transition frame size", e)
-                                null
-                            }
-                            val blackFrame = Bitmap.createBitmap(
-                                snapshot?.width ?: 1920,
-                                snapshot?.height ?: 1080,
-                                Bitmap.Config.ARGB_8888
-                            )
-                            snapshot?.recycle()
-                            // Fade out — darken camera frames before the source switch.
+                            // Fade out while old camera is still running — no bitmap needed.
                             fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 250)
-                            currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
-                            // Black hold: covers camera2 teardown + new camera open.
-                            delay(500)
                         } else {
                             // Not streaming (preview-only): plain delay is sufficient.
                             delay(300)
                         }
+                        // Camera→camera path properly waits for the old camera's onClosed
+                        // callback before opening the new one — no "Max cameras in use" error.
                         currentStreamer.setCameraId(newCameraId)
                         if (isStreaming) {
-                            // Wait for the new camera to deliver its first frame before ramping
-                            // alpha. See switchCameraWithTransition for the full explanation.
-                            delay(500)
+                            // t² easing keeps alpha near 0 during hardware warmup
+                            // (~200-400ms before first frame arrives), so no explicit
+                            // delay is needed before starting the fade-in.
                             fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
                         }
                         Log.i(TAG, "Camera toggled successfully")
