@@ -2563,7 +2563,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         snapshot?.recycle()
                         // Fade out — darken camera frames before the source switch so
                         // dying-camera artifacts are never visible to the encoder.
-                        fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 500)
+                        fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 250)
                         currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
                         // Black hold: covers camera2 teardown + new camera open.
                         delay(500)
@@ -2634,7 +2634,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             )
                             snapshot?.recycle()
                             // Fade out — darken camera frames before the source switch.
-                            fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 500)
+                            fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 250)
                             currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
                             // Black hold: covers camera2 teardown + new camera open.
                             delay(500)
