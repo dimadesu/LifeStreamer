@@ -2503,10 +2503,35 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
+     * Animates the GL surface processor alpha from [from] to [to] over [durationMs] ms.
+     * Runs on the calling coroutine — must be called from a coroutine context.
+     * No-ops if the service / processor factory is not available.
+     */
+    private suspend fun fadeTransitionAlpha(from: Float, to: Float, durationMs: Long) {
+        val factory = CameraStreamerService.surfaceProcessorFactory
+        val startTime = System.currentTimeMillis()
+        while (true) {
+            val elapsed = System.currentTimeMillis() - startTime
+            val t = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+            // Perceptual correction: display gamma (~2.2) makes a linear alpha
+            // ramp look non-uniform. Ease-in (t²) for brightening keeps early
+            // frames dark longer; ease-out (√t) for darkening drops brightness
+            // quickly at the start so the fade-out is clearly visible.
+            val eased = if (to > from) t * t else kotlin.math.sqrt(t.toDouble()).toFloat()
+            factory.setAlpha(from + (to - from) * eased)
+            if (t >= 1f) break
+            delay(16) // ~60 fps
+        }
+    }
+
+    /**
      * Switch to a specific camera by ID, injecting a black frame during the
      * transition so the encoder stays fed and OBS / SRT receivers see no gap.
      * The black frame is held long enough for the old camera to fully tear down
      * and the new camera's 3A (auto-exposure, AWB) to converge.
+     *
+     * GL alpha animation hides glitchy teardown frames (fade-out) and early 3A
+     * settling frames (fade-in) on both ends of the cut.
      */
     @RequiresPermission(Manifest.permission.CAMERA)
     fun switchCameraWithTransition(cameraId: String) {
@@ -2520,7 +2545,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch(defaultDispatcher) {
             videoSourceMutex.withLock {
                 try {
-                    if (currentStreamer.isStreamingFlow.value == true) {
+                    val isStreaming = currentStreamer.isStreamingFlow.value == true
+                    if (isStreaming) {
                         // Snapshot only to get current frame dimensions;
                         // fall back to 1920×1080 if it fails.
                         val snapshot = try {
@@ -2535,17 +2561,30 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Bitmap.Config.ARGB_8888
                         )
                         snapshot?.recycle()
+                        // Fade out — darken camera frames before the source switch so
+                        // dying-camera artifacts are never visible to the encoder.
+                        fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 500)
                         currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
-                        // 3s: covers camera2 teardown (~300ms) + new camera open +
-                        // 3A convergence (~1-1.5s) with margin to avoid any artifacts.
-                        delay(3000)
+                        // Black hold: covers camera2 teardown + new camera open.
+                        delay(500)
                     } else {
                         delay(300)
                     }
                     currentStreamer.setCameraId(cameraId)
+                    if (isStreaming) {
+                        // Wait for the new camera to deliver its first frame before ramping
+                        // alpha. setCameraId() returns after the device opens, but onFrameAvailable
+                        // fires only when hardware delivers the first frame (~200-400 ms later).
+                        // Without this delay the coroutine advances alphaMultiplier while render()
+                        // is never called, making the start of the fade appear skipped.
+                        delay(500)
+                        fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 500)
+                    }
                     Log.i(TAG, "Switched to camera $cameraId successfully")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to switch camera", e)
+                    // Always restore full alpha so streaming continues normally.
+                    CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
                     _streamerErrorLiveData.postValue("Camera switch failed: ${e.message}")
                 }
             }
@@ -2578,7 +2617,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             viewModelScope.launch(defaultDispatcher) {
                 videoSourceMutex.withLock {
                     try {
-                        if (currentStreamer.isStreamingFlow.value == true) {
+                        val isStreaming = currentStreamer.isStreamingFlow.value == true
+                        if (isStreaming) {
                             // While streaming: inject a black frame so the encoder
                             // keeps producing output during the camera switch gap.
                             val snapshot = try {
@@ -2593,17 +2633,27 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 Bitmap.Config.ARGB_8888
                             )
                             snapshot?.recycle()
+                            // Fade out — darken camera frames before the source switch.
+                            fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 500)
                             currentStreamer.setVideoSource(BitmapSourceFactory(blackFrame))
-                            // 3s: covers camera2 teardown + new camera 3A convergence.
-                            delay(3000)
+                            // Black hold: covers camera2 teardown + new camera open.
+                            delay(500)
                         } else {
                             // Not streaming (preview-only): plain delay is sufficient.
                             delay(300)
                         }
                         currentStreamer.setCameraId(newCameraId)
+                        if (isStreaming) {
+                            // Wait for the new camera to deliver its first frame before ramping
+                            // alpha. See switchCameraWithTransition for the full explanation.
+                            delay(500)
+                            fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 500)
+                        }
                         Log.i(TAG, "Camera toggled successfully")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to toggle camera", e)
+                        // Always restore full alpha so streaming continues normally.
+                        CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
                         _streamerErrorLiveData.postValue("Camera toggle failed: ${e.message}")
                     }
                 }

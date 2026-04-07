@@ -19,8 +19,10 @@ import android.os.PowerManager
 import android.util.Log
 import com.dimadesu.lifestreamer.R
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
+import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
 import io.github.thibaultbee.streampack.services.StreamerService
-import io.github.thibaultbee.streampack.services.utils.SingleStreamerFactory
+import io.github.thibaultbee.streampack.services.utils.StreamerFactory
+import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.view.Surface
@@ -56,11 +58,15 @@ import com.dimadesu.lifestreamer.audio.ScoOrchestrator
  * CameraStreamerService extending StreamerService for camera streaming
  */
 class CameraStreamerService : StreamerService<ISingleStreamer>(
-    streamerFactory = SingleStreamerFactory(
-        withAudio = true, 
-        withVideo = true 
-        // Remove defaultRotation - let StreamPack detect it automatically and we'll update it dynamically
-    ),
+    streamerFactory = object : StreamerFactory<ISingleStreamer> {
+        override fun create(context: Context): ISingleStreamer =
+            SingleStreamer(
+                context,
+                withAudio = true,
+                withVideo = true,
+                surfaceProcessorFactory = surfaceProcessorFactory
+            )
+    },
     notificationId = 1001,
     channelId = "camera_streaming_channel", 
     channelNameResourceId = R.string.streaming_channel_name,
@@ -73,6 +79,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         const val ACTION_START_STREAM = "com.dimadesu.lifestreamer.action.START_STREAM"
         const val ACTION_TOGGLE_MUTE = "com.dimadesu.lifestreamer.action.TOGGLE_MUTE"
         const val ACTION_EXIT_APP = "com.dimadesu.lifestreamer.action.EXIT_APP"
+
+        /**
+         * Persistent GL surface processor factory. Held here so the ViewModel can
+         * call [DefaultSurfaceProcessorFactory.setAlpha] for fade-in/fade-out during
+         * camera transitions without going through the StreamPack pipeline internals.
+         */
+        val surfaceProcessorFactory = DefaultSurfaceProcessorFactory()
         const val ACTION_OPEN_FROM_NOTIFICATION = "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION"
 
         /**
