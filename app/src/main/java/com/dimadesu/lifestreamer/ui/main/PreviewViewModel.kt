@@ -2578,7 +2578,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Without this delay the coroutine advances alphaMultiplier while render()
                         // is never called, making the start of the fade appear skipped.
                         delay(500)
-                        fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 500)
+                        fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
                     }
                     Log.i(TAG, "Switched to camera $cameraId successfully")
                 } catch (e: Exception) {
@@ -2647,7 +2647,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             // Wait for the new camera to deliver its first frame before ramping
                             // alpha. See switchCameraWithTransition for the full explanation.
                             delay(500)
-                            fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 500)
+                            fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
                         }
                         Log.i(TAG, "Camera toggled successfully")
                     } catch (e: Exception) {
