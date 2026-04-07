@@ -364,7 +364,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         setOnClickListener {
                             lifecycleScope.launch {
                                 try {
-                                    (previewViewModel.streamer as? IWithVideoSource)?.setCameraId(camera.id)
+                                    previewViewModel.switchCameraWithTransition(camera.id)
                                     Log.i(TAG, "Switched to camera: ${camera.displayName}")
                                     
                                     // Update button states
@@ -881,7 +881,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 val selectedId = cameraIds[which]
                 lifecycleScope.launch {
                     try {
-                        (previewViewModel.streamer as? IWithVideoSource)?.setCameraId(selectedId)
+                        previewViewModel.switchCameraWithTransition(selectedId)
                         // Update button text to show chosen camera and orientation
                         binding.switchSourceButton.contentDescription = items[which]
                     } catch (t: Throwable) {

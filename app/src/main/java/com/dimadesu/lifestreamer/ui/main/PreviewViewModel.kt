@@ -2503,6 +2503,52 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         return true
     }
 
+    /**
+     * Switch to a specific camera by ID, injecting a blurred frozen frame during the
+     * transition so the encoder stays fed and OBS / SRT receivers see no gap.
+     * Falls back to a plain delay if snapshot fails or not currently streaming.
+     */
+    @RequiresPermission(Manifest.permission.CAMERA)
+    fun switchCameraWithTransition(cameraId: String) {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            Log.e(TAG, "Streamer service not available for camera switch")
+            _streamerErrorLiveData.postValue("Service not available")
+            return
+        }
+
+        viewModelScope.launch(defaultDispatcher) {
+            videoSourceMutex.withLock {
+                try {
+                    if (currentStreamer.isStreamingFlow.value == true) {
+                        val frozenBlurred = try {
+                            currentStreamer.videoInput?.takeSnapshot(0)?.blurForTransition()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not take snapshot for transition, falling back to plain delay", e)
+                            null
+                        }
+                        if (frozenBlurred != null) {
+                            currentStreamer.setVideoSource(BitmapSourceFactory(frozenBlurred))
+                            // 400ms: camera2 session teardown is async and takes ~180-300ms.
+                            // This gives the old camera time to fully release while the
+                            // blurred frozen frame keeps the encoder fed throughout.
+                            delay(400)
+                        } else {
+                            delay(400)
+                        }
+                    } else {
+                        delay(300)
+                    }
+                    currentStreamer.setCameraId(cameraId)
+                    Log.i(TAG, "Switched to camera $cameraId successfully")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to switch camera", e)
+                    _streamerErrorLiveData.postValue("Camera switch failed: ${e.message}")
+                }
+            }
+        }
+    }
+
     @RequiresPermission(Manifest.permission.CAMERA)
     fun toggleCamera() {
         /**
@@ -2542,11 +2588,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             }
                             if (frozenBlurred != null) {
                                 currentStreamer.setVideoSource(BitmapSourceFactory(frozenBlurred))
-                                // Give BitmapSource one or two frames to reach the encoder
-                                // before we tear down the bitmap source and open the new camera.
-                                delay(50)
+                                // 400ms: camera2 session teardown is async and takes ~180-300ms.
+                                // This gives the old camera time to fully release while the
+                                // blurred frozen frame keeps the encoder fed throughout.
+                                delay(400)
                             } else {
-                                delay(300)
+                                delay(400)
                             }
                         } else {
                             // Not streaming (preview-only): plain delay is sufficient.
