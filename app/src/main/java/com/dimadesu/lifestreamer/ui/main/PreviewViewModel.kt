@@ -2503,35 +2503,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
-     * Animates the GL surface processor alpha from [from] to [to] over [durationMs] ms.
-     * Runs on the calling coroutine — must be called from a coroutine context.
-     * No-ops if the service / processor factory is not available.
-     */
-    private suspend fun fadeTransitionAlpha(from: Float, to: Float, durationMs: Long) {
-        val factory = CameraStreamerService.surfaceProcessorFactory
-        val startTime = System.currentTimeMillis()
-        while (true) {
-            val elapsed = System.currentTimeMillis() - startTime
-            val t = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
-            // Perceptual correction: display gamma (~2.2) makes a linear alpha
-            // ramp look non-uniform. Ease-in (t²) for brightening keeps early
-            // frames dark longer; ease-out (√t) for darkening drops brightness
-            // quickly at the start so the fade-out is clearly visible.
-            val eased = if (to > from) t * t else kotlin.math.sqrt(t.toDouble()).toFloat()
-            factory.setAlpha(from + (to - from) * eased)
-            if (t >= 1f) break
-            delay(16) // ~60 fps
-        }
-    }
-
-    /**
-     * Switch to a specific camera by ID, injecting a black frame during the
-     * transition so the encoder stays fed and OBS / SRT receivers see no gap.
-     * The black frame is held long enough for the old camera to fully tear down
-     * and the new camera's 3A (auto-exposure, AWB) to converge.
-     *
-     * GL alpha animation hides glitchy teardown frames (fade-out) and early 3A
-     * settling frames (fade-in) on both ends of the cut.
+     * Switch to a specific camera by ID with a black hold during the transition.
+     * Instantly cuts to black, waits 5s on the old camera, switches, holds 500ms
+     * for the new camera's first frame, then snaps back to full brightness.
      */
     @RequiresPermission(Manifest.permission.CAMERA)
     fun switchCameraWithTransition(cameraId: String) {
