@@ -2547,20 +2547,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 try {
                     val isStreaming = currentStreamer.isStreamingFlow.value == true
                     if (isStreaming) {
-                        // Fade out while old camera is still running — no bitmap needed.
-                        fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 250)
-                    } else {
-                        delay(300)
+                        // Go fully dark instantly to hide teardown/startup glitches.
+                        CameraStreamerService.surfaceProcessorFactory.setAlpha(0f)
                     }
                     // Camera→camera path properly waits for the old camera's onClosed
                     // callback before opening the new one — no "Max cameras in use" error.
                     currentStreamer.setCameraId(cameraId)
                     if (isStreaming) {
-                        // Wait for the new camera to deliver its first frame before ramping
-                        // alpha. setCameraId() returns after the device opens, but onFrameAvailable
-                        // fires only when hardware delivers the first frame (~200-400 ms later).
+                        // Hold black while new camera delivers first frames and 3A settles.
                         delay(500)
-                        fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
+                        CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
                     }
                     Log.i(TAG, "Switched to camera $cameraId successfully")
                 } catch (e: Exception) {
@@ -2601,21 +2597,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     try {
                         val isStreaming = currentStreamer.isStreamingFlow.value == true
                         if (isStreaming) {
-                            // Fade out while old camera is still running — no bitmap needed.
-                            fadeTransitionAlpha(from = 1f, to = 0f, durationMs = 250)
-                        } else {
-                            // Not streaming (preview-only): plain delay is sufficient.
-                            delay(300)
+                            // Go fully dark instantly to hide teardown/startup glitches.
+                            CameraStreamerService.surfaceProcessorFactory.setAlpha(0f)
                         }
                         // Camera→camera path properly waits for the old camera's onClosed
                         // callback before opening the new one — no "Max cameras in use" error.
                         currentStreamer.setCameraId(newCameraId)
                         if (isStreaming) {
-                            // Wait for the new camera to deliver its first frame before ramping
-                            // alpha. setCameraId() returns after the device opens, but onFrameAvailable
-                            // fires only when hardware delivers the first frame (~200-400 ms later).
+                            // Hold black while new camera delivers first frames and 3A settles.
                             delay(500)
-                            fadeTransitionAlpha(from = 0f, to = 1f, durationMs = 1500)
+                            CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
                         }
                         Log.i(TAG, "Camera toggled successfully")
                     } catch (e: Exception) {
