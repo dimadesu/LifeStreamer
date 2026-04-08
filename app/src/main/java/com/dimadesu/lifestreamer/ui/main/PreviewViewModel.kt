@@ -55,7 +55,6 @@ import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSo
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
-import com.dimadesu.lifestreamer.utils.setNextCameraId
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import com.dimadesu.lifestreamer.utils.toggleBackToFront
 import com.dimadesu.lifestreamer.utils.ReconnectTimer
@@ -2504,8 +2503,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Switch to a specific camera by ID with a black hold during the transition.
-     * Instantly cuts to black, waits 5s on the old camera, switches, holds 500ms
-     * for the new camera's first frame, then snaps back to full brightness.
+     * Instantly cuts to black, switches camera, holds 500ms for 3A to settle,
+     * then restores full brightness.
      */
     @RequiresPermission(Manifest.permission.CAMERA)
     fun switchCameraWithTransition(cameraId: String) {
