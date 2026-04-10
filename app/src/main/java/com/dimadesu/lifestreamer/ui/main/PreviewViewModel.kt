@@ -2521,7 +2521,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     val isStreaming = currentStreamer.isStreamingFlow.value == true
                     if (isStreaming) {
                         // Go fully dark instantly to hide teardown/startup glitches.
-                        CameraStreamerService.surfaceProcessorFactory.setAlpha(0f)
+                        CameraStreamerService.surfaceProcessorFactory.setBrightness(0f)
                     }
                     // Camera→camera path properly waits for the old camera's onClosed
                     // callback before opening the new one — no "Max cameras in use" error.
@@ -2529,13 +2529,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     if (isStreaming) {
                         // Hold black while new camera delivers first frames and 3A settles.
                         delay(500)
-                        CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
+                        CameraStreamerService.surfaceProcessorFactory.setBrightness(1f)
                     }
                     Log.i(TAG, "Switched to camera $cameraId successfully")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to switch camera", e)
-                    // Always restore full alpha so streaming continues normally.
-                    CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
+                    // Always restore full brightness so streaming continues normally.
+                    CameraStreamerService.surfaceProcessorFactory.setBrightness(1f)
                     _streamerErrorLiveData.postValue("Camera switch failed: ${e.message}")
                 }
             }
@@ -2571,7 +2571,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         val isStreaming = currentStreamer.isStreamingFlow.value == true
                         if (isStreaming) {
                             // Go fully dark instantly to hide teardown/startup glitches.
-                            CameraStreamerService.surfaceProcessorFactory.setAlpha(0f)
+                            CameraStreamerService.surfaceProcessorFactory.setBrightness(0f)
                         }
                         // Camera→camera path properly waits for the old camera's onClosed
                         // callback before opening the new one — no "Max cameras in use" error.
@@ -2579,13 +2579,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (isStreaming) {
                             // Hold black while new camera delivers first frames and 3A settles.
                             delay(500)
-                            CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
+                            CameraStreamerService.surfaceProcessorFactory.setBrightness(1f)
                         }
                         Log.i(TAG, "Camera toggled successfully")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to toggle camera", e)
-                        // Always restore full alpha so streaming continues normally.
-                        CameraStreamerService.surfaceProcessorFactory.setAlpha(1f)
+                        // Always restore full brightness so streaming continues normally.
+                        CameraStreamerService.surfaceProcessorFactory.setBrightness(1f)
                         _streamerErrorLiveData.postValue("Camera toggle failed: ${e.message}")
                     }
                 }

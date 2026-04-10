@@ -82,7 +82,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         /**
          * Persistent GL surface processor factory. Held here so the ViewModel can
-         * call [DefaultSurfaceProcessorFactory.setAlpha] for fade-in/fade-out during
+         * call [DefaultSurfaceProcessorFactory.setBrightness] to go black during
          * camera transitions without going through the StreamPack pipeline internals.
          */
         val surfaceProcessorFactory = DefaultSurfaceProcessorFactory()
