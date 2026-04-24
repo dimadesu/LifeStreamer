@@ -69,6 +69,8 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.exten
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
+import io.github.thibaultbee.streampack.core.streamers.single.withAudio
+import io.github.thibaultbee.streampack.core.streamers.single.withVideo
 import io.github.thibaultbee.streampack.core.utils.extensions.isClosedException
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
