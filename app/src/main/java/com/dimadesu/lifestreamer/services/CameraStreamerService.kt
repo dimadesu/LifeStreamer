@@ -19,6 +19,7 @@ import android.os.PowerManager
 import android.util.Log
 import com.dimadesu.lifestreamer.R
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
+import io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer
 import io.github.thibaultbee.streampack.services.StreamerService
 import io.github.thibaultbee.streampack.services.utils.SingleStreamerFactory
 import android.content.pm.ServiceInfo
@@ -332,11 +333,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 Log.i(TAG, "Bitrate regulator settings changed during stream - updating controller")
                                 
                                 // Remove old controller
-                                streamer.removeBitrateRegulatorController()
+                                (streamer as? IVideoSingleStreamer)?.removeBitrateRegulatorController()
                                 
                                 // Re-add with new config if enabled
                                 if (config != null) {
-                                    streamer.addBitrateRegulatorController(
+                                    (streamer as? IVideoSingleStreamer)?.addBitrateRegulatorController(
                                         AdaptiveSrtBitrateRegulatorController.Factory(
                                             bitrateRegulatorConfig = config,
                                             mode = mode
@@ -1191,7 +1192,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (bitrateRegulatorConfig != null) {
                     try {
                         val mode = try { storageRepository.regulatorModeFlow.first() } catch (_: Exception) { com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_FAST }
-                        currentStreamer.addBitrateRegulatorController(
+                        (currentStreamer as? IVideoSingleStreamer)?.addBitrateRegulatorController(
                             AdaptiveSrtBitrateRegulatorController.Factory(
                                 bitrateRegulatorConfig = bitrateRegulatorConfig,
                                 mode = mode
