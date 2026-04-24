@@ -13,14 +13,12 @@ import androidx.annotation.RequiresPermission
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.utils.dataStore
 import kotlinx.coroutines.flow.first
-import io.github.thibaultbee.streampack.core.elements.data.RawFrame
 import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioFrameSourceInternal
 import io.github.thibaultbee.streampack.core.elements.interfaces.SuspendConfigurable
 import io.github.thibaultbee.streampack.core.elements.interfaces.SuspendStreamable
 import io.github.thibaultbee.streampack.core.elements.interfaces.Releasable
-import io.github.thibaultbee.streampack.core.elements.utils.pool.IReadOnlyRawFrameFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -49,7 +47,9 @@ class BluetoothAudioSource(
     }
 
     private var audioRecord: AudioRecord? = null
-    private var bufferSize: Int = 0
+    private var _bufferSize: Int = 0
+    override val minBufferSize: Int
+        get() = _bufferSize
 
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow = _isStreamingFlow.asStateFlow()
@@ -68,7 +68,7 @@ class BluetoothAudioSource(
             }
         }
 
-        bufferSize = AudioRecord.getMinBufferSize(
+        _bufferSize = AudioRecord.getMinBufferSize(
             config.sampleRate,
             config.channelConfig,
             config.byteFormat
@@ -87,7 +87,7 @@ class BluetoothAudioSource(
             
             val record = AudioRecord.Builder()
                 .setAudioFormat(audioFormat)
-                .setBufferSizeInBytes(bufferSize)
+                .setBufferSizeInBytes(_bufferSize)
                 .setAudioSource(audioSourceType)
                 .build()
 
@@ -104,7 +104,7 @@ class BluetoothAudioSource(
                 config.sampleRate,
                 config.channelConfig,
                 config.byteFormat,
-                bufferSize
+                _bufferSize
             )
         }
 
@@ -224,26 +224,18 @@ class BluetoothAudioSource(
         }
     }
 
-    override fun fillAudioFrame(frame: RawFrame): RawFrame {
+    override fun fillAudioFrame(buffer: ByteBuffer): Long {
         val ar = requireNotNull(audioRecord) { "Audio source is not initialized" }
         if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
             throw IllegalStateException("Audio source is not recording")
         }
 
-        val buffer = frame.rawBuffer
         val length = ar.read(buffer, buffer.remaining())
         if (length > 0) {
-            frame.timestampInUs = System.nanoTime() / 1000L
-            return frame
+            return System.nanoTime() / 1000L
         } else {
-            frame.close()
             throw IllegalArgumentException("AudioRecord read error: $length")
         }
-    }
-
-    override fun getAudioFrame(frameFactory: IReadOnlyRawFrameFactory): RawFrame {
-        val cfg = requireNotNull(currentConfig) { "Audio source is not configured" }
-        return fillAudioFrame(frameFactory.create(bufferSize, 0))
     }
 }
 
