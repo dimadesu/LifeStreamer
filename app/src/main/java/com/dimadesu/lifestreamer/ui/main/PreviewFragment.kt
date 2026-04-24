@@ -752,13 +752,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private fun inflateStreamerPreview(streamer: IWithVideoSource) {
         val preview = binding.preview
         // Set camera settings button when camera is started
-        preview.listener = object : PreviewView.Listener {
+        preview.listener = object : PreviewView.PreviewListener {
             override fun onPreviewStarted() {
                 Log.i(TAG, "Preview started")
-            }
-
-            override fun onZoomRationOnPinchChanged(zoomRatio: Float) {
-                previewViewModel.onZoomRationOnPinchChanged()
             }
         }
 
