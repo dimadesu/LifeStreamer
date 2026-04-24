@@ -118,7 +118,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val storageRepository = DataStoreRepository(application, application.dataStore)
     private val rotationRepository = RotationRepository.getInstance(application)
     val mediaProjectionHelper = MediaProjectionHelper(application)
-    private val buildStreamerUseCase = BuildStreamerUseCase(application, storageRepository)
+    private val buildStreamerUseCase = BuildStreamerUseCase(application)
 
     // Dispatcher for camera/video source operations to avoid blocking Main thread with mutex
     private val defaultDispatcher = Dispatchers.IO
