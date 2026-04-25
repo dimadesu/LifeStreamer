@@ -308,7 +308,8 @@ class UvcVideoSource(
                     if (surface != null) {
                         cameraHelper.addSurface(surface, false)
                         if (isCameraReady) {
-                            // Camera is already open (e.g. after orientation change) — restart preview.
+                            // Camera is already open (e.g. after orientation change) — must call
+                            // startPreview() explicitly because onCameraOpen won't fire again.
                             try {
                                 cameraHelper.startPreview()
                                 Log.d(TAG, "Restarted camera preview (camera was already ready)")
@@ -316,6 +317,8 @@ class UvcVideoSource(
                                 Log.d(TAG, "startPreview in startPreview(): ${e.message} (may be normal)")
                             }
                         } else {
+                            // Camera not open yet — don't call startPreview() here.
+                            // The onCameraOpen callback will handle it once the camera is ready.
                             Log.d(TAG, "Added surface for preview (camera will start when ready)")
                         }
                     }
