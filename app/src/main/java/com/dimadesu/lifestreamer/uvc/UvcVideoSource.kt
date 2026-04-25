@@ -338,21 +338,11 @@ class UvcVideoSource(
             previewSurfaceOutput = null
         }
 
-        mainHandler.post {
-            try {
-                // If streaming is active, keep camera running
-                if (!_isStreamingFlow.value) {
-                    cameraHelper.stopPreview()
-                    Log.d(TAG, "Stopped camera preview")
-                } else {
-                    Log.d(TAG, "Streaming active - keeping camera running")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping preview: ${e.message}", e)
-            }
-        }
-
-        // Schedule cleanup if both are inactive
+        // Don't call cameraHelper.stopPreview() directly here — use scheduled cleanup instead.
+        // Direct stop races with a subsequent startPreview() on the CameraHelper thread,
+        // causing a native crash in UVCPreview::stopPreview().
+        // The cleanup gives startPreview() a window to cancel it if preview restarts quickly
+        // (e.g. screen off/on, orientation change).
         schedulePendingCleanup(500) {
             if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
                 Log.d(TAG, "Full cleanup - stopping camera")
