@@ -5,7 +5,7 @@ import io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IConfigu
 import io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IEncodingPipelineOutput
 import io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IConfigurableVideoEncodingPipelineOutput
 import io.github.thibaultbee.streampack.core.regulator.controllers.BitrateRegulatorController
-import io.github.thibaultbee.streampack.core.regulator.controllers.DummyBitrateRegulatorController
+import io.github.thibaultbee.streampack.core.regulator.controllers.SimpleBitrateRegulatorController
 import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 
 /**
@@ -23,7 +23,7 @@ class AdaptiveSrtBitrateRegulatorController {
         override fun newBitrateRegulatorController(
             pipelineOutput: IEncodingPipelineOutput,
             coroutineDispatcher: kotlinx.coroutines.CoroutineDispatcher
-        ): DummyBitrateRegulatorController {
+        ): SimpleBitrateRegulatorController {
             require(pipelineOutput is IConfigurableVideoEncodingPipelineOutput) {
                 "Pipeline output must be an video encoding output"
             }
@@ -66,7 +66,7 @@ class AdaptiveSrtBitrateRegulatorController {
                 }
             }
 
-            return DummyBitrateRegulatorController(
+            return SimpleBitrateRegulatorController(
                 audioEncoder,
                 videoEncoder,
                 pipelineOutput.endpoint,
