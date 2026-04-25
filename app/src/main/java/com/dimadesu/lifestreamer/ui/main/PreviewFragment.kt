@@ -25,6 +25,7 @@ import kotlin.math.sqrt
 import kotlin.math.PI
 import androidx.appcompat.app.AlertDialog
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSettings
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import android.app.AppOpsManager
 import android.content.Context
@@ -757,6 +758,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.i(TAG, "Preview started")
             }
         }
+
+        // Keep zoom slider in sync when the user pinch-zooms on the preview.
+        // The listener is dispatched on the main thread (PreviewView wraps it with post{}).
+        preview.setZoomListener(object : CameraSettings.Zoom.OnZoomChangedListener {
+            override fun onZoomChanged(zoomRatio: Float) {
+                previewViewModel.onZoomRationOnPinchChanged()
+            }
+        })
 
         // If the preview already uses the same streamer, no need to set it again.
         lifecycleScope.launch {
