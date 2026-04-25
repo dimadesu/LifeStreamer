@@ -2377,6 +2377,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Job for observing audio config changes and starting pre-stream capture
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
     private var startCaptureJob: kotlinx.coroutines.Job? = null
+    private var stopCaptureJob: kotlinx.coroutines.Job? = null
     
     /**
      * Set up audio level monitoring on the streamer's audio processor.
@@ -2443,6 +2444,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             startCaptureJob = null
             serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
+            // stopCapture is a suspend function — launch it and let it complete independently
+            val audioInput = serviceStreamer?.audioInput
+            stopCaptureJob?.cancel()
+            stopCaptureJob = viewModelScope.launch {
+                try {
+                    audioInput?.stopCapture()
+                    Log.i(TAG, "Audio capture stopped")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to stop audio capture: ${t.message}")
+                }
+            }
         } catch (_: Throwable) {}
     }
 
