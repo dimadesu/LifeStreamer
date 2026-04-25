@@ -2374,9 +2374,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
     
-    // Job for observing audio config changes and streaming state
+    // Job for observing audio config changes and starting pre-stream capture
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
-    private var streamingStateObserverJob: kotlinx.coroutines.Job? = null
+    private var startCaptureJob: kotlinx.coroutines.Job? = null
     
     /**
      * Set up audio level monitoring on the streamer's audio processor.
@@ -2406,15 +2406,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
-        // Observe streaming state to reset meter when stream stops
-        streamingStateObserverJob?.cancel()
-        streamingStateObserverJob = viewModelScope.launch {
-            streamer.isStreamingFlow.collect { isStreaming ->
-                if (!isStreaming) {
-                    // Reset the meter to silent when streaming stops
-                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
-                    Log.d(TAG, "Audio level meter reset (streaming stopped)")
-                }
+        // Start capture once the audio source is ready so the VU meter works before streaming
+        startCaptureJob?.cancel()
+        startCaptureJob = viewModelScope.launch {
+            try {
+                streamer.audioInput?.sourceFlow?.filterNotNull()?.first()
+                streamer.audioInput?.startCapture()
+                Log.i(TAG, "Audio capture started for pre-stream VU meter")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to start audio capture: ${t.message}")
             }
         }
         
@@ -2439,8 +2439,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         try {
             audioConfigObserverJob?.cancel()
             audioConfigObserverJob = null
-            streamingStateObserverJob?.cancel()
-            streamingStateObserverJob = null
+            startCaptureJob?.cancel()
+            startCaptureJob = null
             serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
         } catch (_: Throwable) {}
