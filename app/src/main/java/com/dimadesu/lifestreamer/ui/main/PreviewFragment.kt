@@ -1108,7 +1108,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // First button (index 1) from XML
         binding.switchSourceButton.backgroundTintList = getButtonColorStateList(ctx, activeIndex == 1)
         binding.switchSourceButton.visibility =
-            if (activeIndex != null && activeIndex != 1) View.GONE else View.VISIBLE
+            if (activeIndex != null && activeIndex != 1) View.GONE
+            else if (previewViewModel.isUvcSource.value == true) View.GONE
+            else View.VISIBLE
 
         // Dynamic buttons (index 2, 3, ...)
         val container = binding.rtmpSourceButtonsContainer

@@ -303,15 +303,24 @@ class UvcVideoSource(
 
             mainHandler.post {
                 try {
-                    // Just add the surface - don't call cameraHelper.startPreview() here.
-                    // The camera might not be open yet; onCameraOpen callback handles starting preview.
-                    // If camera is already open and streaming, adding the surface will receive frames.
-                    if (surfaceProcessor != null && inputSurface != null) {
-                        cameraHelper.addSurface(inputSurface, false)
-                        Log.d(TAG, "Added input surface for preview (camera will start when ready)")
-                    } else if (previewSurface != null) {
-                        cameraHelper.addSurface(previewSurface, false)
-                        Log.d(TAG, "Added preview surface directly (camera will start when ready)")
+                    val surface = if (surfaceProcessor != null && inputSurface != null) inputSurface
+                                  else previewSurface
+                    if (surface != null) {
+                        cameraHelper.addSurface(surface, false)
+                        if (isCameraReady) {
+                            // Camera is already open (e.g. after orientation change) — must call
+                            // startPreview() explicitly because onCameraOpen won't fire again.
+                            try {
+                                cameraHelper.startPreview()
+                                Log.d(TAG, "Restarted camera preview (camera was already ready)")
+                            } catch (e: Exception) {
+                                Log.d(TAG, "startPreview in startPreview(): ${e.message} (may be normal)")
+                            }
+                        } else {
+                            // Camera not open yet — don't call startPreview() here.
+                            // The onCameraOpen callback will handle it once the camera is ready.
+                            Log.d(TAG, "Added surface for preview (camera will start when ready)")
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error starting preview: ${e.message}", e)
