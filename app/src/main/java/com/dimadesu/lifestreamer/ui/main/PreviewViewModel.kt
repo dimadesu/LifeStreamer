@@ -2407,12 +2407,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
-        // Start capture once the audio source is ready so the VU meter works before streaming
+        // Start capture once the audio source is ready AND configured so the VU meter works before streaming.
+        // We must wait for BOTH sourceFlow (source exists) AND audioConfigFlow (configure() was called
+        // on the AudioRecord - without this, AudioRecord is null and startCapture() throws).
         startCaptureJob?.cancel()
         startCaptureJob = viewModelScope.launch {
             try {
-                streamer.audioInput?.sourceFlow?.filterNotNull()?.first()
-                streamer.audioInput?.startCapture()
+                val audioInput = streamer.audioInput ?: return@launch
+                audioInput.sourceFlow.filterNotNull().first()     // source is set
+                streamer.audioConfigFlow.filterNotNull().first()   // configure() has been called on source
+                audioInput.startCapture()
                 Log.i(TAG, "Audio capture started for pre-stream VU meter")
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to start audio capture: ${t.message}")
