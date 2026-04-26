@@ -1708,6 +1708,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Set appropriate audio source based on current video source
                         setAudioSourceBasedOnVideoSource()
 
+                        // Re-enable VU meter now that MediaProjection audio source is set.
+                        // Monitoring was paused when the user switched to RTMP source pre-stream.
+                        // setupAudioLevelMonitoring() waits for source + config to be ready internally.
+                        setupAudioLevelMonitoring()
+
                         // Start the actual stream
                         service?.setStreamStatus(StreamStatus.CONNECTING)
                         startStreamInternal(onSuccess, onError)
@@ -2030,9 +2035,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
                         }
                         
-                        // Don't reset audio source here - it will be properly set when starting next stream
-                        // Resetting after stop/close can leave the source in a broken state
-                        Log.i(TAG, "Stream confirmed stopped - audio/video sources will be reinitialized on next start")
+                        // Pause VU meter after stopping an RTMP stream - RTMP audio is gone and
+                        // mic levels would be misleading while RTMP source is still selected.
+                        // The meter resumes when the user switches back to camera/UVC.
+                        val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+                        if (audioSource is IMediaProjectionSource) {
+                            disableAudioLevelMonitoring()
+                            Log.i(TAG, "Paused VU meter after RTMP stream stop (RTMP source still active)")
+                        } else {
+                            Log.i(TAG, "Stream confirmed stopped - audio source is mic, VU meter unchanged")
+                        }
 
                         Log.i(TAG, "Stream stop completed successfully")
                         
@@ -3086,7 +3098,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Mark that user toggled RTMP ON with this index
                     _activeRtmpIndex.postValue(rtmpIndex)
                     _userToggledUvc.postValue(false)
-                    
+
+                    // Pause VU meter when not streaming - RTMP audio isn't available until stream
+                    // starts so mic levels would be misleading. Keep it running during an active
+                    // stream so MediaProjection audio levels continue to display.
+                    if (!isCurrentlyStreaming) {
+                        disableAudioLevelMonitoring()
+                    }
+
                     // Suppress passthrough observer updates during source switch
                     // to prevent monitor toggle from resetting to OFF
                     suppressPassthroughObserver = true
@@ -3256,7 +3275,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
                     }
                     currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                    
+
+                    // Resume VU meter now that mic is the audio source again
+                    setupAudioLevelMonitoring()
+
                     // Re-add bitrate regulator if streaming with SRT
                     readdBitrateRegulatorIfNeeded()
                     
