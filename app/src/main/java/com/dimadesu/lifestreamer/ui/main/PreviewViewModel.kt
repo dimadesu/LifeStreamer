@@ -227,7 +227,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                         try {
                             Log.i(TAG, "Applying pending audio config after UI resumed")
+                            val wasMonitoring = vuMeterEffect != null
+                            if (wasMonitoring) disableAudioLevelMonitoring()
                             streamer.setAudioConfig(config)
+                            if (wasMonitoring) setupAudioLevelMonitoring()
                         } catch (t: Throwable) {
                             Log.e(TAG, "setAudioConfig failed (deferred)", t)
                             _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
@@ -270,7 +273,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (streamer != null && streamer.isStreamingFlow.value != true) {
                 try {
                     Log.i(TAG, "Applying pending audio config after permission granted")
+                    val wasMonitoring = vuMeterEffect != null
+                    if (wasMonitoring) disableAudioLevelMonitoring()
                     streamer.setAudioConfig(config)
+                    if (wasMonitoring) setupAudioLevelMonitoring()
                 } catch (t: Throwable) {
                     Log.e(TAG, "setAudioConfig failed (after permission)", t)
                     _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
@@ -1482,7 +1488,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     ) {
                         config?.let {
                             try {
+                                // Stop VU meter capture before reconfiguring audio —
+                                // AudioRecord can't be reconfigured while recording.
+                                val wasMonitoring = vuMeterEffect != null
+                                if (wasMonitoring) {
+                                    disableAudioLevelMonitoring()
+                                }
                                 serviceStreamer?.setAudioConfig(it)
+                                if (wasMonitoring) {
+                                    setupAudioLevelMonitoring()
+                                }
                             } catch (t: Throwable) {
                                 Log.e(TAG, "setAudioConfig failed", t)
                                 _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
