@@ -353,12 +353,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Determines if MediaProjection is required for the current streaming setup.
      * MediaProjection is needed when streaming from RTMP source for audio capture.
+     * UVC → bitmap fallback uses mic audio, not MediaProjection — same as a camera source.
      */
     fun requiresMediaProjection(): Boolean {
         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
-        // Only RTMP and Bitmap sources need MediaProjection for audio capture
-        // UVC and Camera sources use microphone directly
-        return currentVideoSource is RTMPVideoSource || currentVideoSource is IBitmapSource
+        // UVC bitmap fallback does NOT need MediaProjection — it uses mic audio just like camera.
+        // Only RTMP (live or its bitmap fallback) needs MediaProjection for audio.
+        val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
+        return (currentVideoSource is RTMPVideoSource || currentVideoSource is IBitmapSource) && !isUvcBitmapFallback
     }
 
     // Streamer errors (nullable to support single-event pattern - cleared after observation)
@@ -911,11 +913,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun setAudioSourceBasedOnVideoSource() {
         val currentStreamer = serviceStreamer ?: return
         val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
-        val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource
+        // UVC bitmap fallback keeps mic audio — only RTMP (live or its bitmap fallback) uses MediaProjection.
+        val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
+        val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource && !isUvcBitmapFallback
         
         if (isRtmpOrBitmap) {
-            // RTMP or Bitmap source - try MediaProjection, fallback to microphone
-            // Note: BT mic toggle is ignored for RTMP/Bitmap - they always use MediaProjection or mic
+            // RTMP source (live or bitmap fallback) - try MediaProjection, fallback to microphone
+            // Note: BT mic toggle is ignored here - RTMP always uses MediaProjection or system mic
             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 try {
@@ -930,9 +934,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
-            // Camera source - use ConditionalAudioSourceFactory which respects BT mic toggle
-            // The factory creates mic source initially, and BluetoothAudioManager switches to BT if enabled
-            Log.i(TAG, "Camera video detected, using ConditionalAudioSourceFactory (BT-aware)")
+            // Camera source, UVC source, or UVC bitmap fallback — use mic (BT-aware)
+            Log.i(TAG, "Camera/UVC video detected, using ConditionalAudioSourceFactory (BT-aware)")
             currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
         }
     }
