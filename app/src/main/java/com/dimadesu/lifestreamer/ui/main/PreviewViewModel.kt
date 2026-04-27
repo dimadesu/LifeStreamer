@@ -2393,6 +2393,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
     private var startCaptureJob: kotlinx.coroutines.Job? = null
     private var stopCaptureJob: kotlinx.coroutines.Job? = null
+    private var vuMeterEffect: com.dimadesu.lifestreamer.audio.VuMeterEffect? = null
     
     /**
      * Set up audio level monitoring on the streamer's audio processor.
@@ -2405,6 +2406,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
         
+        // Remove any previous effect
+        vuMeterEffect?.let { audioProcessor.remove(it) }
+        
+        // Create new VuMeterEffect using IConsumerAudioEffect plugin (runs on background coroutine)
+        val effect = com.dimadesu.lifestreamer.audio.VuMeterEffect { levels ->
+            _audioLevelFlow.value = levels
+        }
+        vuMeterEffect = effect
+        audioProcessor.add(effect)
+        
         // Observe the streamer's audioConfigFlow for channel count changes
         audioConfigObserverJob?.cancel()
         audioConfigObserverJob = viewModelScope.launch {
@@ -2412,11 +2423,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (audioConfig != null) {
                     try {
                         val channelCount = io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig.getNumberOfChannels(audioConfig.channelConfig)
-                        audioProcessor.channelCount = channelCount
+                        effect.channelCount = channelCount
                         Log.i(TAG, "Audio level monitoring: channelCount=$channelCount")
                     } catch (t: Throwable) {
                         Log.w(TAG, "Failed to get channel count: ${t.message}")
-                        audioProcessor.channelCount = 1
+                        effect.channelCount = 1
                     }
                 }
             }
@@ -2438,17 +2449,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
-        audioProcessor.audioLevelCallback = { levels ->
-            // Update the flow (this is called from audio thread, so be efficient)
-            _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel(
-                rms = levels.rmsLeft,
-                peak = levels.peakLeft,
-                rmsRight = levels.rmsRight,
-                peakRight = levels.peakRight,
-                isStereo = levels.isStereo
-            )
-        }
-        
         Log.i(TAG, "Audio level monitoring enabled")
     }
     
@@ -2461,7 +2461,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             audioConfigObserverJob = null
             startCaptureJob?.cancel()
             startCaptureJob = null
-            serviceStreamer?.audioInput?.processor?.audioLevelCallback = null
+            vuMeterEffect?.let { effect ->
+                serviceStreamer?.audioInput?.processor?.remove(effect)
+                effect.close()
+            }
+            vuMeterEffect = null
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
             // stopCapture is a suspend function — launch it and let it complete independently
             val audioInput = serviceStreamer?.audioInput
