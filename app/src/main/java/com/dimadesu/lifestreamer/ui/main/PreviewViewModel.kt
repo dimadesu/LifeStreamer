@@ -69,6 +69,8 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.exten
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
+import io.github.thibaultbee.streampack.core.streamers.single.withAudio
+import io.github.thibaultbee.streampack.core.streamers.single.withVideo
 import io.github.thibaultbee.streampack.core.utils.extensions.isClosedException
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
@@ -118,7 +120,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val storageRepository = DataStoreRepository(application, application.dataStore)
     private val rotationRepository = RotationRepository.getInstance(application)
     val mediaProjectionHelper = MediaProjectionHelper(application)
-    private val buildStreamerUseCase = BuildStreamerUseCase(application, storageRepository)
+    private val buildStreamerUseCase = BuildStreamerUseCase(application)
 
     // Dispatcher for camera/video source operations to avoid blocking Main thread with mutex
     private val defaultDispatcher = Dispatchers.IO
