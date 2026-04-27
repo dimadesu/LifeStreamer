@@ -20,8 +20,10 @@ import android.util.Log
 import com.dimadesu.lifestreamer.R
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer
+import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
+import io.github.thibaultbee.streampack.core.pipelines.StreamerPipeline
 import io.github.thibaultbee.streampack.services.StreamerService
-import io.github.thibaultbee.streampack.services.utils.SingleStreamerFactory
+import io.github.thibaultbee.streampack.services.utils.StreamerFactory
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.view.Surface
@@ -57,11 +59,14 @@ import com.dimadesu.lifestreamer.audio.ScoOrchestrator
  * CameraStreamerService extending StreamerService for camera streaming
  */
 class CameraStreamerService : StreamerService<ISingleStreamer>(
-    streamerFactory = SingleStreamerFactory(
-        withAudio = true, 
-        withVideo = true 
-        // Remove defaultRotation - let StreamPack detect it automatically and we'll update it dynamically
-    ),
+    streamerFactory = object : StreamerFactory<ISingleStreamer> {
+        override fun create(context: Context): ISingleStreamer {
+            return SingleStreamer(
+                context,
+                audioInputMode = StreamerPipeline.AudioInputMode.PUSH
+            )
+        }
+    },
     notificationId = 1001,
     channelId = "camera_streaming_channel", 
     channelNameResourceId = R.string.streaming_channel_name,
