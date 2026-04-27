@@ -227,7 +227,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         }
                         try {
                             Log.i(TAG, "Applying pending audio config after UI resumed")
-                            streamer.setAudioConfig(config)
+                            applyAudioConfigSafely(streamer, config)
                         } catch (t: Throwable) {
                             Log.e(TAG, "setAudioConfig failed (deferred)", t)
                             _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
@@ -270,7 +270,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (streamer != null && streamer.isStreamingFlow.value != true) {
                 try {
                     Log.i(TAG, "Applying pending audio config after permission granted")
-                    streamer.setAudioConfig(config)
+                    applyAudioConfigSafely(streamer, config)
                 } catch (t: Throwable) {
                     Log.e(TAG, "setAudioConfig failed (after permission)", t)
                     _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
@@ -1482,7 +1482,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     ) {
                         config?.let {
                             try {
-                                serviceStreamer?.setAudioConfig(it)
+                                serviceStreamer?.let { s -> applyAudioConfigSafely(s, it) }
                             } catch (t: Throwable) {
                                 Log.e(TAG, "setAudioConfig failed", t)
                                 _streamerErrorLiveData.postValue("setAudioConfig: ${t.message ?: t::class.java.simpleName}")
@@ -2479,6 +2479,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         } catch (_: Throwable) {}
+    }
+
+    /**
+     * Apply an audio config change, pausing VU meter capture if active.
+     * AudioRecord can't be reconfigured while recording, so we must
+     * stop capture first and restart it after.
+     */
+    private suspend fun applyAudioConfigSafely(streamer: io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer, config: io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig) {
+        val wasMonitoring = vuMeterEffect != null
+        if (wasMonitoring) disableAudioLevelMonitoring()
+        streamer.setAudioConfig(config)
+        if (wasMonitoring) setupAudioLevelMonitoring()
     }
 
     fun setMute(isMuted: Boolean) {
