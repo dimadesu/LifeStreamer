@@ -382,9 +382,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         videoProfileListPreference.entries = profilesName
         videoProfileListPreference.entryValues = profiles.map { it.toString() }.toTypedArray()
-        if (videoProfileListPreference.entry == null) {
-            videoProfileListPreference.value = VideoConfig.getBestProfile(encoder).toString()
-        }
+        val savedProfile = videoProfileListPreference.value
+        videoProfileListPreference.value =
+            if (videoProfileListPreference.findIndexOfValue(savedProfile) >= 0) savedProfile
+            else VideoConfig.getBestProfile(encoder).toString()
+        videoProfileListPreference.refreshStaleSettingUi()
         videoProfileListPreference.setOnPreferenceChangeListener { _, newValue ->
             loadVideoLevel(encoder, (newValue as String).toInt())
             true
@@ -405,7 +407,22 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         videoLevelListPreference.entries = levelsName
         videoLevelListPreference.entryValues = levels.map { it.toString() }.toTypedArray()
-        videoLevelListPreference.value = VideoConfig.getBestLevel(encoder, profile).toString()
+        val savedLevel = videoLevelListPreference.value
+        videoLevelListPreference.value =
+            if (videoLevelListPreference.findIndexOfValue(savedLevel) >= 0) savedLevel
+            else VideoConfig.getBestLevel(encoder, profile).toString()
+        videoLevelListPreference.refreshStaleSettingUi()
+    }
+
+    /**
+     * Re-assigns SimpleSummaryProvider to force a notifyChanged() call, which makes the UI
+     * rebind and re-read getEntry() against the updated entries list. Without this, the summary
+     * label can be stale when setValue() receives the same string value it already holds
+     * (e.g. AVCProfileBaseline=1 and HEVCProfileMain=1 are the same int), so the framework
+     * skips the UI update entirely.
+     */
+    private fun ListPreference.refreshStaleSettingUi() {
+        summaryProvider = ListPreference.SimpleSummaryProvider.getInstance()
     }
 
     private fun loadAudioSettings() {
