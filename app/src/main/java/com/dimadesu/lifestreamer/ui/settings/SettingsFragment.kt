@@ -308,14 +308,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
             videoEncoderListPreference.value = defaultVideoEncoder
         }
         videoEncoderListPreference.setOnPreferenceChangeListener { _, newValue ->
-            loadVideoSettings(newValue as String)
+            loadVideoSettings(newValue as String, resetToDefaults = true)
             true
         }
 
         videoEncoderListPreference.value?.let { loadVideoSettings(it) }
     }
 
-    private fun loadVideoSettings(encoder: String) {
+    private fun loadVideoSettings(encoder: String, resetToDefaults: Boolean = false) {
         // Inflates video resolutions
         streamerInfo.video.getSupportedResolutions(
             requireContext(), encoder
@@ -384,7 +384,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         videoProfileListPreference.entryValues = profiles.map { it.toString() }.toTypedArray()
         val savedProfile = videoProfileListPreference.value
         videoProfileListPreference.value =
-            if (videoProfileListPreference.findIndexOfValue(savedProfile) >= 0) savedProfile
+            if (!resetToDefaults && videoProfileListPreference.findIndexOfValue(savedProfile) >= 0) savedProfile
             else VideoConfig.getBestProfile(encoder).toString()
         videoProfileListPreference.refreshStaleSettingUi()
         videoProfileListPreference.setOnPreferenceChangeListener { _, newValue ->
@@ -392,10 +392,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-        videoProfileListPreference.value?.toIntOrNull()?.let { loadVideoLevel(encoder, it) }
+        videoProfileListPreference.value?.toIntOrNull()?.let { loadVideoLevel(encoder, it, resetToDefaults) }
     }
 
-    private fun loadVideoLevel(encoder: String, profile: Int) {
+    private fun loadVideoLevel(encoder: String, profile: Int, resetToDefaults: Boolean = false) {
         // Inflates level
         val levels = profileLevelDisplay.getAllLevelSet(encoder)
             .filter { it <= MediaCodecHelper.getMaxLevel(encoder, profile) }
@@ -409,7 +409,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         videoLevelListPreference.entryValues = levels.map { it.toString() }.toTypedArray()
         val savedLevel = videoLevelListPreference.value
         videoLevelListPreference.value =
-            if (videoLevelListPreference.findIndexOfValue(savedLevel) >= 0) savedLevel
+            if (!resetToDefaults && videoLevelListPreference.findIndexOfValue(savedLevel) >= 0) savedLevel
             else VideoConfig.getBestLevel(encoder, profile).toString()
         videoLevelListPreference.refreshStaleSettingUi()
     }
