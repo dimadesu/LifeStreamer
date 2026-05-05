@@ -308,14 +308,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
             videoEncoderListPreference.value = defaultVideoEncoder
         }
         videoEncoderListPreference.setOnPreferenceChangeListener { _, newValue ->
-            loadVideoSettings(newValue as String)
+            loadVideoSettings(newValue as String, resetToDefaults = true)
             true
         }
 
         videoEncoderListPreference.value?.let { loadVideoSettings(it) }
     }
 
-    private fun loadVideoSettings(encoder: String) {
+    private fun loadVideoSettings(encoder: String, resetToDefaults: Boolean = false) {
         // Inflates video resolutions
         streamerInfo.video.getSupportedResolutions(
             requireContext(), encoder
@@ -382,18 +382,20 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         videoProfileListPreference.entries = profilesName
         videoProfileListPreference.entryValues = profiles.map { it.toString() }.toTypedArray()
-        if (videoProfileListPreference.entry == null) {
-            videoProfileListPreference.value = VideoConfig.getBestProfile(encoder).toString()
-        }
+        val savedProfile = videoProfileListPreference.value
+        videoProfileListPreference.value =
+            if (!resetToDefaults && videoProfileListPreference.findIndexOfValue(savedProfile) >= 0) savedProfile
+            else VideoConfig.getBestProfile(encoder).toString()
+        videoProfileListPreference.refreshStaleSettingUi()
         videoProfileListPreference.setOnPreferenceChangeListener { _, newValue ->
             loadVideoLevel(encoder, (newValue as String).toInt())
             true
         }
 
-        videoProfileListPreference.value?.toIntOrNull()?.let { loadVideoLevel(encoder, it) }
+        videoProfileListPreference.value?.toIntOrNull()?.let { loadVideoLevel(encoder, it, resetToDefaults) }
     }
 
-    private fun loadVideoLevel(encoder: String, profile: Int) {
+    private fun loadVideoLevel(encoder: String, profile: Int, resetToDefaults: Boolean = false) {
         // Inflates level
         val levels = profileLevelDisplay.getAllLevelSet(encoder)
             .filter { it <= MediaCodecHelper.getMaxLevel(encoder, profile) }
@@ -405,7 +407,22 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         videoLevelListPreference.entries = levelsName
         videoLevelListPreference.entryValues = levels.map { it.toString() }.toTypedArray()
-        videoLevelListPreference.value = VideoConfig.getBestLevel(encoder, profile).toString()
+        val savedLevel = videoLevelListPreference.value
+        videoLevelListPreference.value =
+            if (!resetToDefaults && videoLevelListPreference.findIndexOfValue(savedLevel) >= 0) savedLevel
+            else VideoConfig.getBestLevel(encoder, profile).toString()
+        videoLevelListPreference.refreshStaleSettingUi()
+    }
+
+    /**
+     * Re-assigns SimpleSummaryProvider to force a notifyChanged() call, which makes the UI
+     * rebind and re-read getEntry() against the updated entries list. Without this, the summary
+     * label can be stale when setValue() receives the same string value it already holds
+     * (e.g. AVCProfileBaseline=1 and HEVCProfileMain=1 are the same int), so the framework
+     * skips the UI update entirely.
+     */
+    private fun ListPreference.refreshStaleSettingUi() {
+        summaryProvider = ListPreference.SimpleSummaryProvider.getInstance()
     }
 
     private fun loadAudioSettings() {
