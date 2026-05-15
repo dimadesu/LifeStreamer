@@ -31,6 +31,7 @@ import android.app.AppOpsManager
 import android.content.Context
 import android.media.AudioManager
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -145,6 +146,20 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
         binding.switchSourceButton.setOnClickListener {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = 1)
+        }
+
+        binding.rtmpSrvrButton.setOnClickListener {
+            val pkg = "com.dimadesu.mediasrvr"
+            val launchIntent = requireContext().packageManager.getLaunchIntentForPackage(pkg)
+            if (launchIntent != null) {
+                startActivity(launchIntent)
+            } else {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
+                } catch (e: android.content.ActivityNotFoundException) {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$pkg")))
+                }
+            }
         }
 
         binding.toggleUvcButton.setOnClickListener {

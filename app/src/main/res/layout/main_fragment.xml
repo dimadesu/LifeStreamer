@@ -211,6 +211,14 @@
                     app:goneUnless="@{!viewmodel.isUvcSource}" />
 
                 <Button
+                    android:id="@+id/rtmpSrvrButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RTMP SRVR"
+                    android:backgroundTint="@color/button_gray"
+                    app:goneUnless="@{!viewmodel.isUvcSource}" />
+
+                <Button
                     android:id="@+id/toggleUvcButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
