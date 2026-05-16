@@ -26,7 +26,8 @@ enum class EndpointType(val id: Int, @StringRes val labelResId: Int) {
     MP4_FILE(4, R.string.to_mp4_file),
     WEBM_FILE(5, R.string.to_webm_file),
     OGG_FILE(6, R.string.to_ogg_file),
-    THREEGP_FILE(7, R.string.to_3gp_file);
+    THREEGP_FILE(7, R.string.to_3gp_file),
+    SRTLA(8, R.string.to_srtla);
 
     companion object {
         fun fromId(id: Int): EndpointType = entries.first { it.id == id }

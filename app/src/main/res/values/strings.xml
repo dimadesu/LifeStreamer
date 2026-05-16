@@ -135,6 +135,7 @@
     <string name="to_webm_file">Record WebM file</string>
     <string name="to_ogg_file">Record OGG file</string>
     <string name="to_3gp_file">Record 3GP file</string>
+    <string name="to_srtla">Stream SRT via SRTLA (Bond Bunny)</string>
 
     <string name="srt_server">SRT Server</string>
     <string name="srt_server_key">srt_server_key</string>
@@ -176,6 +177,26 @@
     <string name="rtmp_server_url_key">rtmp_server_url_key</string>
     <string name="default_rtmp_url">rtmp://127.0.0.1:1935/publish/live</string>
     <string name="server_url">URL</string>
+
+    <!-- SRTLA (Bond Bunny) endpoint settings -->
+    <string name="srtla_key">srtla_key</string>
+    <string name="srtla_settings">Bond Bunny (SRTLA)</string>
+    <string name="srtla_receiver_host_key">srtla_receiver_host_key</string>
+    <string name="srtla_receiver_host">Receiver Host</string>
+    <string name="default_srtla_receiver_host">au.srt.belabox.net</string>
+    <string name="srtla_receiver_port_key">srtla_receiver_port_key</string>
+    <string name="srtla_receiver_port">Receiver Port</string>
+    <string name="default_srtla_receiver_port">5000</string>
+    <string name="srtla_listen_port_key">srtla_listen_port_key</string>
+    <string name="srtla_listen_port">Local SRT Listen Port</string>
+    <string name="default_srtla_listen_port">6000</string>
+    <string name="srtla_latency_key">srtla_latency_key</string>
+    <string name="srtla_latency">SRT Latency (ms)</string>
+    <string name="default_srtla_latency">2000</string>
+    <string name="srtla_stream_id_key">srtla_stream_id_key</string>
+    <string name="srtla_stream_id">Stream ID</string>
+    <string name="srtla_passphrase_key">srtla_passphrase_key</string>
+    <string name="srtla_passphrase">Passphrase</string>
 
     <!-- RTMP source -->
     <string name="rtmp_source_category_title">RTMP (or SRT) as source</string>

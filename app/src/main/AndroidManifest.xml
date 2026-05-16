@@ -33,6 +33,11 @@
     <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" />
     <uses-permission android:name="android.permission.PROJECT_MEDIA" />
 
+    <!-- Required for embedded SRTLA (ConnectivityManager.requestNetwork) -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- Required for embedded SRTLA (WifiManager.createWifiLock) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.microphone" />
 

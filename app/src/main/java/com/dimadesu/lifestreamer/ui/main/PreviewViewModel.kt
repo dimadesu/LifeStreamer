@@ -84,6 +84,8 @@ import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
+import com.dimadesu.lifestreamer.srtla.SrtlaManager
+import com.serenegiant.utils.UVCUtils.getApplication
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -679,6 +681,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             Log.i(TAG, "startServiceStreaming: serviceStreamer available, calling open()...")
 
+            // If SRTLA mode, start the embedded SRTLA proxy before opening the SRT connection.
+            // SrtlaManager.start() is a suspend function — it returns only after the native
+            // listen port is bound (~300 ms), so no extra delay is needed here.
+            val srtlaConfig = storageRepository.srtlaConfigFlow.first()
+            if (srtlaConfig != null) {
+                Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")
+                SrtlaManager.start(getApplication(), srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort)
+            }
+
             // Add timeout to prevent hanging
             // Run on IO dispatcher to prevent blocking UI thread
             withTimeout(5000) { // 5 second timeout
@@ -868,6 +879,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "stopServiceStreaming: Stopping stream...")
             serviceStreamer?.stopStream()
             Log.i(TAG, "stopServiceStreaming: Stream stopped successfully")
+
+            // Stop embedded SRTLA proxy if it was running
+            if (SrtlaManager.isRunning) {
+                Log.i(TAG, "stopServiceStreaming: Stopping embedded SRTLA proxy")
+                withContext(kotlinx.coroutines.Dispatchers.IO) { SrtlaManager.stop() }
+            }
 
             // Don't stop the service - keep it alive like notification stop does
             // This prevents race conditions where ViewModel tries to access destroyed service
