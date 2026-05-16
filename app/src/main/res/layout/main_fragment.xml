@@ -376,6 +376,29 @@
 
         </LinearLayout>
 
+        <!-- SRTLA stats overlay — initially hidden, toggled by srtlaStatsButton -->
+        <com.dimadesu.bondbunny.SrtlaStatsView
+            android:id="@+id/srtlaStatsView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#CC000000"
+            android:padding="8dp"
+            android:visibility="gone"
+            app:layout_constraintBottom_toTopOf="@+id/srtlaStatsButton"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- SRTLA stats toggle button — bottom-left corner -->
+        <Button
+            android:id="@+id/srtlaStatsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SRTLA"
+            android:backgroundTint="@color/button_gray"
+            android:layout_marginStart="8dp"
+            android:layout_marginBottom="8dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent" />
+
         <ToggleButton
             android:id="@+id/liveButton"
             android:layout_width="wrap_content"

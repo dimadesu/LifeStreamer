@@ -174,7 +174,17 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.audioDebugToggleButton.setOnClickListener {
             previewViewModel.toggleAudioDebugOverlay()
         }
-        
+
+        binding.srtlaStatsButton.setOnClickListener {
+            if (binding.srtlaStatsView.visibility == View.VISIBLE) {
+                binding.srtlaStatsView.stopUpdating()
+                binding.srtlaStatsView.visibility = View.GONE
+            } else {
+                binding.srtlaStatsView.visibility = View.VISIBLE
+                binding.srtlaStatsView.startUpdating()
+            }
+        }
+
         // Setup audio source spinner
         setupAudioSourceSpinner()
 
@@ -651,6 +661,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onPause() {
         super.onPause()
         previewViewModel.onUiPaused()
+        binding.srtlaStatsView.stopUpdating()
         // DO NOT stop streaming when going to background - the service should continue streaming
         // DO NOT stop preview either when the camera is being used for streaming -
         // the camera source is shared between preview and streaming, so stopping preview
@@ -666,6 +677,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onResume() {
         super.onResume()
         previewViewModel.onUiResumed()
+        if (binding.srtlaStatsView.visibility == View.VISIBLE) {
+            binding.srtlaStatsView.startUpdating()
+        }
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
         // Reapply RTMP button visibility (observer won't re-fire if value unchanged)
