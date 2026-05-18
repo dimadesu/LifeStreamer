@@ -261,6 +261,13 @@
                     android:backgroundTint='@{viewmodel.isAudioDebugOverlayVisible ? @color/active_button_green : @color/button_gray}'
                     app:goneUnless="@{!viewmodel.isRtmpSource}" />
 
+                <Button
+                    android:id="@+id/srtlaStatsButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SRTLA"
+                    android:backgroundTint="@color/button_gray" />
+
             </LinearLayout>
 
         </ScrollView>
@@ -384,19 +391,7 @@
             android:background="#CC000000"
             android:padding="8dp"
             android:visibility="gone"
-            app:layout_constraintBottom_toTopOf="@+id/srtlaStatsButton"
-            app:layout_constraintStart_toStartOf="parent" />
-
-        <!-- SRTLA stats toggle button — bottom-left corner -->
-        <Button
-            android:id="@+id/srtlaStatsButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="SRTLA"
-            android:backgroundTint="@color/button_gray"
-            android:layout_marginStart="8dp"
-            android:layout_marginBottom="8dp"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintBottom_toTopOf="@+id/liveButton"
             app:layout_constraintStart_toStartOf="parent" />
 
         <ToggleButton
