@@ -130,12 +130,12 @@
     <string name="to_ts_file">Record TS file</string>
     <string name="to_flv_file">Record FLV file</string>
     <string name="to_srt">Stream SRT</string>
+    <string name="to_srtla">Stream SRTLA</string>
     <string name="to_rtmp">Stream RTMP</string>
     <string name="to_mp4_file">Record MP4 file</string>
     <string name="to_webm_file">Record WebM file</string>
     <string name="to_ogg_file">Record OGG file</string>
     <string name="to_3gp_file">Record 3GP file</string>
-    <string name="to_srtla">Stream SRT via SRTLA (Bond Bunny)</string>
 
     <string name="srt_server">SRT Server</string>
     <string name="srt_server_key">srt_server_key</string>
@@ -182,18 +182,18 @@
 
     <!-- SRTLA (Bond Bunny) endpoint settings -->
     <string name="srtla_key">srtla_key</string>
-    <string name="srtla_settings">Bond Bunny (SRTLA)</string>
+    <string name="srtla_settings">SRTLA</string>
     <string name="srtla_receiver_host_key">srtla_receiver_host_key</string>
-    <string name="srtla_receiver_host">Receiver Host</string>
+    <string name="srtla_receiver_host">SRTLA Server (example: au.srt.belabox.net or IP address)</string>
     <string name="default_srtla_receiver_host">au.srt.belabox.net</string>
     <string name="srtla_receiver_port_key">srtla_receiver_port_key</string>
-    <string name="srtla_receiver_port">Receiver Port</string>
+    <string name="srtla_receiver_port">SRTLA Server Port</string>
     <string name="default_srtla_receiver_port">5000</string>
     <string name="srtla_listen_port_key">srtla_listen_port_key</string>
-    <string name="srtla_listen_port">Local SRT Listen Port</string>
+    <string name="srtla_listen_port">Local SRTLA Sender Listen Port</string>
     <string name="default_srtla_listen_port">6000</string>
     <string name="srtla_latency_key">srtla_latency_key</string>
-    <string name="srtla_latency">SRT Latency (ms)</string>
+    <string name="srtla_latency">Latency (ms)</string>
     <string name="default_srtla_latency">2000</string>
     <string name="srtla_stream_id_key">srtla_stream_id_key</string>
     <string name="srtla_stream_id">Stream ID</string>
