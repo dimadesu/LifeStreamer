@@ -179,9 +179,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             if (binding.srtlaStatsView.visibility == View.VISIBLE) {
                 binding.srtlaStatsView.stopStatsUpdates()
                 binding.srtlaStatsView.visibility = View.GONE
+                binding.srtlaStatsButton.backgroundTintList = getButtonColorStateList(requireContext(), false)
             } else {
                 binding.srtlaStatsView.visibility = View.VISIBLE
                 binding.srtlaStatsView.startStatsUpdates()
+                binding.srtlaStatsButton.backgroundTintList = getButtonColorStateList(requireContext(), true)
             }
         }
 
