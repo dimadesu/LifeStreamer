@@ -384,7 +384,6 @@
 
         </LinearLayout>
 
-        <!-- SRTLA stats overlay — initially hidden, toggled by srtlaStatsButton -->
         <com.dimadesu.bondbunny.SrtlaStatsView
             android:id="@+id/srtlaStatsView"
             android:layout_width="wrap_content"
