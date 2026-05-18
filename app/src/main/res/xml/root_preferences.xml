@@ -194,37 +194,6 @@
                 app:title="@string/srt_server_passphrase"
                 app:useSimpleSummaryProvider="true" />
 
-            <SwitchPreference
-                android:defaultValue="true"
-                app:key="@string/srt_server_enable_bitrate_regulation_key"
-                app:title="@string/srt_server_enable_bitrate_regulation" />
-
-            <SeekBarPreference
-                android:max="10000"
-                app:defaultValue="5000"
-                app:key="@string/srt_server_video_target_bitrate_key"
-                app:min="500"
-                app:showSeekBarValue="true"
-                app:title="@string/srt_server_video_target_bitrate"
-                app:useSimpleSummaryProvider="true" />
-
-            <SeekBarPreference
-                android:max="10000"
-                app:defaultValue="300"
-                app:key="@string/srt_server_video_min_bitrate_key"
-                app:min="100"
-                app:showSeekBarValue="true"
-                app:title="@string/srt_server_video_min_bitrate"
-                app:useSimpleSummaryProvider="true" />
-
-            <ListPreference
-                app:defaultValue="@string/srt_server_moblin_regulator_mode_value_belabox"
-                app:key="@string/srt_server_moblin_regulator_mode_key"
-                app:title="@string/srt_server_moblin_regulator_mode"
-                app:entries='@array/moblin_regulator_mode_entries'
-                app:entryValues='@array/moblin_regulator_mode_values'
-                app:useSimpleSummaryProvider="true" />
-
 
         </PreferenceCategory>
 
@@ -277,6 +246,13 @@
                 app:key="@string/srtla_passphrase_key"
                 app:title="@string/srtla_passphrase"
                 app:useSimpleSummaryProvider="true" />
+
+
+        </PreferenceCategory>
+
+        <PreferenceCategory
+            app:key="@string/bitrate_regulation_key"
+            app:title="@string/bitrate_regulation">
 
             <SwitchPreference
                 android:defaultValue="true"

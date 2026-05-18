@@ -144,6 +144,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<PreferenceCategory>(R.string.srtla_key) ?: error("srtla_key not found")
     }
 
+    private val bitrateRegulationPreference: PreferenceCategory by lazy {
+        findPreferenceSafe<PreferenceCategory>(R.string.bitrate_regulation_key) ?: error("bitrate_regulation_key not found")
+    }
+
     private val serverIpPreference: EditTextPreference by lazy {
         findPreferenceSafe<EditTextPreference>(R.string.srt_server_ip_key) ?: error("srt_server_ip_key not found")
     }
@@ -634,6 +638,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         rtmpEndpointPreference.isVisible = endpoint.hasRtmpCapabilities
         srtlaEndpointPreference.isVisible = endpoint.hasSrtlaCapabilities
         fileEndpointPreference.isVisible = endpoint.hasFileCapabilities
+        bitrateRegulationPreference.isVisible = endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities
 
         // Update supported values with a new info
         streamerInfo = StreamerInfoFactory(requireContext(), endpointType).build()
