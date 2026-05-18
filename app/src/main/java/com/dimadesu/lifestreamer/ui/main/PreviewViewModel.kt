@@ -3755,6 +3755,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     val isRtmpSource: LiveData<Boolean> = _activeRtmpIndex.map { it != null }
 
+    val isSrtlaEndpoint: LiveData<Boolean> = storageRepository.srtlaConfigFlow
+        .map { it != null }
+        .asLiveData()
+
     /**
      * Expose which RTMP source index is active (1-based), or null if not on RTMP.
      */
