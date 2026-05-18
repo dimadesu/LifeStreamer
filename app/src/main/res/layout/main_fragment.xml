@@ -386,13 +386,14 @@
 
         <com.dimadesu.bondbunny.SrtlaStatsView
             android:id="@+id/srtlaStatsView"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:background="#CC000000"
             android:padding="8dp"
             android:visibility="gone"
             app:layout_constraintBottom_toTopOf="@+id/liveButton"
-            app:layout_constraintStart_toStartOf="parent" />
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
 
         <ToggleButton
             android:id="@+id/liveButton"
