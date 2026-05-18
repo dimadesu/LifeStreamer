@@ -232,14 +232,14 @@
                 app:useSimpleSummaryProvider="true" />
 
             <EditTextPreference
-                app:defaultValue="@string/default_srtla_latency"
-                app:key="@string/srtla_latency_key"
-                app:title="@string/srtla_latency"
+                app:key="@string/srtla_stream_id_key"
+                app:title="@string/srtla_stream_id"
                 app:useSimpleSummaryProvider="true" />
 
             <EditTextPreference
-                app:key="@string/srtla_stream_id_key"
-                app:title="@string/srtla_stream_id"
+                app:defaultValue="@string/default_srtla_latency"
+                app:key="@string/srtla_latency_key"
+                app:title="@string/srtla_latency"
                 app:useSimpleSummaryProvider="true" />
 
             <EditTextPreference
