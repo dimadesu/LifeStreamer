@@ -265,7 +265,7 @@
                     android:id="@+id/srtlaStatsButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SRTLA"
+                    android:text="SRTLA STATS"
                     android:backgroundTint="@color/button_gray" />
 
             </LinearLayout>
