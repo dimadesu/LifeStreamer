@@ -391,6 +391,8 @@
             android:background="#CC000000"
             android:padding="8dp"
             android:elevation="10dp"
+            android:clickable="true"
+            android:focusable="true"
             android:visibility="gone"
             app:layout_constraintBottom_toTopOf="@+id/liveButton"
             app:layout_constraintStart_toStartOf="parent"
