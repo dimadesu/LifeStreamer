@@ -2230,6 +2230,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
+                if (SrtlaManager.isRunning) SrtlaManager.stop()
                 service?.cancelReconnection()
                 service?.setStreamStatus(StreamStatus.ERROR)
                 _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
@@ -2268,6 +2269,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val currentStreamer = serviceStreamer
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
+                    if (SrtlaManager.isRunning) SrtlaManager.stop()
                     service?.cancelReconnection()
                     service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
@@ -2283,6 +2285,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
                 if (!sourcesValid) {
                     Log.e(TAG, "Reconnection failed: $sourceError")
+                    if (SrtlaManager.isRunning) SrtlaManager.stop()
                     service?.setReconnectionMessage("Reconnection failed. Sources not configured")
                     service?.cancelReconnection()
                     service?.setStreamStatus(StreamStatus.ERROR)
