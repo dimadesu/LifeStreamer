@@ -1865,6 +1865,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Unlock stream rotation since we're truly stopped
                         service?.unlockStreamRotation()
                         
+                        // Stop SRTLA proxy since we're aborting the session entirely
+                        if (SrtlaManager.isRunning) {
+                            Log.i(TAG, "stopStream() - Stopping SRTLA during reconnection cancel")
+                            SrtlaManager.stop()
+                        }
+
                         // If we were actually streaming, do slow cleanup in background with flag
                         // If just reconnecting/connecting, close quickly without the flag
                         if (currentStreamingState == true) {
@@ -1917,6 +1923,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "Stopping connection attempt (userStoppedManually already set)")
                         
                         // userStoppedManually already set to true before acquiring mutex
+                        
+                        // Stop SRTLA proxy if it was started for this connection attempt
+                        if (SrtlaManager.isRunning) {
+                            Log.i(TAG, "stopStream() - Stopping SRTLA during connection abort")
+                            SrtlaManager.stop()
+                        }
                         
                         // Cancel any pending reconnection attempts
                         reconnectTimer.stop()
