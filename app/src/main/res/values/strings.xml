@@ -191,7 +191,7 @@
     <string name="default_srtla_receiver_port">5000</string>
     <string name="srtla_listen_port_key">srtla_listen_port_key</string>
     <string name="srtla_listen_port">Local SRTLA Sender Listen Port</string>
-    <string name="default_srtla_listen_port">6000</string>
+    <string name="default_srtla_listen_port">6001</string>
     <string name="srtla_latency_key">srtla_latency_key</string>
     <string name="srtla_latency">Latency (ms)</string>
     <string name="default_srtla_latency">2000</string>
