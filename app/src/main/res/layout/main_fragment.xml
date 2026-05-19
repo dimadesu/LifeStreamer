@@ -404,7 +404,8 @@
                 android:id="@+id/srtlaStatsView"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="8dp" />
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp" />
 
         </ScrollView>
 
