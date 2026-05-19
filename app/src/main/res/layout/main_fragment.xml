@@ -388,7 +388,7 @@
             android:id="@+id/srtlaStatsScrollView"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:background="#CC000000"
+            android:background="#80000000"
             android:elevation="10dp"
             android:clickable="true"
             android:focusable="true"
