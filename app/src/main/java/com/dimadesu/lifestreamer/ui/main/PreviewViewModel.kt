@@ -3759,6 +3759,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         .map { it != null }
         .asLiveData()
 
+    private val _isSrtlaStatsVisible = MutableLiveData(false)
+    val isSrtlaStatsVisible: LiveData<Boolean> = _isSrtlaStatsVisible
+
+    fun setSrtlaStatsVisible(visible: Boolean) {
+        _isSrtlaStatsVisible.value = visible
+    }
+
     /**
      * Expose which RTMP source index is active (1-based), or null if not on RTMP.
      */
