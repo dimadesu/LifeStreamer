@@ -389,7 +389,6 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:background="#CC000000"
-            android:paddingStart="68dp"
             android:elevation="10dp"
             android:clickable="true"
             android:focusable="true"
