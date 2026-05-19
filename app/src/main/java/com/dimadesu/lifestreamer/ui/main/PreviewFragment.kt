@@ -176,12 +176,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.srtlaStatsButton.setOnClickListener {
-            if (binding.srtlaStatsView.visibility == View.VISIBLE) {
+            if (binding.srtlaStatsScrollView.visibility == View.VISIBLE) {
                 binding.srtlaStatsView.stopStatsUpdates()
-                binding.srtlaStatsView.visibility = View.GONE
+                binding.srtlaStatsScrollView.visibility = View.GONE
                 binding.srtlaStatsButton.backgroundTintList = getButtonColorStateList(requireContext(), false)
             } else {
-                binding.srtlaStatsView.visibility = View.VISIBLE
+                binding.srtlaStatsScrollView.visibility = View.VISIBLE
                 binding.srtlaStatsView.startStatsUpdates()
                 binding.srtlaStatsButton.backgroundTintList = getButtonColorStateList(requireContext(), true)
             }

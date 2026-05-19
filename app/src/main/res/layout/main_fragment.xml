@@ -384,19 +384,29 @@
 
         </LinearLayout>
 
-        <com.dimadesu.bondbunny.SrtlaStatsView
-            android:id="@+id/srtlaStatsView"
+        <ScrollView
+            android:id="@+id/srtlaStatsScrollView"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:background="#CC000000"
-            android:padding="8dp"
             android:elevation="10dp"
             android:clickable="true"
             android:focusable="true"
             android:visibility="gone"
+            app:layout_constrainedHeight="true"
+            app:layout_constraintVertical_bias="1.0"
+            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toTopOf="@+id/liveButton"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <com.dimadesu.bondbunny.SrtlaStatsView
+                android:id="@+id/srtlaStatsView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp" />
+
+        </ScrollView>
 
         <ToggleButton
             android:id="@+id/liveButton"
