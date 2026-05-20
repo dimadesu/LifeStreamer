@@ -184,13 +184,13 @@
     <string name="srtla_key">srtla_key</string>
     <string name="srtla_settings">SRTLA</string>
     <string name="srtla_receiver_host_key">srtla_receiver_host_key</string>
-    <string name="srtla_receiver_host">SRTLA Server (example: au.srt.belabox.net or IP address)</string>
+    <string name="srtla_receiver_host">SRTLA server (example: au.srt.belabox.net or IP address)</string>
     <string name="default_srtla_receiver_host">au.srt.belabox.net</string>
     <string name="srtla_receiver_port_key">srtla_receiver_port_key</string>
-    <string name="srtla_receiver_port">SRTLA Server Port</string>
+    <string name="srtla_receiver_port">SRTLA server port</string>
     <string name="default_srtla_receiver_port">5000</string>
     <string name="srtla_listen_port_key">srtla_listen_port_key</string>
-    <string name="srtla_listen_port">Local SRTLA Sender Listen Port</string>
+    <string name="srtla_listen_port">Local SRTLA sender listen port (any free port)</string>
     <string name="default_srtla_listen_port">6001</string>
     <string name="srtla_latency_key">srtla_latency_key</string>
     <string name="srtla_latency">Latency (ms)</string>
