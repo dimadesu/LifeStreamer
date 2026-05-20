@@ -261,6 +261,14 @@
                     android:backgroundTint='@{viewmodel.isAudioDebugOverlayVisible ? @color/active_button_green : @color/button_gray}'
                     app:goneUnless="@{!viewmodel.isRtmpSource}" />
 
+                <Button
+                    android:id="@+id/srtlaStatsButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SRTLA STATS"
+                    android:backgroundTint="@color/button_gray"
+                    app:goneUnless="@{viewmodel.isSrtlaEndpoint}" />
+
             </LinearLayout>
 
         </ScrollView>
@@ -375,6 +383,31 @@
                 android:layout_height="14dp" />
 
         </LinearLayout>
+
+        <ScrollView
+            android:id="@+id/srtlaStatsScrollView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:background="#80000000"
+            android:elevation="10dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone"
+            app:layout_constrainedHeight="true"
+            app:layout_constraintVertical_bias="1.0"
+            app:layout_constraintTop_toBottomOf="@+id/audioLevelContainer"
+            app:layout_constraintBottom_toTopOf="@+id/liveButton"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <com.dimadesu.bondbunny.SrtlaStatsView
+                android:id="@+id/srtlaStatsView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp" />
+
+        </ScrollView>
 
         <ToggleButton
             android:id="@+id/liveButton"

@@ -21,7 +21,8 @@ sealed class Endpoint(
     val hasMP4Capabilities: Boolean,
     val hasFileCapabilities: Boolean,
     val hasSrtCapabilities: Boolean,
-    val hasRtmpCapabilities: Boolean
+    val hasRtmpCapabilities: Boolean,
+    val hasSrtlaCapabilities: Boolean = false
 ) {
     class TsFileEndpoint : Endpoint(true, false, false, true, false, false)
     class FlvFileEndpoint : Endpoint(false, true, false, true, false, false)
@@ -32,6 +33,15 @@ sealed class Endpoint(
     class WebmFileEndpoint : Endpoint(false, false, false, true, false, false)
     class OggFileEndpoint : Endpoint(false, false, false, true, false, false)
     class ThreeGPFileEndpoint : Endpoint(false, false, false, true, false, false)
+    class SrtlaEndpoint : Endpoint(
+        hasTSCapabilities = true,
+        hasFLVCapabilities = false,
+        hasMP4Capabilities = false,
+        hasFileCapabilities = false,
+        hasSrtCapabilities = false,
+        hasRtmpCapabilities = false,
+        hasSrtlaCapabilities = true
+    )
 }
 
 class EndpointFactory(private val type: EndpointType) {
@@ -45,6 +55,7 @@ class EndpointFactory(private val type: EndpointType) {
             EndpointType.WEBM_FILE -> Endpoint.WebmFileEndpoint()
             EndpointType.OGG_FILE -> Endpoint.OggFileEndpoint()
             EndpointType.THREEGP_FILE -> Endpoint.ThreeGPFileEndpoint()
+            EndpointType.SRTLA -> Endpoint.SrtlaEndpoint()
         }
     }
 }

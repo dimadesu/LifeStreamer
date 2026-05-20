@@ -178,7 +178,48 @@ class DataStoreRepository(
                     ?: context.getString(R.string.default_rtmp_url)
                 UriMediaDescriptor(context, url)
             }
+
+            EndpointType.SRTLA -> {
+                val listenPort =
+                    preferences[stringPreferencesKey(context.getString(R.string.srtla_listen_port_key))]?.toIntOrNull()
+                        ?: context.getString(R.string.default_srtla_listen_port).toInt()
+                val latency =
+                    preferences[stringPreferencesKey(context.getString(R.string.srtla_latency_key))]?.toIntOrNull()
+                        ?: context.getString(R.string.default_srtla_latency).toInt()
+                val streamId =
+                    preferences[stringPreferencesKey(context.getString(R.string.srtla_stream_id_key))]
+                        ?: ""
+                val passPhrase =
+                    preferences[stringPreferencesKey(context.getString(R.string.srtla_passphrase_key))]
+                        ?: ""
+                // SRT connects to the local Bond Bunny proxy which forwards to the SRTLA receiver
+                SrtMediaDescriptor(
+                    host = "127.0.0.1",
+                    port = listenPort,
+                    streamId = streamId,
+                    passPhrase = passPhrase,
+                    latency = latency
+                )
+            }
         }
+    }.distinctUntilChanged()
+
+    /** Config needed to start Bond Bunny SRTLA service. Null when endpoint type is not SRTLA. */
+    data class SrtlaConfig(val receiverHost: String, val receiverPort: String, val listenPort: String)
+
+    val srtlaConfigFlow: Flow<SrtlaConfig?> = dataStore.data.map { preferences ->
+        val endpointTypeId =
+            preferences[stringPreferencesKey(context.getString(R.string.endpoint_type_key))]?.toInt()
+                ?: EndpointType.SRT.id
+        if (EndpointType.fromId(endpointTypeId) != EndpointType.SRTLA) return@map null
+        SrtlaConfig(
+            receiverHost = preferences[stringPreferencesKey(context.getString(R.string.srtla_receiver_host_key))]
+                ?: context.getString(R.string.default_srtla_receiver_host),
+            receiverPort = preferences[stringPreferencesKey(context.getString(R.string.srtla_receiver_port_key))]
+                ?: context.getString(R.string.default_srtla_receiver_port),
+            listenPort = preferences[stringPreferencesKey(context.getString(R.string.srtla_listen_port_key))]
+                ?: context.getString(R.string.default_srtla_listen_port)
+        )
     }.distinctUntilChanged()
 
     // Flow for RTMP video source URL (primary, index 1)

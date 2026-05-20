@@ -23,6 +23,10 @@ android {
         versionName = "1.32.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+        }
     }
 
     signingConfigs {
@@ -75,6 +79,7 @@ android {
             pickFirsts += setOf("**/*.so")
         }
     }
+
 }
 
 dependencies {
@@ -96,6 +101,7 @@ dependencies {
     implementation("io.github.thibaultbee.streampack:streampack-srt:3.0.1-SNAPSHOT")
 
     implementation("com.herohan:UVCAndroid:1.0.11")
+    implementation("com.dimadesu.bondbunny:srtla-lib")
     implementation("com.google.code.gson:gson:2.11.0")
 
     implementation("androidx.media3:media3-exoplayer:1.8.0")

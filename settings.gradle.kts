@@ -38,4 +38,12 @@ includeBuild("StreamPack") {
             .using(project(":streampack-srt"))
     }
 }
+
+// Include bond-bunny's srtla-lib as a composite build
+includeBuild("bond-bunny") {
+    dependencySubstitution {
+        substitute(module("com.dimadesu.bondbunny:srtla-lib"))
+            .using(project(":srtla-lib"))
+    }
+}
  

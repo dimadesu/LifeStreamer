@@ -194,6 +194,66 @@
                 app:title="@string/srt_server_passphrase"
                 app:useSimpleSummaryProvider="true" />
 
+
+        </PreferenceCategory>
+
+        <PreferenceCategory
+            app:key="@string/rtmp_server_key"
+            app:title="@string/rtmp_server">
+
+            <EditTextPreference
+                app:defaultValue="@string/default_rtmp_url"
+                app:key="@string/rtmp_server_url_key"
+                app:title="@string/server_url"
+                app:useSimpleSummaryProvider="true" />
+
+        </PreferenceCategory>
+
+        <PreferenceCategory
+            app:key="@string/srtla_key"
+            app:title="@string/srtla_settings">
+
+            <EditTextPreference
+                app:defaultValue="@string/default_srtla_receiver_host"
+                app:key="@string/srtla_receiver_host_key"
+                app:title="@string/srtla_receiver_host"
+                app:useSimpleSummaryProvider="true" />
+
+            <EditTextPreference
+                app:defaultValue="@string/default_srtla_receiver_port"
+                app:key="@string/srtla_receiver_port_key"
+                app:title="@string/srtla_receiver_port"
+                app:useSimpleSummaryProvider="true" />
+
+            <EditTextPreference
+                app:defaultValue="@string/default_srtla_listen_port"
+                app:key="@string/srtla_listen_port_key"
+                app:title="@string/srtla_listen_port"
+                app:useSimpleSummaryProvider="true" />
+
+            <EditTextPreference
+                app:key="@string/srtla_stream_id_key"
+                app:title="@string/srtla_stream_id"
+                app:useSimpleSummaryProvider="true" />
+
+            <EditTextPreference
+                app:defaultValue="@string/default_srtla_latency"
+                app:key="@string/srtla_latency_key"
+                app:title="@string/srtla_latency"
+                app:useSimpleSummaryProvider="true" />
+
+            <EditTextPreference
+                app:key="@string/srtla_passphrase_key"
+                app:title="@string/srtla_passphrase"
+                app:useSimpleSummaryProvider="true" />
+
+
+        </PreferenceCategory>
+
+        <PreferenceCategory
+            app:key="@string/bitrate_regulation_key"
+            app:title="@string/bitrate_regulation">
+
             <SwitchPreference
                 android:defaultValue="true"
                 app:key="@string/srt_server_enable_bitrate_regulation_key"
@@ -223,19 +283,6 @@
                 app:title="@string/srt_server_moblin_regulator_mode"
                 app:entries='@array/moblin_regulator_mode_entries'
                 app:entryValues='@array/moblin_regulator_mode_values'
-                app:useSimpleSummaryProvider="true" />
-
-
-        </PreferenceCategory>
-
-        <PreferenceCategory
-            app:key="@string/rtmp_server_key"
-            app:title="@string/rtmp_server">
-
-            <EditTextPreference
-                app:defaultValue="@string/default_rtmp_url"
-                app:key="@string/rtmp_server_url_key"
-                app:title="@string/server_url"
                 app:useSimpleSummaryProvider="true" />
 
         </PreferenceCategory>

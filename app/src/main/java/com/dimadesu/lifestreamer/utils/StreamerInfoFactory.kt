@@ -83,6 +83,13 @@ class StreamerInfoFactory(
                     MediaSinkType.FILE
                 )
             )
+
+            EndpointType.SRTLA -> getInfo(
+                MediaDescriptor.Type(
+                    MediaContainerType.TS,
+                    MediaSinkType.SRT
+                )
+            )
         }
     }
 

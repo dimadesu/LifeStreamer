@@ -174,7 +174,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.audioDebugToggleButton.setOnClickListener {
             previewViewModel.toggleAudioDebugOverlay()
         }
-        
+
+        binding.srtlaStatsButton.setOnClickListener {
+            previewViewModel.setSrtlaStatsVisible(binding.srtlaStatsScrollView.visibility != View.VISIBLE)
+        }
+
+        previewViewModel.isSrtlaStatsVisible.observe(viewLifecycleOwner) { visible ->
+            if (visible) {
+                binding.srtlaStatsScrollView.visibility = View.VISIBLE
+                binding.srtlaStatsView.startStatsUpdates()
+                binding.srtlaStatsButton.backgroundTintList = getButtonColorStateList(requireContext(), true)
+            } else {
+                binding.srtlaStatsView.stopStatsUpdates()
+                binding.srtlaStatsScrollView.visibility = View.GONE
+                binding.srtlaStatsButton.backgroundTintList = getButtonColorStateList(requireContext(), false)
+            }
+        }
+
         // Setup audio source spinner
         setupAudioSourceSpinner()
 
@@ -651,6 +667,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onPause() {
         super.onPause()
         previewViewModel.onUiPaused()
+        binding.srtlaStatsView.stopStatsUpdates()
         // DO NOT stop streaming when going to background - the service should continue streaming
         // DO NOT stop preview either when the camera is being used for streaming -
         // the camera source is shared between preview and streaming, so stopping preview
@@ -666,6 +683,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onResume() {
         super.onResume()
         previewViewModel.onUiResumed()
+        if (binding.srtlaStatsView.visibility == View.VISIBLE) {
+            binding.srtlaStatsView.startStatsUpdates()
+        }
         Log.d(TAG, "onResume() - app returning to foreground, preview should already be active")
         
         // Reapply RTMP button visibility (observer won't re-fire if value unchanged)

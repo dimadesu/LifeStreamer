@@ -140,6 +140,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<PreferenceCategory>(R.string.file_endpoint_key) ?: error("file_endpoint_key not found")
     }
 
+    private val srtlaEndpointPreference: PreferenceCategory by lazy {
+        findPreferenceSafe<PreferenceCategory>(R.string.srtla_key) ?: error("srtla_key not found")
+    }
+
+    private val bitrateRegulationPreference: PreferenceCategory by lazy {
+        findPreferenceSafe<PreferenceCategory>(R.string.bitrate_regulation_key) ?: error("bitrate_regulation_key not found")
+    }
+
     private val serverIpPreference: EditTextPreference by lazy {
         findPreferenceSafe<EditTextPreference>(R.string.srt_server_ip_key) ?: error("srt_server_ip_key not found")
     }
@@ -564,6 +572,26 @@ class SettingsFragment : PreferenceFragmentCompat() {
             editText.filters = arrayOf(InputFilter.LengthFilter(5))
         }
 
+        findPreferenceSafe<EditTextPreference>(R.string.srtla_receiver_host_key)
+            ?.setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_TEXT_VARIATION_URI
+            }
+        findPreferenceSafe<EditTextPreference>(R.string.srtla_receiver_port_key)
+            ?.setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_NUMBER
+                editText.filters = arrayOf(InputFilter.LengthFilter(5))
+            }
+        findPreferenceSafe<EditTextPreference>(R.string.srtla_listen_port_key)
+            ?.setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_NUMBER
+                editText.filters = arrayOf(InputFilter.LengthFilter(5))
+            }
+        findPreferenceSafe<EditTextPreference>(R.string.srtla_latency_key)
+            ?.setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_NUMBER
+                editText.filters = arrayOf(InputFilter.LengthFilter(5))
+            }
+
         serverTargetVideoBitratePreference.isVisible =
             serverEnableBitrateRegulationPreference.isChecked
         serverMinVideoBitratePreference.isVisible =
@@ -608,7 +636,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         ).build()
         srtEndpointPreference.isVisible = endpoint.hasSrtCapabilities
         rtmpEndpointPreference.isVisible = endpoint.hasRtmpCapabilities
+        srtlaEndpointPreference.isVisible = endpoint.hasSrtlaCapabilities
         fileEndpointPreference.isVisible = endpoint.hasFileCapabilities
+        bitrateRegulationPreference.isVisible = endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities
 
         // Update supported values with a new info
         streamerInfo = StreamerInfoFactory(requireContext(), endpointType).build()

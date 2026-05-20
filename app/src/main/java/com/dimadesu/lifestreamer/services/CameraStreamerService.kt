@@ -36,6 +36,7 @@ import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.models.StreamStatus
+import com.dimadesu.lifestreamer.srtla.SrtlaManager
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -432,6 +433,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try { releaseWakeLock() } catch (_: Exception) {}
         try { releaseNetworkWakeLock() } catch (_: Exception) {}
 
+        // Stop embedded SRTLA proxy if running
+        try { if (SrtlaManager.isRunning) SrtlaManager.stop() } catch (_: Exception) {}
+
         // Ensure audio passthrough is stopped - Quit from notification may call
         // Activity.finishAndRemoveTask() which doesn't always guarantee the
         // service stopped state is fully cleaned up. Stop passthrough here
@@ -499,6 +503,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             _userStoppedFromNotification.emit(Unit)
                             
                             streamer?.stopStream()
+
+                            // Stop embedded SRTLA proxy if it was running for this stream
+                            val srtlaConfig = storageRepository.srtlaConfigFlow.first()
+                            if (srtlaConfig != null && SrtlaManager.isRunning) {
+                                SrtlaManager.stop()
+                            }
                             
                             // Unlock stream rotation since streaming has stopped
                             unlockStreamRotation()
@@ -1119,6 +1129,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.i(TAG, "startStreamFromConfiguredEndpoint: opening descriptor $descriptor")
             // Indicate start sequence
             try { _serviceStreamStatus.tryEmit(StreamStatus.STARTING) } catch (_: Throwable) {}
+
+            // If SRTLA mode, start the embedded SRTLA proxy before opening the SRT connection.
+            // SrtlaManager.start() is a suspend fun that returns once the listen port is bound.
+            val srtlaConfig = storageRepository.srtlaConfigFlow.first()
+            if (srtlaConfig != null) {
+                Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")
+                SrtlaManager.start(this, srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort)
+            }
 
             try {
                 // Indicate we're attempting to connect/open

@@ -130,6 +130,7 @@
     <string name="to_ts_file">Record TS file</string>
     <string name="to_flv_file">Record FLV file</string>
     <string name="to_srt">Stream SRT</string>
+    <string name="to_srtla">Stream SRTLA</string>
     <string name="to_rtmp">Stream RTMP</string>
     <string name="to_mp4_file">Record MP4 file</string>
     <string name="to_webm_file">Record WebM file</string>
@@ -156,6 +157,8 @@
     <string name="default_srt_server_latency">2000</string>
     <string name="srt_server_enable_bitrate_regulation_key">srt_server_enable_bitrate_regulation_key</string>
     <string name="srt_server_enable_bitrate_regulation">Enable bitrate regulation</string>
+    <string name="bitrate_regulation_key">bitrate_regulation_key</string>
+    <string name="bitrate_regulation">Bitrate regulation</string>
     <string name="srt_server_video_target_bitrate_key">srt_server_video_target_bitrate_key</string>
     <string name="srt_server_video_target_bitrate">Video target bitrate (kb/s)</string>
     <string name="srt_server_video_min_bitrate_key">srt_server_video_min_bitrate_key</string>
@@ -176,6 +179,26 @@
     <string name="rtmp_server_url_key">rtmp_server_url_key</string>
     <string name="default_rtmp_url">rtmp://127.0.0.1:1935/publish/live</string>
     <string name="server_url">URL</string>
+
+    <!-- SRTLA (Bond Bunny) endpoint settings -->
+    <string name="srtla_key">srtla_key</string>
+    <string name="srtla_settings">SRTLA</string>
+    <string name="srtla_receiver_host_key">srtla_receiver_host_key</string>
+    <string name="srtla_receiver_host">SRTLA Server (example: au.srt.belabox.net or IP address)</string>
+    <string name="default_srtla_receiver_host">au.srt.belabox.net</string>
+    <string name="srtla_receiver_port_key">srtla_receiver_port_key</string>
+    <string name="srtla_receiver_port">SRTLA Server Port</string>
+    <string name="default_srtla_receiver_port">5000</string>
+    <string name="srtla_listen_port_key">srtla_listen_port_key</string>
+    <string name="srtla_listen_port">Local SRTLA Sender Listen Port</string>
+    <string name="default_srtla_listen_port">6001</string>
+    <string name="srtla_latency_key">srtla_latency_key</string>
+    <string name="srtla_latency">Latency (ms)</string>
+    <string name="default_srtla_latency">2000</string>
+    <string name="srtla_stream_id_key">srtla_stream_id_key</string>
+    <string name="srtla_stream_id">Stream ID</string>
+    <string name="srtla_passphrase_key">srtla_passphrase_key</string>
+    <string name="srtla_passphrase">Passphrase</string>
 
     <!-- RTMP source -->
     <string name="rtmp_source_category_title">RTMP (or SRT) as source</string>

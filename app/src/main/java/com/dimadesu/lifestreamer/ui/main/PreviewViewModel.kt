@@ -84,6 +84,8 @@ import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
+import com.dimadesu.lifestreamer.srtla.SrtlaManager
+import com.serenegiant.utils.UVCUtils.getApplication
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -679,6 +681,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             Log.i(TAG, "startServiceStreaming: serviceStreamer available, calling open()...")
 
+            // If SRTLA mode, start the embedded SRTLA proxy before opening the SRT connection.
+            // SrtlaManager.start() is a suspend function — it returns only after the native
+            // listen port is bound (~300 ms), so no extra delay is needed here.
+            val srtlaConfig = storageRepository.srtlaConfigFlow.first()
+            if (srtlaConfig != null) {
+                Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")
+                SrtlaManager.start(getApplication(), srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort)
+            }
+
             // Add timeout to prevent hanging
             // Run on IO dispatcher to prevent blocking UI thread
             withTimeout(5000) { // 5 second timeout
@@ -868,6 +879,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "stopServiceStreaming: Stopping stream...")
             serviceStreamer?.stopStream()
             Log.i(TAG, "stopServiceStreaming: Stream stopped successfully")
+
+            // Stop embedded SRTLA proxy if it was running
+            if (SrtlaManager.isRunning) {
+                Log.i(TAG, "stopServiceStreaming: Stopping embedded SRTLA proxy")
+                withContext(kotlinx.coroutines.Dispatchers.IO) { SrtlaManager.stop() }
+            }
 
             // Don't stop the service - keep it alive like notification stop does
             // This prevents race conditions where ViewModel tries to access destroyed service
@@ -1848,6 +1865,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Unlock stream rotation since we're truly stopped
                         service?.unlockStreamRotation()
                         
+                        // Stop SRTLA proxy since we're aborting the session entirely
+                        if (SrtlaManager.isRunning) {
+                            Log.i(TAG, "stopStream() - Stopping SRTLA during reconnection cancel")
+                            SrtlaManager.stop()
+                        }
+
                         // If we were actually streaming, do slow cleanup in background with flag
                         // If just reconnecting/connecting, close quickly without the flag
                         if (currentStreamingState == true) {
@@ -1900,6 +1923,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "Stopping connection attempt (userStoppedManually already set)")
                         
                         // userStoppedManually already set to true before acquiring mutex
+                        
+                        // Stop SRTLA proxy if it was started for this connection attempt
+                        if (SrtlaManager.isRunning) {
+                            Log.i(TAG, "stopStream() - Stopping SRTLA during connection abort")
+                            SrtlaManager.stop()
+                        }
                         
                         // Cancel any pending reconnection attempts
                         reconnectTimer.stop()
@@ -2201,6 +2230,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
+                if (SrtlaManager.isRunning) SrtlaManager.stop()
                 service?.cancelReconnection()
                 service?.setStreamStatus(StreamStatus.ERROR)
                 _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
@@ -2239,6 +2269,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val currentStreamer = serviceStreamer
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
+                    if (SrtlaManager.isRunning) SrtlaManager.stop()
                     service?.cancelReconnection()
                     service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
@@ -2254,6 +2285,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
                 if (!sourcesValid) {
                     Log.e(TAG, "Reconnection failed: $sourceError")
+                    if (SrtlaManager.isRunning) SrtlaManager.stop()
                     service?.setReconnectionMessage("Reconnection failed. Sources not configured")
                     service?.cancelReconnection()
                     service?.setStreamStatus(StreamStatus.ERROR)
@@ -3737,6 +3769,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * True when any RTMP source is active.
      */
     val isRtmpSource: LiveData<Boolean> = _activeRtmpIndex.map { it != null }
+
+    val isSrtlaEndpoint: LiveData<Boolean> = storageRepository.srtlaConfigFlow
+        .map { it != null }
+        .asLiveData()
+
+    private val _isSrtlaStatsVisible = MutableLiveData(false)
+    val isSrtlaStatsVisible: LiveData<Boolean> = _isSrtlaStatsVisible
+
+    fun setSrtlaStatsVisible(visible: Boolean) {
+        _isSrtlaStatsVisible.value = visible
+    }
 
     /**
      * Expose which RTMP source index is active (1-based), or null if not on RTMP.
