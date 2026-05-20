@@ -59,6 +59,10 @@ I was originally releasing .apk files using [GitHub releases](https://github.com
 
 Open [GitHub releases page](https://github.com/dimadesu/LifeStreamer/releases) on your phone, download .apk file and install.
 
+#### ⚠️ Note on GitHub VS. Google Play Store releases
+
+GitHub and Play Store releases are signed with different keys, which means they are incompatible with one another. You have to delete one version to install the other.
+
 #### ⚠️ Note on "debug" VS. "release" builds
 
 I am in the process of switching GitHub releases to "release" builds from "debug" builds. They have much better performance. This actually fixed "background mode" performance issues.
