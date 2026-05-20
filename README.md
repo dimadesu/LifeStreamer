@@ -63,18 +63,6 @@ Open [GitHub releases page](https://github.com/dimadesu/LifeStreamer/releases) o
 
 GitHub and Play Store releases are signed with different keys, which means they are incompatible with one another. You have to delete one version to install the other.
 
-#### ⚠️ Note on "debug" VS. "release" builds
-
-I am in the process of switching GitHub releases to "release" builds from "debug" builds. They have much better performance. This actually fixed "background mode" performance issues.
-
-Starting from version [1.20.0](https://github.com/dimadesu/LifeStreamer/releases/tag/v1.20.0) I plan to publish "release" .apk builds via GitHub releases.
-
-If you already have older .apk version from GitHub installed, you need to uninstall previous "debug" version first before installing "release" .apk as they are incompatible. Settings from "debug" build cannot be transferred to "release" build.
-
-I used to publish only "debug" builds on GitHub. It was possible to install new version as an update on top of the old one without losing settings.
-
-Once you switch over to "release" builds, it will be possible to update without losing settings (as long as you keep using "release" builds).
-
 ## My goals
 
 My original motiviation for this project was to improve live streaming for action cameras like DJI Osmo Action 4 or GoPro.
