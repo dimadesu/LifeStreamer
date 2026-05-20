@@ -132,7 +132,3 @@ There are existing chat apps for Android like [Stream Buddy](https://play.google
 ### Overlays?
 
 I highly recommend adding overlays in OBS that restreams SRT.
-
-### Can LifeStreamer be combined with Bond Bunny and MediaSrvr?
-
-In theory yes, but there are many benefits to having them separate, so no plans to combine. In general, I'm not a big fan of idea of having everything in one app. I'd rather have different focused apps each doing particular thing really well.
