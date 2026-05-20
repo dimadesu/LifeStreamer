@@ -53,12 +53,6 @@ See the [demo video on YouTube](https://www.youtube.com/watch?v=_zlWsQYxrE4).
 
 You can install app from Google Play Store. Follow [this link](https://play.google.com/store/apps/details?id=com.dimadesu.lifestreamer).
 
-#### Become alpha tester (aka "closed testing")
-
-Please join alpha testing to test early versions of the app. More details [here](https://gist.github.com/dimadesu/00283dc48a672d6d9468126adeaf8566).
-
-Note: Now that app is published publicly on the Play Store there is also "open testing" (beta?) - I'm still figuring out how it works.
-
 ### GitHub releases
 
 I was originally releasing .apk files using [GitHub releases](https://github.com/dimadesu/LifeStreamer/releases). I plan to continue releasing on GitHub as a backup.
