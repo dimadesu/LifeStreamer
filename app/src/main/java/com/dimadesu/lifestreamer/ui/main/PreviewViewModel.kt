@@ -1305,11 +1305,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
+                    // Track the previous value of isStreamingFlow itself rather than reading
+                    // streamStatus.value, because the service's onStreamingStopped callback sets
+                    // status to NOT_STREAMING a few ms BEFORE isStreamingFlow emits false.
+                    // Reading previousStatus at that point gives NOT_STREAMING even when the stream
+                    // was actively running, causing wasStreaming=false and suppressing reconnection.
+                    var previouslyStreaming = serviceStreamer?.isStreamingFlow?.value ?: false
                     serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
                         val previousStatus = streamStatus.value
-                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previousStatus=$previousStatus, userStoppedManually=${service?.userStoppedManually?.value}, isReconnecting=${service?.isReconnecting?.value}")
+                        Log.i(TAG, "isStreamingFlow changed: $isStreaming, previouslyStreaming=$previouslyStreaming, previousStatus=$previousStatus, userStoppedManually=${service?.userStoppedManually?.value}, isReconnecting=${service?.isReconnecting?.value}")
                         
                         if (isStreaming) {
+                            previouslyStreaming = true
                             // Don't change to STREAMING during reconnection - keep CONNECTING status
                             // This ensures stop button works during reconnection attempts
                             if (service?.isReconnecting?.value != true) {
@@ -1318,9 +1325,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 Log.d(TAG, "Stream started during reconnection - keeping CONNECTING status for stop button")
                             }
                         } else {
-                            // Stream stopped - check if this was unexpected (should trigger reconnection)
-                            val wasStreaming = previousStatus == StreamStatus.STREAMING || 
-                                              previousStatus == StreamStatus.CONNECTING
+                            // Stream stopped - check if this was unexpected (should trigger reconnection).
+                            // Use previouslyStreaming (tracks actual isStreamingFlow transitions) instead
+                            // of previousStatus (which can be prematurely set to NOT_STREAMING by the
+                            // service's streaming-stopped callback before isStreamingFlow fires false).
+                            val wasStreaming = previouslyStreaming
+                            previouslyStreaming = false
                             
                             Log.d(TAG, "Stream stopped - wasStreaming=$wasStreaming, userStopped=${service?.userStoppedManually?.value}, isReconnecting=${service?.isReconnecting?.value}")
                             
