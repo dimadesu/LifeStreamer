@@ -1222,6 +1222,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             ) {
                 Log.i(TAG, "Camera permission granted, setting video source")
                 currentStreamer.setVideoSource(CameraSourceFactory(application))
+
+                // Set overlay image — persists across processor recreations
+                val overlayBitmap = BitmapFactory.decodeResource(application.resources, R.drawable.overlay_test)
+                if (overlayBitmap != null) {
+                    currentStreamer.videoInput?.setOverlayBitmap(overlayBitmap)
+                    Log.i(TAG, "Overlay bitmap set on video input")
+                }
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }
