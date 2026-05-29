@@ -180,7 +180,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         previewViewModel.useSystemAudioForCameraLiveData.observe(viewLifecycleOwner) { enabled ->
-            binding.systemAudioToggleButton.text = if (enabled) "SYS AUDIO: ON" else "SYS AUDIO: OFF"
+            binding.systemAudioToggleButton.backgroundTintList = getButtonColorStateList(requireContext(), enabled)
         }
 
         binding.srtlaStatsButton.setOnClickListener {

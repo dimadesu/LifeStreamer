@@ -254,6 +254,14 @@
                     android:visibility="@{viewmodel.showBluetoothToggle ? android.view.View.VISIBLE : android.view.View.GONE}" />
 
                 <Button
+                    android:id="@+id/systemAudioToggleButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SYS AUDIO"
+                    android:backgroundTint="@color/button_gray"
+                    app:goneUnless="@{!viewmodel.isRtmpSource}" />
+
+                <Button
                     android:id="@+id/audioDebugToggleButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -383,22 +391,6 @@
                 android:layout_height="14dp" />
 
         </LinearLayout>
-
-        <!-- System audio toggle: visible for camera/UVC sources only -->
-        <Button
-            android:id="@+id/systemAudioToggleButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="SYS AUDIO: OFF"
-            android:textSize="10sp"
-            android:paddingVertical="2dp"
-            android:backgroundTint="#80000000"
-            android:textColor="@android:color/white"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            app:goneUnless="@{!viewmodel.isRtmpSource}"
-            app:layout_constraintTop_toBottomOf="@+id/audioLevelContainer"
-            app:layout_constraintStart_toStartOf="@+id/audioLevelContainer"
-            app:layout_constraintEnd_toEndOf="@+id/audioLevelContainer" />
 
         <ScrollView
             android:id="@+id/srtlaStatsScrollView"
