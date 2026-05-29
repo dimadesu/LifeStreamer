@@ -3355,8 +3355,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rtmpDisconnectListener = null
                     currentRtmpPlayer = null
 
-                    // Don't release streaming MediaProjection here - it's managed by stream lifecycle
-                    if (streamingMediaProjection == null) {
+                    // Don't release streaming MediaProjection here - it's managed by stream lifecycle.
+                    // Also keep the service alive if startupMediaProjection is still in use.
+                    if (streamingMediaProjection == null && startupMediaProjection == null) {
                         mediaProjectionHelper.release()
                     }
 
@@ -3376,9 +3377,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         currentStreamer.setVideoSource(CameraSourceFactory(application))
                         Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
                     }
-                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                    setAudioSourceBasedOnVideoSource()
 
-                    // Resume VU meter now that mic is the audio source again
+                    // Resume VU meter now that the audio source is restored
                     setupAudioLevelMonitoring()
 
                     // Re-add bitrate regulator if streaming with SRT
