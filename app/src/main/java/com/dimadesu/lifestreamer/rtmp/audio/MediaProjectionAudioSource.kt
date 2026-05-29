@@ -24,10 +24,11 @@ import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSo
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class MediaProjectionAudioSource(
-    override val mediaProjection: MediaProjection,
+    override val mediaProjection: MediaProjection,  // Make public for factory comparison
     private val captureFullPhone: Boolean = false
 ) : AudioRecordSource(), Releasable, IMediaProjectionSource {
 
+    // let AudioRecordSource.configure handle buffer sizing and processor setup
     override fun buildAudioRecord(config: AudioSourceConfig, bufferSize: Int): AudioRecord {
         val audioFormat = AudioFormat.Builder()
             .setEncoding(config.byteFormat)
@@ -53,6 +54,8 @@ class MediaProjectionAudioSource(
             .setAudioPlaybackCaptureConfig(captureConfig)
             .build()
     }
+
+    // Behavior (configure/start/stop/fill/get) is provided by AudioRecordSource.
 }
 
 @RequiresApi(Build.VERSION_CODES.Q)

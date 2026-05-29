@@ -968,11 +968,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         isRtmpOrBitmap: Boolean
     ) {
         if (isRtmpOrBitmap) {
+            // RTMP source (live or bitmap fallback) - try MediaProjection, fallback to microphone
+            // Note: BT mic toggle is ignored here - RTMP always uses MediaProjection or system mic
             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 try {
                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                    Log.i(TAG, "Fallback: Set MediaProjection audio for RTMP/Bitmap video")
+                    Log.i(TAG, "Set MediaProjection audio for RTMP/Bitmap video")
                 } catch (e: Exception) {
                     Log.w(TAG, "MediaProjection audio failed, using conditional source: ${e.message}")
                     currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
@@ -982,6 +984,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
+            // Camera source, UVC source, or UVC bitmap fallback — use mic (BT-aware)
             Log.i(TAG, "Camera/UVC video detected, using ConditionalAudioSourceFactory (BT-aware)")
             currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
         }
