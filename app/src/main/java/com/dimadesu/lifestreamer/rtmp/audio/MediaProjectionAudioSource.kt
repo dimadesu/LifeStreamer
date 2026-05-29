@@ -15,16 +15,19 @@ import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSource
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 
 /**
- * App-local MediaProjection-based audio source that captures only app audio by UID filter.
- * This is a minimal implementation compatible with StreamPack's IAudioSourceInternal usage.
+ * App-local MediaProjection-based audio source.
+ *
+ * When [captureFullPhone] is false (default): captures only this app's own audio via UID filter.
+ * When [captureFullPhone] is true: captures all phone audio (media, games, unknown usage).
+ *
  * Implements IMediaProjectionSource so USB audio manager can detect when screen audio is in use.
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class MediaProjectionAudioSource(
-    override val mediaProjection: MediaProjection  // Make public for factory comparison
+    override val mediaProjection: MediaProjection,
+    private val captureFullPhone: Boolean = false
 ) : AudioRecordSource(), Releasable, IMediaProjectionSource {
 
-    // let AudioRecordSource.configure handle buffer sizing and processor setup
     override fun buildAudioRecord(config: AudioSourceConfig, bufferSize: Int): AudioRecord {
         val audioFormat = AudioFormat.Builder()
             .setEncoding(config.byteFormat)
@@ -32,26 +35,33 @@ class MediaProjectionAudioSource(
             .setChannelMask(config.channelConfig)
             .build()
 
+        val captureConfig = if (captureFullPhone) {
+            AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build()
+        } else {
+            AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+                .addMatchingUid(Process.myUid())
+                .build()
+        }
+
         return AudioRecord.Builder()
             .setAudioFormat(audioFormat)
             .setBufferSizeInBytes(bufferSize)
-            .setAudioPlaybackCaptureConfig(
-                AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
-                    .addMatchingUid(Process.myUid())
-                    .build()
-            )
+            .setAudioPlaybackCaptureConfig(captureConfig)
             .build()
     }
-
-    // Behavior (configure/start/stop/fill/get) is provided by AudioRecordSource.
 }
 
 @RequiresApi(Build.VERSION_CODES.Q)
 class MediaProjectionAudioSourceFactory(
-    private val mediaProjection: MediaProjection
+    private val mediaProjection: MediaProjection,
+    private val captureFullPhone: Boolean = false
 ) : IAudioSourceInternal.Factory {
     override suspend fun create(context: Context): IAudioSourceInternal {
-        return MediaProjectionAudioSource(mediaProjection)
+        return MediaProjectionAudioSource(mediaProjection, captureFullPhone)
     }
 
     override fun isSourceEquals(source: IAudioSourceInternal?): Boolean {

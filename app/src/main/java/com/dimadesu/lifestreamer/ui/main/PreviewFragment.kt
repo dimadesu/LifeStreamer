@@ -694,6 +694,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // Request permissions in onResume() instead of onStart() to fix preview freeze
         // when quickly going to settings and back (StreamPack fix 78f1dc28c)
         requestCameraAndMicrophonePermissions()
+
+        // Request MediaProjection once at startup for the audio mix feature
+        if (!previewViewModel.hasRequestedStartupMediaProjection) {
+            previewViewModel.hasRequestedStartupMediaProjection = true
+            previewViewModel.mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mp ->
+                previewViewModel.onStartupMediaProjectionAcquired(mp)
+            }
+        }
         
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // FIRST: Restore orientation lock if streaming, BEFORE restarting preview

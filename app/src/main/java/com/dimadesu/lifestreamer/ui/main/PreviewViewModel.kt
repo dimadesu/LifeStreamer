@@ -512,6 +512,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
+    // MediaProjection acquired once at app startup for the audio mix feature
+    private var startupMediaProjection: MediaProjection? = null
+
+    // Whether the startup MP permission has already been requested this session
+    var hasRequestedStartupMediaProjection = false
+
+    fun onStartupMediaProjectionAcquired(mp: MediaProjection?) {
+        if (mp == null) {
+            Log.w(TAG, "Startup MediaProjection permission denied — will use mic only")
+            return
+        }
+        startupMediaProjection = mp
+        Log.i(TAG, "Startup MediaProjection acquired — audio mix feature ready")
+    }
+
     // Connection retry mechanism (inspired by Moblin)
     private val reconnectTimer = ReconnectTimer()
     
@@ -933,15 +948,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // UVC bitmap fallback keeps mic audio — only RTMP (live or its bitmap fallback) uses MediaProjection.
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
         val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource && !isUvcBitmapFallback
-        
+
+        val mixProjection = startupMediaProjection ?: streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+        if (mixProjection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            try {
+                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mixProjection, captureFullPhone = true))
+                Log.i(TAG, "Set full-phone system audio source")
+            } catch (e: Exception) {
+                Log.w(TAG, "Full-phone audio failed, falling back: ${e.message}")
+                setFallbackAudioSource(currentStreamer, isRtmpOrBitmap)
+            }
+        } else {
+            setFallbackAudioSource(currentStreamer, isRtmpOrBitmap)
+        }
+    }
+
+    private suspend fun setFallbackAudioSource(
+        currentStreamer: SingleStreamer,
+        isRtmpOrBitmap: Boolean
+    ) {
         if (isRtmpOrBitmap) {
-            // RTMP source (live or bitmap fallback) - try MediaProjection, fallback to microphone
-            // Note: BT mic toggle is ignored here - RTMP always uses MediaProjection or system mic
             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
             if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 try {
                     currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                    Log.i(TAG, "Set MediaProjection audio for RTMP/Bitmap video")
+                    Log.i(TAG, "Fallback: Set MediaProjection audio for RTMP/Bitmap video")
                 } catch (e: Exception) {
                     Log.w(TAG, "MediaProjection audio failed, using conditional source: ${e.message}")
                     currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
@@ -951,7 +982,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
-            // Camera source, UVC source, or UVC bitmap fallback — use mic (BT-aware)
             Log.i(TAG, "Camera/UVC video detected, using ConditionalAudioSourceFactory (BT-aware)")
             currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
         }
@@ -2069,9 +2099,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                         }
                         
-                        // Clear MediaProjection from service to prevent reusing expired tokens
+                        // Clear MediaProjection from service to prevent reusing expired tokens.
+                        // Also reset startup MP so onResume requests a fresh one for the next stream.
                         mediaProjectionHelper.clearMediaProjection()
-                        Log.i(TAG, "MediaProjection cleared from service")
+                        startupMediaProjection = null
+                        hasRequestedStartupMediaProjection = false
+                        Log.i(TAG, "MediaProjection cleared from service — startup MP invalidated, will re-request on resume")
                         
                         if (currentStreamer.isStreamingFlow.value == true) {
                             Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
@@ -4187,6 +4220,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Clean up MediaProjection resources
         streamingMediaProjection?.stop()
         streamingMediaProjection = null
+        startupMediaProjection?.stop()
+        startupMediaProjection = null
         mediaProjectionHelper.release()
         Log.i(TAG, "PreviewViewModel cleared but service continues running for background streaming")
     }
