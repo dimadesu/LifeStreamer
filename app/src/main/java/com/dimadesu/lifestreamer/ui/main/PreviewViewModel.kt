@@ -1772,6 +1772,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")
             if (mediaProjection != null) {
                 streamingMediaProjection = mediaProjection
+                // The startup MP was invalidated when requestProjection() called release() to start
+                // a fresh service. Sync startupMediaProjection to the new valid token so SYS AUDIO
+                // continues to work if/when this stream ends and the user returns to camera.
+                startupMediaProjection = mediaProjection
                 Log.i(TAG, "MediaProjection acquired for streaming session - starting setup...")
 
                 viewModelScope.launch {
@@ -2012,12 +2016,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     Log.i(TAG, "Stopping stream...")
 
-                    // Release MediaProjection FIRST to interrupt any ongoing capture
-                    streamingMediaProjection?.let { mediaProjection ->
-                        mediaProjection.stop()
-                        Log.i(TAG, "MediaProjection stopped")
-                    }
+                    // Keep the MediaProjection token alive after stream stops — it is transferred to
+                    // startupMediaProjection so SYS AUDIO and future streams can reuse it without
+                    // requiring a new permission dialog.
+                    startupMediaProjection = streamingMediaProjection
                     streamingMediaProjection = null
+                    Log.i(TAG, "MediaProjection transferred to startupMediaProjection after stream stop")
 
                     // Stop streaming via helper method
                     try {
@@ -2037,9 +2041,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 } catch (e: Throwable) {
                     Log.e(TAG, "stopStream failed", e)
-                    // Force clear state
+                    // Force clear state — on error, stop everything and allow re-acquisition
                     streamingMediaProjection?.stop()
                     streamingMediaProjection = null
+                    startupMediaProjection = null
+                    hasRequestedStartupMediaProjection = false
                 } finally {
                     // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
@@ -2110,9 +2116,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                         }
                         
-                        // Clear MediaProjection from service to prevent reusing expired tokens
-                        mediaProjectionHelper.clearMediaProjection()
-                        Log.i(TAG, "MediaProjection cleared from service")
+                        // Do not clear MediaProjection from the service on stream stop — the token
+                        // is transferred to startupMediaProjection and can be reused for SYS AUDIO
+                        // or the next stream without a new permission dialog.
                         
                         if (currentStreamer.isStreamingFlow.value == true) {
                             Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
