@@ -175,6 +175,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleAudioDebugOverlay()
         }
 
+        binding.systemAudioToggleButton.setOnClickListener {
+            previewViewModel.toggleSystemAudioForCamera()
+        }
+
+        previewViewModel.useSystemAudioForCameraLiveData.observe(viewLifecycleOwner) { enabled ->
+            binding.systemAudioToggleButton.text = if (enabled) "SYS AUDIO: ON" else "SYS AUDIO: OFF"
+        }
+
         binding.srtlaStatsButton.setOnClickListener {
             previewViewModel.setSrtlaStatsVisible(binding.srtlaStatsScrollView.visibility != View.VISIBLE)
         }

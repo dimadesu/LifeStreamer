@@ -512,7 +512,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
-    // MediaProjection acquired once at app startup for the audio mix feature
+    // MediaProjection acquired once at app startup — kept alive for system audio toggle feature
     private var startupMediaProjection: MediaProjection? = null
 
     // Whether the startup MP permission has already been requested this session
@@ -524,7 +524,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
         startupMediaProjection = mp
-        Log.i(TAG, "Startup MediaProjection acquired — audio mix feature ready")
+        Log.i(TAG, "Startup MediaProjection acquired")
+    }
+
+    // Toggle: camera/UVC sources use full-phone system audio instead of mic
+    private var _useSystemAudioForCamera = false
+    val useSystemAudioForCameraLiveData = MutableLiveData(false)
+
+    fun toggleSystemAudioForCamera() {
+        _useSystemAudioForCamera = !_useSystemAudioForCamera
+        useSystemAudioForCameraLiveData.value = _useSystemAudioForCamera
+        Log.i(TAG, "System audio for camera toggled: $_useSystemAudioForCamera")
+        viewModelScope.launch { setAudioSourceBasedOnVideoSource() }
     }
 
     // Connection retry mechanism (inspired by Moblin)
@@ -949,24 +960,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
         val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource && !isUvcBitmapFallback
 
-        val mixProjection = startupMediaProjection ?: streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-        if (mixProjection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            try {
-                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mixProjection, captureFullPhone = true))
-                Log.i(TAG, "Set full-phone system audio source")
-            } catch (e: Exception) {
-                Log.w(TAG, "Full-phone audio failed, falling back: ${e.message}")
-                setFallbackAudioSource(currentStreamer, isRtmpOrBitmap)
-            }
-        } else {
-            setFallbackAudioSource(currentStreamer, isRtmpOrBitmap)
-        }
-    }
-
-    private suspend fun setFallbackAudioSource(
-        currentStreamer: SingleStreamer,
-        isRtmpOrBitmap: Boolean
-    ) {
         if (isRtmpOrBitmap) {
             // RTMP source (live or bitmap fallback) - try MediaProjection, fallback to microphone
             // Note: BT mic toggle is ignored here - RTMP always uses MediaProjection or system mic
@@ -981,6 +974,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } else {
                 Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using conditional source")
+                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+            }
+        } else if (_useSystemAudioForCamera && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // Camera/UVC with system audio toggle ON — capture full phone audio output
+            val projection = startupMediaProjection ?: streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+            if (projection != null) {
+                try {
+                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection, captureFullPhone = true))
+                    Log.i(TAG, "Set full-phone system audio for camera/UVC source")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Full-phone audio failed, falling back to mic: ${e.message}")
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                }
+            } else {
+                Log.w(TAG, "No MediaProjection for system audio toggle, using mic")
                 currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
@@ -2102,12 +2110,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                         }
                         
-                        // Clear MediaProjection from service to prevent reusing expired tokens.
-                        // Also reset startup MP so onResume requests a fresh one for the next stream.
+                        // Clear MediaProjection from service to prevent reusing expired tokens
                         mediaProjectionHelper.clearMediaProjection()
-                        startupMediaProjection = null
-                        hasRequestedStartupMediaProjection = false
-                        Log.i(TAG, "MediaProjection cleared from service — startup MP invalidated, will re-request on resume")
+                        Log.i(TAG, "MediaProjection cleared from service")
                         
                         if (currentStreamer.isStreamingFlow.value == true) {
                             Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
