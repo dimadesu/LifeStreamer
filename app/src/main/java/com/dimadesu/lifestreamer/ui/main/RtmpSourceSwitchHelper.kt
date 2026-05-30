@@ -286,12 +286,12 @@ internal object RtmpSourceSwitchHelper {
                             // Switch video source
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
-                            // Switch audio source immediately after video
-                            // Set audio source: prefer MediaProjection if streaming, otherwise microphone
-                            val isStreaming = currentStreamer.isStreamingFlow.value == true
+                            // Switch audio source immediately after video.
+                            // Use MediaProjection whenever it's available (streaming or not), since
+                            // startupMediaProjection is now acquired when the user toggles RTMP source.
                             val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                            
-                            if (isStreaming && projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+
+                            if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                                 // Always recreate MediaProjection audio when switching to RTMP.
                                 // After ExoPlayer replacement, Android's AudioPlaybackCapture routing
                                 // may not update for an existing AudioRecord, causing silent audio.
@@ -308,40 +308,12 @@ internal object RtmpSourceSwitchHelper {
                                     }
                                 }
                             } else {
-                                // Use conditional source when not streaming or MediaProjection unavailable
+                                // No MediaProjection available — fall back to mic
                                 try {
                                     currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                                    Log.i(TAG, "No MediaProjection available for RTMP, using microphone")
                                 } catch (ae: Exception) {
                                     Log.w(TAG, "Failed to set conditional audio source: ${ae.message}")
-                                }
-                                
-                                // Launch background task to upgrade to MediaProjection if streaming starts
-                                if (!isStreaming && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                    CoroutineScope(Dispatchers.Default).launch {
-                                        try {
-                                            val deadline = System.currentTimeMillis() + 10_000L
-                                            var upgradedProjection = projection ?: mediaProjectionHelper.getMediaProjection()
-                                            if (upgradedProjection == null) {
-                                                while (System.currentTimeMillis() < deadline) {
-                                                    delay(500L)
-                                                    upgradedProjection = mediaProjectionHelper.getMediaProjection()
-                                                    if (upgradedProjection != null) break
-                                                }
-                                            }
-                                            upgradedProjection?.let { mp ->
-                                                if (currentStreamer.isStreamingFlow.value == true) {
-                                                    try {
-                                                        currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mp))
-                                                        Log.d(TAG, "Upgraded to MediaProjection audio")
-                                                    } catch (upgradeEx: Exception) {
-                                                        Log.w(TAG, "MediaProjection upgrade failed: ${upgradeEx.message}")
-                                                    }
-                                                }
-                                            }
-                                        } catch (bgEx: Exception) {
-                                            Log.w(TAG, "Background MediaProjection upgrade failed: ${bgEx.message}")
-                                        }
-                                    }
                                 }
                             }
                             
