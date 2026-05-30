@@ -94,20 +94,20 @@ internal object RtmpSourceSwitchHelper {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             if (playbackState == androidx.media3.common.Player.STATE_READY) {
                                 try { player.removeListener(this) } catch (_: Exception) {}
-                                if (cont.isActive) cont.resume(true)
+                                if (cont.isActive) cont.resumeWith(Result.success(true))
                             }
                         }
 
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             try { player.removeListener(this) } catch (_: Exception) {}
-                            if (cont.isActive) cont.resume(false)
+                            if (cont.isActive) cont.resumeWith(Result.success(false))
                         }
                     }
                     // If the player is already ready, avoid registering the listener which
                     // could miss the READY event if it happened before listener registration.
                     val currentState = try { player.playbackState } catch (_: Exception) { -1 }
                     if (currentState == androidx.media3.common.Player.STATE_READY) {
-                        if (cont.isActive) cont.resume(true) {}
+                        if (cont.isActive) cont.resumeWith(Result.success(true))
                         return@suspendCancellableCoroutine
                     }
                     player.addListener(listener)
