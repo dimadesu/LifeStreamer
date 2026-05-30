@@ -512,28 +512,37 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
 
-    // MediaProjection acquired once at app startup — kept alive for system audio toggle feature
+    // MediaProjection token held outside of a stream session — acquired on first RTMP/SYS AUDIO use
     private var startupMediaProjection: MediaProjection? = null
-
-    // Whether the startup MP permission has already been requested this session
-    var hasRequestedStartupMediaProjection = false
-
-    fun onStartupMediaProjectionAcquired(mp: MediaProjection?) {
-        if (mp == null) {
-            Log.w(TAG, "Startup MediaProjection permission denied — will use mic only")
-            return
-        }
-        startupMediaProjection = mp
-        Log.i(TAG, "Startup MediaProjection acquired")
-    }
 
     // Toggle: camera/UVC sources use full-phone system audio instead of mic
     private var _useSystemAudioForCamera = false
     val useSystemAudioForCameraLiveData = MutableLiveData(false)
 
-    fun toggleSystemAudioForCamera() {
+    fun toggleSystemAudioForCamera(
+        mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
+    ) {
+        val alreadyHasProjection = startupMediaProjection != null
+                || streamingMediaProjection != null
+                || mediaProjectionHelper.getMediaProjection() != null
+        if (!alreadyHasProjection && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            Log.i(TAG, "Requesting MediaProjection for SYS AUDIO toggle")
+            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                if (projection == null) {
+                    Log.w(TAG, "MediaProjection denied — SYS AUDIO toggle cancelled")
+                    return@requestProjection
+                }
+                startupMediaProjection = projection
+                doToggleSystemAudioForCamera()
+            }
+        } else {
+            doToggleSystemAudioForCamera()
+        }
+    }
+
+    private fun doToggleSystemAudioForCamera() {
         _useSystemAudioForCamera = !_useSystemAudioForCamera
-        useSystemAudioForCameraLiveData.value = _useSystemAudioForCamera
+        useSystemAudioForCameraLiveData.postValue(_useSystemAudioForCamera)
         Log.i(TAG, "System audio for camera toggled: $_useSystemAudioForCamera")
         viewModelScope.launch { setAudioSourceBasedOnVideoSource() }
     }
@@ -2045,7 +2054,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     streamingMediaProjection?.stop()
                     streamingMediaProjection = null
                     startupMediaProjection = null
-                    hasRequestedStartupMediaProjection = false
                 } finally {
                     // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
@@ -2124,16 +2132,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
                         }
                         
-                        // Pause VU meter after stopping an RTMP stream - RTMP audio is gone and
-                        // mic levels would be misleading while RTMP source is still selected.
-                        // The meter resumes when the user switches back to camera/UVC.
-                        val audioSource = currentStreamer.audioInput?.sourceFlow?.value
-                        if (audioSource is IMediaProjectionSource) {
-                            disableAudioLevelMonitoring()
-                            Log.i(TAG, "Paused VU meter after RTMP stream stop (RTMP source still active)")
-                        } else {
-                            Log.i(TAG, "Stream confirmed stopped - audio source is mic, VU meter unchanged")
-                        }
+                        // Restart VU meter after stream stops — audio source remains valid regardless
+                        // of video source since startupMediaProjection is always available.
+                        setupAudioLevelMonitoring()
+                        Log.i(TAG, "Restarted VU meter after stream stop")
 
                         Log.i(TAG, "Stream stop completed successfully")
                         
@@ -3207,13 +3209,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _activeRtmpIndex.postValue(rtmpIndex)
                     _userToggledUvc.postValue(false)
 
-                    // Pause VU meter when not streaming - RTMP audio isn't available until stream
-                    // starts so mic levels would be misleading. Keep it running during an active
-                    // stream so MediaProjection audio levels continue to display.
-                    if (!isCurrentlyStreaming) {
-                        disableAudioLevelMonitoring()
-                    }
-
                     // Suppress passthrough observer updates during source switch
                     // to prevent monitor toggle from resetting to OFF
                     suppressPassthroughObserver = true
@@ -3236,26 +3231,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     showExposureSlider.value = false
                     showLensDistanceSlider.value = false
 
-                    // Only request MediaProjection when switching to RTMP while streaming.
+                    // Always require MediaProjection when switching to RTMP, regardless of streaming
+                    // state. If startup MP was already acquired, reuse it without prompting.
                     val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
-                            && isCurrentlyStreaming
+                            && startupMediaProjection == null
                             && streamingMediaProjection == null
                             && mediaProjectionHelper.getMediaProjection() == null
 
                     if (needProjection) {
                         if (mediaProjectionLauncher != null) {
-                            Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
+                            Log.i(TAG, "Requesting MediaProjection permission for RTMP source switch")
                             mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
                                 Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
                                 viewModelScope.launch {
-                                    streamingMediaProjection = projection
                                     if (projection == null) {
                                         // Permission denied - turn off RTMP toggle (BT toggle stays visible)
                                         _activeRtmpIndex.postValue(null)
                                         _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
                                         return@launch
                                     }
-                                    
+                                    // Store as startup MP (not streaming MP — stream hasn't started yet)
+                                    startupMediaProjection = projection
+                                    if (isCurrentlyStreaming) streamingMediaProjection = projection
+
                                     // Permission granted - now hide BT toggle (RTMP uses MediaProjection audio)
                                     _showBluetoothToggle.postValue(false)
 
@@ -3289,10 +3287,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             return@launch
                         }
                     } else {
-                        if (!isCurrentlyStreaming) {
-                            Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
-                        }
-                        
                         // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
                         _showBluetoothToggle.postValue(false)
 

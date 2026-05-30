@@ -176,7 +176,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.systemAudioToggleButton.setOnClickListener {
-            previewViewModel.toggleSystemAudioForCamera()
+            previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
         }
 
         previewViewModel.useSystemAudioForCameraLiveData.observe(viewLifecycleOwner) { enabled ->
@@ -703,14 +703,6 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // when quickly going to settings and back (StreamPack fix 78f1dc28c)
         requestCameraAndMicrophonePermissions()
 
-        // Request MediaProjection once at startup for the audio mix feature
-        if (!previewViewModel.hasRequestedStartupMediaProjection) {
-            previewViewModel.hasRequestedStartupMediaProjection = true
-            previewViewModel.mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mp ->
-                previewViewModel.onStartupMediaProjectionAcquired(mp)
-            }
-        }
-        
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
             // Get saved orientation from Service (source of truth)
