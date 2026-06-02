@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.util.Log
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
+import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -568,6 +569,12 @@ class BluetoothAudioManager(
             Log.i(TAG, "Recreating mic source to ensure clean audio session")
             scope.launch(Dispatchers.Default) {
                 try {
+                    val audioInput = (streamerInstance as? IWithAudioSource)?.audioInput
+                    // Don't overwrite MediaProjection audio source (e.g. SYS AUDIO active)
+                    if (audioInput?.sourceFlow?.value is IMediaProjectionSource) {
+                        Log.i(TAG, "Recreate mic source: skipped - MediaProjection audio is active")
+                        return@launch
+                    }
                     // After BT disconnect, current source is BluetoothAudioSource which won't match
                     // AudioRecord/Microphone in isSourceEquals, so recreation happens automatically.
                     // Factory will auto-detect USB and choose appropriate source type.
