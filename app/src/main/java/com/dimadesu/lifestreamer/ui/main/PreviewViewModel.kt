@@ -544,7 +544,27 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         _useSystemAudioForCamera = !_useSystemAudioForCamera
         useSystemAudioForCameraLiveData.postValue(_useSystemAudioForCamera)
         Log.i(TAG, "System audio for camera toggled: $_useSystemAudioForCamera")
-        viewModelScope.launch { setAudioSourceBasedOnVideoSource() }
+        viewModelScope.launch {
+            setAudioSourceBasedOnVideoSource()
+            if (_useSystemAudioForCamera) {
+                // SYS AUDIO on: stop mic passthrough — stream now uses phone audio, not mic
+                if (_isMonitorAudioOn.value == true) {
+                    Log.i(TAG, "SYS AUDIO on - stopping mic passthrough (stream uses phone audio)")
+                    service?.stopAudioPassthrough()
+                }
+            } else {
+                // SYS AUDIO off: restore BT mic if it was enabled (highest priority after SYS AUDIO)
+                if (com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
+                    Log.i(TAG, "SYS AUDIO off - re-applying BT policy to restore BT mic")
+                    try { serviceBinder?.setUseBluetoothMic(true) } catch (_: Throwable) {}
+                }
+                // Restart monitoring if it was on (startAudioPassthrough handles BT internally)
+                if (_isMonitorAudioOn.value == true) {
+                    Log.i(TAG, "SYS AUDIO off - restarting audio monitoring")
+                    applyMonitorAudioState()
+                }
+            }
+        }
     }
 
     // Connection retry mechanism (inspired by Moblin)
@@ -956,11 +976,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Determines and sets the appropriate audio source based on the current video source.
-     * Audio follows video:
-     * - Camera video -> Microphone (or BT mic if toggled ON via ConditionalAudioSourceFactory)
-     * - RTMP/Bitmap video -> MediaProjection (if available), otherwise Microphone
-     * 
-     * Note: BT mic toggle only affects Camera sources, not RTMP/Bitmap which use MediaProjection.
+     * Priority for camera/UVC sources: SYS AUDIO (full-phone MP) > BT mic > built-in mic.
+     * RTMP/Bitmap sources always use MediaProjection (app-only), falling back to mic.
+     *
+     * Note: BT mic SCO negotiation is handled separately by BluetoothAudioManager. This method
+     * only switches the factory; callers must re-apply BT policy when transitioning off SYS AUDIO.
      */
     private suspend fun setAudioSourceBasedOnVideoSource() {
         val currentStreamer = serviceStreamer ?: return
