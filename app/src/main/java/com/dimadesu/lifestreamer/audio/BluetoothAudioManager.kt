@@ -88,9 +88,20 @@ class BluetoothAudioManager(
             if (streamer != null) {
                 scope.launch(Dispatchers.Default) {
                     try {
+                        val audioStreamer = streamer as? IWithAudioSource
+                        val isMediaProjectionActive = audioStreamer?.audioInput?.sourceFlow?.value is IMediaProjectionSource
+
+                        if (isMediaProjectionActive) {
+                            // SYS AUDIO is active — just stop SCO/cleanup, don't touch the audio source
+                            Log.i(TAG, "applyPolicy disable: MediaProjection audio active, only stopping SCO")
+                            stopScoAndResetAudio()
+                            BluetoothAudioConfig.setPreferredDevice(null)
+                            _scoStateFlow.tryEmit(ScoState.IDLE)
+                            return@launch
+                        }
+
                         // Step 1: Switch audio source while still on SCO
                         Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
-                        val audioStreamer = streamer as? IWithAudioSource
                         audioStreamer?.setAudioSource(
                             ConditionalAudioSourceFactory()
                         )
