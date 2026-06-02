@@ -1112,7 +1112,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         try {
                             val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
                             val isRtmpSource = videoSource is RTMPVideoSource
-                            if (!isRtmpSource) {
+                            if (!isRtmpSource && !_useSystemAudioForCamera) {
                                 val snapshot = svc.isPassthroughRunning.value
                                 _isMonitorAudioOn.postValue(snapshot)
                                 Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
@@ -1130,9 +1130,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
                                 val isRtmpSource = videoSource is RTMPVideoSource
-                                if (!isRtmpSource) {
+                                if (!isRtmpSource && !_useSystemAudioForCamera) {
                                     _isMonitorAudioOn.postValue(running)
                                     Log.i(TAG, "Service passthrough running state observed: $running")
+                                } else if (_useSystemAudioForCamera) {
+                                    Log.d(TAG, "Ignoring passthrough state change while SYS AUDIO is active (running=$running)")
                                 } else {
                                     Log.d(TAG, "Ignoring passthrough state change while on RTMP source (running=$running)")
                                 }
