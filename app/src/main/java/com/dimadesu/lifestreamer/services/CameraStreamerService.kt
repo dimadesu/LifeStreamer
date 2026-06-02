@@ -1309,8 +1309,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
         val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
         
-        // Only apply BT policy for streaming if using mic-based audio
-        val effectiveIsStreaming = isStreaming && !isMediaProjectionAudio
+        // Attempt SCO whenever mic-based audio is active (pre-stream and during streaming).
+        // Previously deferred pre-stream, but that left VU meters on built-in mic until stream start.
+        val effectiveIsStreaming = !isMediaProjectionAudio
         bluetoothAudioManager.applyPolicy(enabled, streamer, effectiveIsStreaming)
         
         if (isStreaming && isMediaProjectionAudio && enabled) {
