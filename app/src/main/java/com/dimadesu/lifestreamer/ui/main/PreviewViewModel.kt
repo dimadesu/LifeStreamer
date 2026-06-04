@@ -4483,13 +4483,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Save audio source type to DataStore for persistence
                 storageRepository.saveAudioSourceType(sourceType)
                 Log.d(TAG, "Saved audio source type to DataStore")
+
+                // Only switch to built-in mic if BT mic and SYS AUDIO are both inactive.
+                // When BT or MP is active, the preference is saved and will apply next time
+                // ConditionalAudioSourceFactory is used (e.g. after SYS AUDIO is toggled off).
+                val btActive = _useBluetoothMic.value == true
+                val sysAudioActive = _useSystemAudioForCamera
+                if (btActive || sysAudioActive) {
+                    Log.i(TAG, "Audio source preference saved but not applied — " +
+                            "BT=$btActive, SYS=$sysAudioActive override is active")
+                } else {
+                    currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
+                    Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
+                }
                 
-                // Use ConditionalAudioSourceFactory which reads from DataStore and disables effects
-                currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
-                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
-                
-                // If audio monitoring is enabled, restart passthrough with new settings
-                if (_isMonitorAudioOn.value == true) {
+                // If audio monitoring is enabled and we actually switched the source, restart passthrough
+                if (!btActive && !sysAudioActive && _isMonitorAudioOn.value == true) {
                     Log.i(TAG, "Restarting audio passthrough with new settings")
                     service?.stopAudioPassthrough()
                     delay(100) // Small delay to ensure clean restart
