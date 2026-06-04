@@ -987,7 +987,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
         // UVC bitmap fallback keeps mic audio — only RTMP (live or its bitmap fallback) uses MediaProjection.
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
-        val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource && !isUvcBitmapFallback
+        val isRtmpOrBitmap = currentVideoSource is RTMPVideoSource || (currentVideoSource is IBitmapSource && !isUvcBitmapFallback)
 
         if (isRtmpOrBitmap) {
             // RTMP source (live or bitmap fallback) - try MediaProjection, fallback to microphone
