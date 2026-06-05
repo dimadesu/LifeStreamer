@@ -2559,10 +2559,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // Remove any previous effect
         vuMeterEffect?.let { audioProcessor.remove(it) }
+        vuMeterWatchdogJob?.cancel()
+        vuMeterWatchdogJob = null
+        lastAudioLevelTimeMs = 0L
         
         // Create new VuMeterEffect using IConsumerAudioEffect plugin (runs on background coroutine)
         val effect = com.dimadesu.lifestreamer.audio.VuMeterEffect { levels ->
-            lastAudioLevelTimeMs = System.currentTimeMillis()
+            // Only stamp time on non-silent frames so the watchdog can detect both:
+            // (a) no frames arriving (source transitions) and
+            // (b) frames arriving with zero amplitude (e.g. MediaProjection when nothing plays)
+            val isEffectivelySilent = levels.rms < 0.0001f && levels.peak < 0.0001f
+                    && levels.rmsRight < 0.0001f && levels.peakRight < 0.0001f
+            if (!isEffectivelySilent) {
+                lastAudioLevelTimeMs = System.currentTimeMillis()
+            }
             _audioLevelFlow.value = levels
         }
         vuMeterEffect = effect
