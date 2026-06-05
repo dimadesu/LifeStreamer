@@ -580,6 +580,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         viewModelScope.launch {
             setAudioSourceBasedOnVideoSource()
             if (_useSystemAudioForCamera) {
+                // MediaProjectionService.startForeground() replaced CameraStreamerService's
+                // notification. Re-post the regular notification to restore Start/Mute/Quit.
+                try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
                 // SYS AUDIO on: stop mic passthrough — stream now uses phone audio, not mic
                 if (_isMonitorAudioOn.value == true) {
                     Log.i(TAG, "SYS AUDIO on - stopping mic passthrough (stream uses phone audio)")

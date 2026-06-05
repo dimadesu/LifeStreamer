@@ -1266,6 +1266,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun setUseBluetoothMic(enabled: Boolean, skipPassthroughRestart: Boolean = false, forcePassthroughRestart: Boolean = false) {
             try { this@CameraStreamerService.applyBluetoothPolicy(enabled, skipPassthroughRestart, forcePassthroughRestart) } catch (_: Throwable) {}
         }
+
+        fun refreshNotification() {
+            try { customNotificationUtils.notify(onCreateNotification()) } catch (_: Throwable) {}
+        }
     }
 
     private val customBinder = CameraStreamerServiceBinder()
