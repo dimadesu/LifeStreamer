@@ -1268,7 +1268,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
 
         fun refreshNotification() {
-            try { customNotificationUtils.notify(onCreateNotification()) } catch (_: Throwable) {}
+            try {
+                val (notification, _) = buildNotificationForStatus(_serviceStreamStatus.value)
+                customNotificationUtils.notify(notification)
+            } catch (_: Throwable) {}
         }
     }
 
