@@ -175,6 +175,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleAudioDebugOverlay()
         }
 
+        binding.systemAudioToggleButton.setOnClickListener {
+            previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+        }
+
+        previewViewModel.useSystemAudioForCameraLiveData.observe(viewLifecycleOwner) { enabled ->
+            binding.systemAudioToggleButton.backgroundTintList = getButtonColorStateList(requireContext(), enabled)
+        }
+
         binding.srtlaStatsButton.setOnClickListener {
             previewViewModel.setSrtlaStatsVisible(binding.srtlaStatsScrollView.visibility != View.VISIBLE)
         }
@@ -472,10 +480,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 try {
                     if (level == com.dimadesu.lifestreamer.audio.AudioLevel.SILENT) {
                         binding.audioLevelMeter.reset()
-                        // Hide meter but keep space allocated (INVISIBLE, not GONE)
-                        binding.audioLevelContainer.visibility = android.view.View.INVISIBLE
                     } else {
-                        binding.audioLevelContainer.visibility = android.view.View.VISIBLE
                         binding.audioLevelMeter.setAudioLevel(level)
                     }
                 } catch (t: Throwable) {
@@ -694,7 +699,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // Request permissions in onResume() instead of onStart() to fix preview freeze
         // when quickly going to settings and back (StreamPack fix 78f1dc28c)
         requestCameraAndMicrophonePermissions()
-        
+
         if (PermissionManager.hasPermissions(requireContext(), Manifest.permission.CAMERA)) {
             // FIRST: Restore orientation lock if streaming, BEFORE restarting preview
             // Get saved orientation from Service (source of truth)

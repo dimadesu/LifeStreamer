@@ -392,16 +392,37 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
+        // Mutual exclusivity: enabling BT mic turns off SYS AUDIO
+        val sysAudioWasOn = enabled && _useSystemAudioForCamera
+        if (sysAudioWasOn) {
+            Log.i(TAG, "BT mic on - turning off SYS AUDIO (mutual exclusivity)")
+            _useSystemAudioForCamera = false
+            useSystemAudioForCameraLiveData.postValue(false)
+        }
+
         _useBluetoothMic.postValue(enabled)
         try {
             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
         } catch (_: Throwable) {}
-        // If we have a direct binder, call it. Otherwise rely on the config being applied
-        // The service will handle restarting passthrough if monitoring is active
-        try {
-            serviceBinder?.setUseBluetoothMic(enabled)
-        } catch (_: Throwable) {
-            // Best-effort only: nothing to do if binder isn't available
+
+        if (sysAudioWasOn) {
+            // Switch source away from MP first; service would defer BT if MP is still active.
+            viewModelScope.launch {
+                setAudioSourceBasedOnVideoSource()
+                // Force passthrough restart if monitoring was on — passthrough was stopped
+                // when SYS AUDIO turned on, so _isPassthroughRunning is false, but we want
+                // the integrated BT passthrough restart to re-enable monitoring with BT mic.
+                val monitorWasOn = _isMonitorAudioOn.value == true
+                try { serviceBinder?.setUseBluetoothMic(true, forcePassthroughRestart = monitorWasOn) } catch (_: Throwable) {}
+            }
+        } else {
+            // If we have a direct binder, call it. Otherwise rely on the config being applied
+            // The service will handle restarting passthrough if monitoring is active
+            try {
+                serviceBinder?.setUseBluetoothMic(enabled)
+            } catch (_: Throwable) {
+                // Best-effort only: nothing to do if binder isn't available
+            }
         }
     }
 
@@ -511,6 +532,76 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     // MediaProjection session for streaming
     private var streamingMediaProjection: MediaProjection? = null
+
+    // MediaProjection token held outside of a stream session — acquired on first RTMP/SYS AUDIO use
+    private var startupMediaProjection: MediaProjection? = null
+
+    // Toggle: camera/UVC sources use full-phone system audio instead of mic
+    private var _useSystemAudioForCamera = false
+    val useSystemAudioForCameraLiveData = MutableLiveData(false)
+
+    fun toggleSystemAudioForCamera(
+        mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
+    ) {
+        val alreadyHasProjection = startupMediaProjection != null
+                || streamingMediaProjection != null
+                || mediaProjectionHelper.getMediaProjection() != null
+        if (!alreadyHasProjection && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            Log.i(TAG, "Requesting MediaProjection for SYS AUDIO toggle")
+            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                if (projection == null) {
+                    Log.w(TAG, "MediaProjection denied — SYS AUDIO toggle cancelled")
+                    return@requestProjection
+                }
+                startupMediaProjection = projection
+                doToggleSystemAudioForCamera()
+            }
+        } else {
+            doToggleSystemAudioForCamera()
+        }
+    }
+
+    private fun doToggleSystemAudioForCamera() {
+        _useSystemAudioForCamera = !_useSystemAudioForCamera
+        useSystemAudioForCameraLiveData.postValue(_useSystemAudioForCamera)
+        Log.i(TAG, "System audio for camera toggled: $_useSystemAudioForCamera")
+
+        // Mutual exclusivity: enabling SYS AUDIO turns off BT mic
+        if (_useSystemAudioForCamera && _useBluetoothMic.value == true) {
+            Log.i(TAG, "SYS AUDIO on - turning off BT mic (mutual exclusivity)")
+            _useBluetoothMic.postValue(false)
+            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+            // skipPassthroughRestart=true: SYS AUDIO will stop/manage passthrough itself;
+            // without this flag the service would restart passthrough with built-in mic just
+            // before setAudioSourceBasedOnVideoSource switches the stream to MediaProjection.
+            try { serviceBinder?.setUseBluetoothMic(false, skipPassthroughRestart = true) } catch (_: Throwable) {}
+        }
+
+        viewModelScope.launch {
+            setAudioSourceBasedOnVideoSource()
+            if (_useSystemAudioForCamera) {
+                // MediaProjectionService.startForeground() replaced CameraStreamerService's
+                // notification. Re-post the regular notification to restore Start/Mute/Quit.
+                try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
+                // SYS AUDIO on: stop mic passthrough — stream now uses phone audio, not mic
+                if (_isMonitorAudioOn.value == true) {
+                    Log.i(TAG, "SYS AUDIO on - stopping mic passthrough (stream uses phone audio)")
+                    service?.stopAudioPassthrough()
+                }
+            } else {
+                // SYS AUDIO off: restore BT mic if it was enabled (highest priority after SYS AUDIO)
+                if (com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.isEnabled()) {
+                    Log.i(TAG, "SYS AUDIO off - re-applying BT policy to restore BT mic")
+                    try { serviceBinder?.setUseBluetoothMic(true) } catch (_: Throwable) {}
+                }
+                // Restart monitoring if it was on (startAudioPassthrough handles BT internally)
+                if (_isMonitorAudioOn.value == true) {
+                    Log.i(TAG, "SYS AUDIO off - restarting audio monitoring")
+                    applyMonitorAudioState()
+                }
+            }
+        }
+    }
 
     // Connection retry mechanism (inspired by Moblin)
     private val reconnectTimer = ReconnectTimer()
@@ -921,19 +1012,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Determines and sets the appropriate audio source based on the current video source.
-     * Audio follows video:
-     * - Camera video -> Microphone (or BT mic if toggled ON via ConditionalAudioSourceFactory)
-     * - RTMP/Bitmap video -> MediaProjection (if available), otherwise Microphone
-     * 
-     * Note: BT mic toggle only affects Camera sources, not RTMP/Bitmap which use MediaProjection.
+     * Priority for camera/UVC sources: SYS AUDIO (full-phone MP) > BT mic > built-in mic.
+     * RTMP/Bitmap sources always use MediaProjection (app-only), falling back to mic.
+     *
+     * Note: BT mic SCO negotiation is handled separately by BluetoothAudioManager. This method
+     * only switches the factory; callers must re-apply BT policy when transitioning off SYS AUDIO.
      */
     private suspend fun setAudioSourceBasedOnVideoSource() {
         val currentStreamer = serviceStreamer ?: return
         val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
         // UVC bitmap fallback keeps mic audio — only RTMP (live or its bitmap fallback) uses MediaProjection.
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
-        val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is ICameraSource && !isUvcBitmapFallback
-        
+        val isRtmpOrBitmap = currentVideoSource is RTMPVideoSource || (currentVideoSource is IBitmapSource && !isUvcBitmapFallback)
+
         if (isRtmpOrBitmap) {
             // RTMP source (live or bitmap fallback) - try MediaProjection, fallback to microphone
             // Note: BT mic toggle is ignored here - RTMP always uses MediaProjection or system mic
@@ -948,6 +1039,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } else {
                 Log.i(TAG, "No MediaProjection available for RTMP/Bitmap, using conditional source")
+                currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+            }
+        } else if (_useSystemAudioForCamera && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // Camera/UVC with system audio toggle ON — capture full phone audio output
+            val projection = startupMediaProjection ?: streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+            if (projection != null) {
+                try {
+                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection, captureFullPhone = true))
+                    Log.i(TAG, "Set full-phone system audio for camera/UVC source")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Full-phone audio failed, falling back to mic: ${e.message}")
+                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                }
+            } else {
+                Log.w(TAG, "No MediaProjection for system audio toggle, using mic")
                 currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
             }
         } else {
@@ -1042,7 +1148,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         try {
                             val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
                             val isRtmpSource = videoSource is RTMPVideoSource
-                            if (!isRtmpSource) {
+                            if (!isRtmpSource && !_useSystemAudioForCamera) {
                                 val snapshot = svc.isPassthroughRunning.value
                                 _isMonitorAudioOn.postValue(snapshot)
                                 Log.i(TAG, "Service passthrough running snapshot applied to UI: $snapshot")
@@ -1060,9 +1166,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                                 val videoSource = serviceStreamer?.videoInput?.sourceFlow?.value
                                 val isRtmpSource = videoSource is RTMPVideoSource
-                                if (!isRtmpSource) {
+                                if (!isRtmpSource && !_useSystemAudioForCamera) {
                                     _isMonitorAudioOn.postValue(running)
                                     Log.i(TAG, "Service passthrough running state observed: $running")
+                                } else if (_useSystemAudioForCamera) {
+                                    Log.d(TAG, "Ignoring passthrough state change while SYS AUDIO is active (running=$running)")
                                 } else {
                                     Log.d(TAG, "Ignoring passthrough state change while on RTMP source (running=$running)")
                                 }
@@ -1731,6 +1839,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")
             if (mediaProjection != null) {
                 streamingMediaProjection = mediaProjection
+                // The startup MP was invalidated when requestProjection() called release() to start
+                // a fresh service. Sync startupMediaProjection to the new valid token so SYS AUDIO
+                // continues to work if/when this stream ends and the user returns to camera.
+                startupMediaProjection = mediaProjection
                 Log.i(TAG, "MediaProjection acquired for streaming session - starting setup...")
 
                 viewModelScope.launch {
@@ -1971,12 +2083,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     Log.i(TAG, "Stopping stream...")
 
-                    // Release MediaProjection FIRST to interrupt any ongoing capture
-                    streamingMediaProjection?.let { mediaProjection ->
-                        mediaProjection.stop()
-                        Log.i(TAG, "MediaProjection stopped")
-                    }
+                    // Keep the MediaProjection token alive after stream stops — it is transferred to
+                    // startupMediaProjection so SYS AUDIO and future streams can reuse it without
+                    // requiring a new permission dialog.
+                    startupMediaProjection = streamingMediaProjection
                     streamingMediaProjection = null
+                    Log.i(TAG, "MediaProjection transferred to startupMediaProjection after stream stop")
 
                     // Stop streaming via helper method
                     try {
@@ -1996,9 +2108,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 } catch (e: Throwable) {
                     Log.e(TAG, "stopStream failed", e)
-                    // Force clear state
+                    // Force clear state — on error, stop everything and allow re-acquisition
                     streamingMediaProjection?.stop()
                     streamingMediaProjection = null
+                    startupMediaProjection = null
                 } finally {
                     // Set status to NOT_STREAMING FIRST so any pending callbacks see it immediately
                     service?.setStreamStatus(StreamStatus.NOT_STREAMING)
@@ -2069,24 +2182,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.e(TAG, "CRITICAL: Failed to close endpoint - second start will fail!", e)
                         }
                         
-                        // Clear MediaProjection from service to prevent reusing expired tokens
-                        mediaProjectionHelper.clearMediaProjection()
-                        Log.i(TAG, "MediaProjection cleared from service")
+                        // Do not clear MediaProjection from the service on stream stop — the token
+                        // is transferred to startupMediaProjection and can be reused for SYS AUDIO
+                        // or the next stream without a new permission dialog.
                         
                         if (currentStreamer.isStreamingFlow.value == true) {
                             Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
                         }
                         
-                        // Pause VU meter after stopping an RTMP stream - RTMP audio is gone and
-                        // mic levels would be misleading while RTMP source is still selected.
-                        // The meter resumes when the user switches back to camera/UVC.
-                        val audioSource = currentStreamer.audioInput?.sourceFlow?.value
-                        if (audioSource is IMediaProjectionSource) {
-                            disableAudioLevelMonitoring()
-                            Log.i(TAG, "Paused VU meter after RTMP stream stop (RTMP source still active)")
-                        } else {
-                            Log.i(TAG, "Stream confirmed stopped - audio source is mic, VU meter unchanged")
-                        }
+                        // Restart VU meter after stream stops — audio source remains valid regardless
+                        // of video source since startupMediaProjection is always available.
+                        setupAudioLevelMonitoring()
+                        Log.i(TAG, "Restarted VU meter after stream stop")
 
                         Log.i(TAG, "Stream stop completed successfully")
                         
@@ -2435,7 +2542,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
     private var startCaptureJob: kotlinx.coroutines.Job? = null
     private var stopCaptureJob: kotlinx.coroutines.Job? = null
+    private var vuMeterWatchdogJob: kotlinx.coroutines.Job? = null
     private var vuMeterEffect: com.dimadesu.lifestreamer.audio.VuMeterEffect? = null
+    @Volatile private var lastAudioLevelTimeMs = 0L
     
     /**
      * Set up audio level monitoring on the streamer's audio processor.
@@ -2450,13 +2559,38 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // Remove any previous effect
         vuMeterEffect?.let { audioProcessor.remove(it) }
+        vuMeterWatchdogJob?.cancel()
+        vuMeterWatchdogJob = null
+        lastAudioLevelTimeMs = 0L
         
         // Create new VuMeterEffect using IConsumerAudioEffect plugin (runs on background coroutine)
         val effect = com.dimadesu.lifestreamer.audio.VuMeterEffect { levels ->
+            // Only stamp time on non-silent frames so the watchdog can detect both:
+            // (a) no frames arriving (source transitions) and
+            // (b) frames arriving with zero amplitude (e.g. MediaProjection when nothing plays)
+            val isEffectivelySilent = levels.rms < 0.0001f && levels.peak < 0.0001f
+                    && levels.rmsRight < 0.0001f && levels.peakRight < 0.0001f
+            if (!isEffectivelySilent) {
+                lastAudioLevelTimeMs = System.currentTimeMillis()
+            }
             _audioLevelFlow.value = levels
         }
         vuMeterEffect = effect
         audioProcessor.add(effect)
+
+        // Watchdog: reset to SILENT if no non-silent audio frames arrive for 1500ms.
+        // Resets lastAudioLevelTimeMs after firing so it doesn't repeatedly re-emit
+        // until new non-silent audio arrives — prevents flicker during brief silent gaps.
+        vuMeterWatchdogJob = viewModelScope.launch {
+            while (true) {
+                delay(200)
+                val lastTime = lastAudioLevelTimeMs
+                if (lastTime > 0 && System.currentTimeMillis() - lastTime > 1500) {
+                    lastAudioLevelTimeMs = 0L // Prevent re-firing until new non-silent audio
+                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
+                }
+            }
+        }
         
         // Observe the streamer's audioConfigFlow for channel count changes
         audioConfigObserverJob?.cancel()
@@ -2503,6 +2637,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             audioConfigObserverJob = null
             startCaptureJob?.cancel()
             startCaptureJob = null
+            vuMeterWatchdogJob?.cancel()
+            vuMeterWatchdogJob = null
+            lastAudioLevelTimeMs = 0L
             vuMeterEffect?.let { effect ->
                 serviceStreamer?.audioInput?.processor?.remove(effect)
                 effect.close()
@@ -3160,13 +3297,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     _activeRtmpIndex.postValue(rtmpIndex)
                     _userToggledUvc.postValue(false)
 
-                    // Pause VU meter when not streaming - RTMP audio isn't available until stream
-                    // starts so mic levels would be misleading. Keep it running during an active
-                    // stream so MediaProjection audio levels continue to display.
-                    if (!isCurrentlyStreaming) {
-                        disableAudioLevelMonitoring()
-                    }
-
                     // Suppress passthrough observer updates during source switch
                     // to prevent monitor toggle from resetting to OFF
                     suppressPassthroughObserver = true
@@ -3189,26 +3319,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     showExposureSlider.value = false
                     showLensDistanceSlider.value = false
 
-                    // Only request MediaProjection when switching to RTMP while streaming.
+                    // Always require MediaProjection when switching to RTMP, regardless of streaming
+                    // state. If startup MP was already acquired, reuse it without prompting.
                     val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
-                            && isCurrentlyStreaming
+                            && startupMediaProjection == null
                             && streamingMediaProjection == null
                             && mediaProjectionHelper.getMediaProjection() == null
 
                     if (needProjection) {
                         if (mediaProjectionLauncher != null) {
-                            Log.i(TAG, "Requesting MediaProjection permission (audio) while switching video to RTMP during active stream")
+                            Log.i(TAG, "Requesting MediaProjection permission for RTMP source switch")
                             mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
                                 Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
                                 viewModelScope.launch {
-                                    streamingMediaProjection = projection
                                     if (projection == null) {
                                         // Permission denied - turn off RTMP toggle (BT toggle stays visible)
                                         _activeRtmpIndex.postValue(null)
                                         _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
                                         return@launch
                                     }
-                                    
+                                    // Store as startup MP (not streaming MP — stream hasn't started yet)
+                                    startupMediaProjection = projection
+                                    if (isCurrentlyStreaming) streamingMediaProjection = projection
+
                                     // Permission granted - now hide BT toggle (RTMP uses MediaProjection audio)
                                     _showBluetoothToggle.postValue(false)
 
@@ -3242,10 +3375,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             return@launch
                         }
                     } else {
-                        if (!isCurrentlyStreaming) {
-                            Log.i(TAG, "Not requesting MediaProjection because stream is not active; will request when starting stream if needed")
-                        }
-                        
                         // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
                         _showBluetoothToggle.postValue(false)
 
@@ -3314,8 +3443,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     rtmpDisconnectListener = null
                     currentRtmpPlayer = null
 
-                    // Don't release streaming MediaProjection here - it's managed by stream lifecycle
-                    if (streamingMediaProjection == null) {
+                    // Don't release streaming MediaProjection here - it's managed by stream lifecycle.
+                    // Also keep the service alive if startupMediaProjection is still in use.
+                    if (streamingMediaProjection == null && startupMediaProjection == null) {
                         mediaProjectionHelper.release()
                     }
 
@@ -3335,9 +3465,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         currentStreamer.setVideoSource(CameraSourceFactory(application))
                         Log.i(TAG, "Switched to camera video (default camera) with BT-aware audio")
                     }
-                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
+                    setAudioSourceBasedOnVideoSource()
 
-                    // Resume VU meter now that mic is the audio source again
+                    // Re-activate BT mic SCO if toggle is on (SCO was stopped while on RTMP source)
+                    if (_useBluetoothMic.value == true && !_useSystemAudioForCamera) {
+                        service?.triggerBluetoothMicActivation()
+                    }
+
+                    // Resume VU meter now that the audio source is restored
                     setupAudioLevelMonitoring()
 
                     // Re-add bitrate regulator if streaming with SRT
@@ -4109,8 +4244,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
             audioSource == null -> application.getString(R.string.audio_source_none)
-            audioSource is IMediaProjectionSource -> 
+            audioSource is IMediaProjectionSource ->
                 application.getString(R.string.audio_source_rtmp)
+            audioSource is com.dimadesu.lifestreamer.audio.BluetoothAudioSource ->
+                application.getString(R.string.audio_source_bluetooth)
             else -> application.getString(R.string.audio_source_microphone)
         }
     }
@@ -4187,6 +4324,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Clean up MediaProjection resources
         streamingMediaProjection?.stop()
         streamingMediaProjection = null
+        startupMediaProjection?.stop()
+        startupMediaProjection = null
         mediaProjectionHelper.release()
         Log.i(TAG, "PreviewViewModel cleared but service continues running for background streaming")
     }
@@ -4417,13 +4556,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Save audio source type to DataStore for persistence
                 storageRepository.saveAudioSourceType(sourceType)
                 Log.d(TAG, "Saved audio source type to DataStore")
+
+                // Only switch to built-in mic if BT mic and SYS AUDIO are both inactive.
+                // When BT or MP is active, the preference is saved and will apply next time
+                // ConditionalAudioSourceFactory is used (e.g. after SYS AUDIO is toggled off).
+                val btActive = _useBluetoothMic.value == true
+                val sysAudioActive = _useSystemAudioForCamera
+                if (btActive || sysAudioActive) {
+                    Log.i(TAG, "Audio source preference saved but not applied — " +
+                            "BT=$btActive, SYS=$sysAudioActive override is active")
+                } else {
+                    currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
+                    Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
+                }
                 
-                // Use ConditionalAudioSourceFactory which reads from DataStore and disables effects
-                currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
-                Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
-                
-                // If audio monitoring is enabled, restart passthrough with new settings
-                if (_isMonitorAudioOn.value == true) {
+                // If audio monitoring is enabled and we actually switched the source, restart passthrough
+                if (!btActive && !sysAudioActive && _isMonitorAudioOn.value == true) {
                     Log.i(TAG, "Restarting audio passthrough with new settings")
                     service?.stopAudioPassthrough()
                     delay(100) // Small delay to ensure clean restart

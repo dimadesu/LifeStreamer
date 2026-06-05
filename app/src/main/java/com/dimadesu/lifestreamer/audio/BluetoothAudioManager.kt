@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.util.Log
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
+import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,7 +71,7 @@ class BluetoothAudioManager(
      * @param streamer Optional streamer instance for audio source switching
      * @param isStreaming Whether currently streaming
      */
-    fun applyPolicy(enabled: Boolean, streamer: ISingleStreamer?, isStreaming: Boolean) {
+    fun applyPolicy(enabled: Boolean, streamer: ISingleStreamer?, isStreaming: Boolean, sysAudioTransition: Boolean = false) {
         BluetoothAudioConfig.setEnabled(enabled)
 
         if (!enabled) {
@@ -87,13 +88,28 @@ class BluetoothAudioManager(
             if (streamer != null) {
                 scope.launch(Dispatchers.Default) {
                     try {
-                        // Step 1: Switch audio source while still on SCO
-                        Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
                         val audioStreamer = streamer as? IWithAudioSource
-                        audioStreamer?.setAudioSource(
-                            ConditionalAudioSourceFactory()
-                        )
-                        delay(200)
+                        val isMediaProjectionActive = audioStreamer?.audioInput?.sourceFlow?.value is IMediaProjectionSource
+
+                        if (isMediaProjectionActive) {
+                            // SYS AUDIO is active — just stop SCO/cleanup, don't touch the audio source
+                            Log.i(TAG, "applyPolicy disable: MediaProjection audio active, only stopping SCO")
+                            stopScoAndResetAudio()
+                            BluetoothAudioConfig.setPreferredDevice(null)
+                            _scoStateFlow.tryEmit(ScoState.IDLE)
+                            return@launch
+                        }
+
+                        // Step 1: Switch audio source while still on SCO.
+                        // Skip when SYS AUDIO is about to take over — setAudioSourceBasedOnVideoSource()
+                        // will set MP concurrently, and Step 1's factory create() can race and override it.
+                        if (sysAudioTransition) {
+                            Log.i(TAG, "applyPolicy disable: Step 1 skipped - SYS AUDIO transition")
+                        } else {
+                            Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
+                            audioStreamer?.setAudioSource(ConditionalAudioSourceFactory())
+                            delay(200)
+                        }
                         
                         // Step 2: Now stop SCO and reset audio mode
                         Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
@@ -101,11 +117,18 @@ class BluetoothAudioManager(
                         BluetoothAudioConfig.setPreferredDevice(null)
                         delay(300)
                         
-                        // Step 3: Recreate audio source with fresh AudioRecord
-                        Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
-                        audioStreamer?.setAudioSource(
-                            ConditionalAudioSourceFactory()
-                        )
+                        // Step 3: Recreate audio source with fresh AudioRecord.
+                        // Skip when SYS AUDIO is taking over — ViewModel sets MP via
+                        // setAudioSourceBasedOnVideoSource() and any source switch here
+                        // would race and override it.
+                        // Also re-check at runtime in case SYS AUDIO activated during delays.
+                        val isMediaProjectionNow = audioStreamer?.audioInput?.sourceFlow?.value is IMediaProjectionSource
+                        if (sysAudioTransition || isMediaProjectionNow) {
+                            Log.i(TAG, "applyPolicy disable: Step 3 skipped - SYS AUDIO transition or MediaProjection now active")
+                        } else {
+                            Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
+                            audioStreamer?.setAudioSource(ConditionalAudioSourceFactory())
+                        }
                         
                         delay(150)
                         _scoStateFlow.tryEmit(ScoState.IDLE)
@@ -568,6 +591,12 @@ class BluetoothAudioManager(
             Log.i(TAG, "Recreating mic source to ensure clean audio session")
             scope.launch(Dispatchers.Default) {
                 try {
+                    val audioInput = (streamerInstance as? IWithAudioSource)?.audioInput
+                    // Don't overwrite MediaProjection audio source (e.g. SYS AUDIO active)
+                    if (audioInput?.sourceFlow?.value is IMediaProjectionSource) {
+                        Log.i(TAG, "Recreate mic source: skipped - MediaProjection audio is active")
+                        return@launch
+                    }
                     // After BT disconnect, current source is BluetoothAudioSource which won't match
                     // AudioRecord/Microphone in isSourceEquals, so recreation happens automatically.
                     // Factory will auto-detect USB and choose appropriate source type.
