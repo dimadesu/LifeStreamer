@@ -4206,8 +4206,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
             audioSource == null -> application.getString(R.string.audio_source_none)
-            audioSource is IMediaProjectionSource -> 
+            audioSource is IMediaProjectionSource ->
                 application.getString(R.string.audio_source_rtmp)
+            audioSource is com.dimadesu.lifestreamer.audio.BluetoothAudioSource ->
+                application.getString(R.string.audio_source_bluetooth)
             else -> application.getString(R.string.audio_source_microphone)
         }
     }
