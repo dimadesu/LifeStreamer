@@ -1511,16 +1511,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 _isPassthroughRunning.tryEmit(false)
                 Log.i(TAG, "Audio passthrough stopped")
                 
-                // Only stop SCO if streaming is NOT currently using Bluetooth
-                // Check if streamer is streaming and using BluetoothAudioSource
-                val isStreaming = streamer?.isStreamingFlow?.value == true
+                // Keep SCO active if the streamer is already using BluetoothAudioSource —
+                // stopping SCO would fire a disconnect event and revert the stream source to
+                // built-in mic even though the BT toggle is still on.
                 val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
-                val isStreamingWithBluetooth = isStreaming && currentAudioSource is BluetoothAudioSource
-                
-                if (isStreamingWithBluetooth) {
-                    Log.i(TAG, "Streaming is using Bluetooth - keeping SCO active")
+                val isUsingBluetooth = currentAudioSource is BluetoothAudioSource
+
+                if (isUsingBluetooth) {
+                    Log.i(TAG, "Stream source is Bluetooth - keeping SCO active after passthrough stop")
                 } else {
-                    // Stop SCO if started for passthrough and streaming is not using BT
                     bluetoothAudioManager.stopScoForPassthrough()
                 }
             } catch (e: Exception) {
