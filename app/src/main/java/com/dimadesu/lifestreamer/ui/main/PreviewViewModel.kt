@@ -392,16 +392,33 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
+        // Mutual exclusivity: enabling BT mic turns off SYS AUDIO
+        val sysAudioWasOn = enabled && _useSystemAudioForCamera
+        if (sysAudioWasOn) {
+            Log.i(TAG, "BT mic on - turning off SYS AUDIO (mutual exclusivity)")
+            _useSystemAudioForCamera = false
+            useSystemAudioForCameraLiveData.postValue(false)
+        }
+
         _useBluetoothMic.postValue(enabled)
         try {
             com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(enabled)
         } catch (_: Throwable) {}
-        // If we have a direct binder, call it. Otherwise rely on the config being applied
-        // The service will handle restarting passthrough if monitoring is active
-        try {
-            serviceBinder?.setUseBluetoothMic(enabled)
-        } catch (_: Throwable) {
-            // Best-effort only: nothing to do if binder isn't available
+
+        if (sysAudioWasOn) {
+            // Switch source away from MP first; service would defer BT if MP is still active.
+            viewModelScope.launch {
+                setAudioSourceBasedOnVideoSource()
+                try { serviceBinder?.setUseBluetoothMic(true) } catch (_: Throwable) {}
+            }
+        } else {
+            // If we have a direct binder, call it. Otherwise rely on the config being applied
+            // The service will handle restarting passthrough if monitoring is active
+            try {
+                serviceBinder?.setUseBluetoothMic(enabled)
+            } catch (_: Throwable) {
+                // Best-effort only: nothing to do if binder isn't available
+            }
         }
     }
 
@@ -544,6 +561,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         _useSystemAudioForCamera = !_useSystemAudioForCamera
         useSystemAudioForCameraLiveData.postValue(_useSystemAudioForCamera)
         Log.i(TAG, "System audio for camera toggled: $_useSystemAudioForCamera")
+
+        // Mutual exclusivity: enabling SYS AUDIO turns off BT mic
+        if (_useSystemAudioForCamera && _useBluetoothMic.value == true) {
+            Log.i(TAG, "SYS AUDIO on - turning off BT mic (mutual exclusivity)")
+            setUseBluetoothMic(false)
+        }
+
         viewModelScope.launch {
             setAudioSourceBasedOnVideoSource()
             if (_useSystemAudioForCamera) {
