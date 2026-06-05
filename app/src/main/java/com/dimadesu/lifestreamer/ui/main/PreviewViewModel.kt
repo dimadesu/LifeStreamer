@@ -3437,6 +3437,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                     setAudioSourceBasedOnVideoSource()
 
+                    // Re-activate BT mic SCO if toggle is on (SCO was stopped while on RTMP source)
+                    if (_useBluetoothMic.value == true && !_useSystemAudioForCamera) {
+                        service?.triggerBluetoothMicActivation()
+                    }
+
                     // Resume VU meter now that the audio source is restored
                     setupAudioLevelMonitoring()
 
