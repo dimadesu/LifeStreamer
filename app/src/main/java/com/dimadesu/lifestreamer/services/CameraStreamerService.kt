@@ -1263,8 +1263,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Expose SCO state flow for UI (delegated to BluetoothAudioManager)
         fun scoStateFlow() = this@CameraStreamerService.bluetoothAudioManager.scoStateFlow
         // Allow bound clients to enable/disable Bluetooth mic policy at runtime
-        fun setUseBluetoothMic(enabled: Boolean) {
-            try { this@CameraStreamerService.applyBluetoothPolicy(enabled) } catch (_: Throwable) {}
+        fun setUseBluetoothMic(enabled: Boolean, skipPassthroughRestart: Boolean = false, forcePassthroughRestart: Boolean = false) {
+            try { this@CameraStreamerService.applyBluetoothPolicy(enabled, skipPassthroughRestart, forcePassthroughRestart) } catch (_: Throwable) {}
         }
     }
 
@@ -1300,8 +1300,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Note: BT mic only applies when using mic-based audio, not MediaProjection.
      * 
      * @param enabled true to enable Bluetooth mic, false to disable
+     * @param skipPassthroughRestart true when SYS AUDIO is about to take over — avoids a
+     *        passthrough restart race where the service would restart with built-in mic just
+     *        before the ViewModel switches the stream source to MediaProjection.
      */
-    fun applyBluetoothPolicy(enabled: Boolean) {
+    fun applyBluetoothPolicy(enabled: Boolean, skipPassthroughRestart: Boolean = false, forcePassthroughRestart: Boolean = false) {
         val isStreaming = streamer?.isStreamingFlow?.value == true
         val passthroughWasRunning = _isPassthroughRunning.value
         
@@ -1318,8 +1321,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.i(TAG, "applyBluetoothPolicy: BT toggle ON but using MediaProjection audio - BT mic won't be used for streaming")
         }
         
-        // If passthrough is running, restart it to switch between BT and built-in mic
-        if (passthroughWasRunning) {
+        // If passthrough is running, restart it to switch between BT and built-in mic.
+        // Skip when SYS AUDIO is taking over — it will manage the passthrough itself.
+        // Force restart when transitioning from SYS AUDIO to BT — passthrough was stopped
+        // by SYS AUDIO so passthroughWasRunning is false, but monitoring should resume.
+        if ((passthroughWasRunning || forcePassthroughRestart) && !skipPassthroughRestart) {
             // Cancel any ongoing restart to prevent race conditions
             passthroughRestartJob?.cancel()
             

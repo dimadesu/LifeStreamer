@@ -409,7 +409,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Switch source away from MP first; service would defer BT if MP is still active.
             viewModelScope.launch {
                 setAudioSourceBasedOnVideoSource()
-                try { serviceBinder?.setUseBluetoothMic(true) } catch (_: Throwable) {}
+                // Force passthrough restart if monitoring was on — passthrough was stopped
+                // when SYS AUDIO turned on, so _isPassthroughRunning is false, but we want
+                // the integrated BT passthrough restart to re-enable monitoring with BT mic.
+                val monitorWasOn = _isMonitorAudioOn.value == true
+                try { serviceBinder?.setUseBluetoothMic(true, forcePassthroughRestart = monitorWasOn) } catch (_: Throwable) {}
             }
         } else {
             // If we have a direct binder, call it. Otherwise rely on the config being applied
@@ -565,7 +569,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Mutual exclusivity: enabling SYS AUDIO turns off BT mic
         if (_useSystemAudioForCamera && _useBluetoothMic.value == true) {
             Log.i(TAG, "SYS AUDIO on - turning off BT mic (mutual exclusivity)")
-            setUseBluetoothMic(false)
+            _useBluetoothMic.postValue(false)
+            try { com.dimadesu.lifestreamer.audio.BluetoothAudioConfig.setEnabled(false) } catch (_: Throwable) {}
+            // skipPassthroughRestart=true: SYS AUDIO will stop/manage passthrough itself;
+            // without this flag the service would restart passthrough with built-in mic just
+            // before setAudioSourceBasedOnVideoSource switches the stream to MediaProjection.
+            try { serviceBinder?.setUseBluetoothMic(false, skipPassthroughRestart = true) } catch (_: Throwable) {}
         }
 
         viewModelScope.launch {
