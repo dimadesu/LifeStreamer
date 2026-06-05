@@ -117,11 +117,14 @@ class BluetoothAudioManager(
                         BluetoothAudioConfig.setPreferredDevice(null)
                         delay(300)
                         
-                        // Step 3: Recreate audio source with fresh AudioRecord
-                        // Re-check in case SYS AUDIO was activated during SCO teardown delays
+                        // Step 3: Recreate audio source with fresh AudioRecord.
+                        // Skip when SYS AUDIO is taking over — ViewModel sets MP via
+                        // setAudioSourceBasedOnVideoSource() and any source switch here
+                        // would race and override it.
+                        // Also re-check at runtime in case SYS AUDIO activated during delays.
                         val isMediaProjectionNow = audioStreamer?.audioInput?.sourceFlow?.value is IMediaProjectionSource
-                        if (isMediaProjectionNow) {
-                            Log.i(TAG, "applyPolicy disable: Step 3 skipped - MediaProjection audio now active")
+                        if (sysAudioTransition || isMediaProjectionNow) {
+                            Log.i(TAG, "applyPolicy disable: Step 3 skipped - SYS AUDIO transition or MediaProjection now active")
                         } else {
                             Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
                             audioStreamer?.setAudioSource(ConditionalAudioSourceFactory())
