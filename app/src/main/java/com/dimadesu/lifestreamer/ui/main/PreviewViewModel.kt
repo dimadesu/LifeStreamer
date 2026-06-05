@@ -2542,7 +2542,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var audioConfigObserverJob: kotlinx.coroutines.Job? = null
     private var startCaptureJob: kotlinx.coroutines.Job? = null
     private var stopCaptureJob: kotlinx.coroutines.Job? = null
+    private var vuMeterWatchdogJob: kotlinx.coroutines.Job? = null
     private var vuMeterEffect: com.dimadesu.lifestreamer.audio.VuMeterEffect? = null
+    @Volatile private var lastAudioLevelTimeMs = 0L
     
     /**
      * Set up audio level monitoring on the streamer's audio processor.
@@ -2560,10 +2562,23 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // Create new VuMeterEffect using IConsumerAudioEffect plugin (runs on background coroutine)
         val effect = com.dimadesu.lifestreamer.audio.VuMeterEffect { levels ->
+            lastAudioLevelTimeMs = System.currentTimeMillis()
             _audioLevelFlow.value = levels
         }
         vuMeterEffect = effect
         audioProcessor.add(effect)
+
+        // Watchdog: reset to SILENT if no audio frames arrive for 500ms (e.g. source transitions)
+        vuMeterWatchdogJob?.cancel()
+        vuMeterWatchdogJob = viewModelScope.launch {
+            while (true) {
+                delay(200)
+                val lastTime = lastAudioLevelTimeMs
+                if (lastTime > 0 && System.currentTimeMillis() - lastTime > 500) {
+                    _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
+                }
+            }
+        }
         
         // Observe the streamer's audioConfigFlow for channel count changes
         audioConfigObserverJob?.cancel()
@@ -2610,6 +2625,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             audioConfigObserverJob = null
             startCaptureJob?.cancel()
             startCaptureJob = null
+            vuMeterWatchdogJob?.cancel()
+            vuMeterWatchdogJob = null
+            lastAudioLevelTimeMs = 0L
             vuMeterEffect?.let { effect ->
                 serviceStreamer?.audioInput?.processor?.remove(effect)
                 effect.close()
