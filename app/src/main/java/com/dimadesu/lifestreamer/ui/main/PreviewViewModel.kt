@@ -2578,13 +2578,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         vuMeterEffect = effect
         audioProcessor.add(effect)
 
-        // Watchdog: reset to SILENT if no audio frames arrive for 500ms (e.g. source transitions)
-        vuMeterWatchdogJob?.cancel()
+        // Watchdog: reset to SILENT if no non-silent audio frames arrive for 1500ms.
+        // Resets lastAudioLevelTimeMs after firing so it doesn't repeatedly re-emit
+        // until new non-silent audio arrives — prevents flicker during brief silent gaps.
         vuMeterWatchdogJob = viewModelScope.launch {
             while (true) {
                 delay(200)
                 val lastTime = lastAudioLevelTimeMs
-                if (lastTime > 0 && System.currentTimeMillis() - lastTime > 500) {
+                if (lastTime > 0 && System.currentTimeMillis() - lastTime > 1500) {
+                    lastAudioLevelTimeMs = 0L // Prevent re-firing until new non-silent audio
                     _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
                 }
             }
