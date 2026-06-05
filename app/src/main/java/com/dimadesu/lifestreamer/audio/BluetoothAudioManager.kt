@@ -71,7 +71,7 @@ class BluetoothAudioManager(
      * @param streamer Optional streamer instance for audio source switching
      * @param isStreaming Whether currently streaming
      */
-    fun applyPolicy(enabled: Boolean, streamer: ISingleStreamer?, isStreaming: Boolean) {
+    fun applyPolicy(enabled: Boolean, streamer: ISingleStreamer?, isStreaming: Boolean, sysAudioTransition: Boolean = false) {
         BluetoothAudioConfig.setEnabled(enabled)
 
         if (!enabled) {
@@ -100,12 +100,16 @@ class BluetoothAudioManager(
                             return@launch
                         }
 
-                        // Step 1: Switch audio source while still on SCO
-                        Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
-                        audioStreamer?.setAudioSource(
-                            ConditionalAudioSourceFactory()
-                        )
-                        delay(200)
+                        // Step 1: Switch audio source while still on SCO.
+                        // Skip when SYS AUDIO is about to take over — setAudioSourceBasedOnVideoSource()
+                        // will set MP concurrently, and Step 1's factory create() can race and override it.
+                        if (sysAudioTransition) {
+                            Log.i(TAG, "applyPolicy disable: Step 1 skipped - SYS AUDIO transition")
+                        } else {
+                            Log.i(TAG, "applyPolicy disable: Step 1 - switch to built-in mic before SCO stop")
+                            audioStreamer?.setAudioSource(ConditionalAudioSourceFactory())
+                            delay(200)
+                        }
                         
                         // Step 2: Now stop SCO and reset audio mode
                         Log.i(TAG, "applyPolicy disable: Step 2 - stop SCO and reset audio")
