@@ -473,13 +473,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                         clearUserStoppedManually()
                         
                         try {
-                            // Check if we're using RTMP source - can't start from notification
-                            if (isUsingRtmpSource()) {
-                                Log.i(TAG, "Cannot start RTMP stream from notification - updating notification")
-                                showCannotStartRtmpNotification()
-                                return@launch
-                            }
-                            
                             startStreamFromConfiguredEndpoint()
                         } catch (e: Exception) {
                             Log.w(TAG, "Start from notification failed: ${e.message}")
@@ -949,17 +942,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
     
     /**
-     * Show a notification when user tries to start RTMP stream from notification.
-     * RTMP streams can only be started from the app due to MediaProjection permission requirements.
-     */
-    private fun showCannotStartRtmpNotification() {
-        val notification = createDefaultNotification(
-            content = "Can't start with RTMP source from notification"
-        )
-        customNotificationUtils.notify(notification)
-    }
-    
-    /**
      * Create a standard notification with default settings.
      * Used by onCreateNotification() and other notification methods.
      * 
@@ -1003,18 +985,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.d(TAG, "Sources validated - video: ${videoSource.javaClass.simpleName}, audio: ${audioSource.javaClass.simpleName}")
             true to null
         }
-    }
-    
-    /**
-     * Check if the current video source is RTMP.
-     * RTMP sources cannot be started from notifications due to MediaProjection permission requirements.
-     * 
-     * @return true if current video source is RTMP, false otherwise
-     */
-    private fun isUsingRtmpSource(): Boolean {
-        val currentStreamer = streamer
-        val videoSource = (currentStreamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)?.videoInput?.sourceFlow?.value
-        return videoSource is com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
     }
     
     /**
