@@ -257,7 +257,7 @@
                     android:id="@+id/systemAudioToggleButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SYS AUDIO"
+                    android:text="AUDIO OUT"
                     android:backgroundTint="@color/button_gray"
                     app:goneUnless="@{!viewmodel.isRtmpSource}" />
 
