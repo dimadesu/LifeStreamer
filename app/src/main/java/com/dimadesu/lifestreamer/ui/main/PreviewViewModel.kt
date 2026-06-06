@@ -547,6 +547,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     var rtmpAudioExplanationShown = false
     var sysAudioExplanationShown = false
+    var pendingRtmpIndex: Int? = null
 
     fun toggleSystemAudioForCamera(
         mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
