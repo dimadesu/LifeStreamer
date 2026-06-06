@@ -80,7 +80,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
     // BLUETOOTH_CONNECT permission launcher
     private lateinit var bluetoothConnectLauncher: ActivityResultLauncher<String>
-    // UI messages from service (notification-start feedback)
+
+    // Track whether each explanation dialog has been shown this session.
+    // Independent flags so both dialogs are shown regardless of MP grant order.
+    private var rtmpAudioExplanationShown = false
+    private var sysAudioExplanationShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -177,7 +181,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
         binding.systemAudioToggleButton.setOnClickListener {
             val isTurningOn = previewViewModel.useSystemAudioForCameraLiveData.value != true
-            if (isTurningOn && !previewViewModel.hasMediaProjection()) {
+            if (isTurningOn && !sysAudioExplanationShown) {
+                sysAudioExplanationShown = true
                 androidx.appcompat.app.AlertDialog.Builder(requireContext())
                     .setTitle(R.string.audio_out_explanation_title)
                     .setMessage(R.string.audio_out_explanation_message)
@@ -185,7 +190,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                         dialog.dismiss()
                         previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
                     }
-                    .setNegativeButton(android.R.string.cancel, null)
+                    .setNegativeButton(android.R.string.cancel) { _, _ ->
+                        sysAudioExplanationShown = false // reset so it shows again if user cancelled
+                    }
                     .show()
             } else {
                 previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
@@ -1131,7 +1138,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
      */
     private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
         val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
-        if (isSwitchingTo && !previewViewModel.hasMediaProjection()) {
+        if (isSwitchingTo && !rtmpAudioExplanationShown) {
+            rtmpAudioExplanationShown = true
             androidx.appcompat.app.AlertDialog.Builder(requireContext())
                 .setTitle(R.string.rtmp_audio_explanation_title)
                 .setMessage(R.string.rtmp_audio_explanation_message)
@@ -1139,7 +1147,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     dialog.dismiss()
                     previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
                 }
-                .setNegativeButton(android.R.string.cancel, null)
+                .setNegativeButton(android.R.string.cancel) { _, _ ->
+                    rtmpAudioExplanationShown = false // reset so it shows again if user cancelled
+                }
                 .show()
         } else {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
