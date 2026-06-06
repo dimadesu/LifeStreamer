@@ -1144,11 +1144,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     /**
      * Toggle RTMP video source, showing an explanation dialog before requesting
-     * MediaProjection permission when the user is switching to RTMP for the first time.
+     * MediaProjection permission when the user is switching to RTMP for the first time
+     * and no MediaProjection token exists yet.
      */
     private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
         val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
-        if (isSwitchingTo && !previewViewModel.rtmpAudioExplanationShown) {
+        if (isSwitchingTo && !previewViewModel.rtmpAudioExplanationShown && !previewViewModel.hasMediaProjection()) {
             previewViewModel.pendingRtmpIndex = rtmpIndex
             if (childFragmentManager.findFragmentByTag(ExplanationDialogFragment.RTMP_AUDIO_TAG) == null) {
                 ExplanationDialogFragment.newInstance(
