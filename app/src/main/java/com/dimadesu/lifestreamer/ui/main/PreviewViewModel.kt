@@ -1232,16 +1232,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 scoFlow.collect { state ->
                                     try { _scoStateLiveData.postValue(state.name) } catch (_: Throwable) {}
 
-                                    // If SCO negotiation failed, revert user toggle and notify UI
+                                    // If SCO failed or was unexpectedly disconnected, revert user toggle and notify UI
                                     try {
-                                        val failedEnum = com.dimadesu.lifestreamer.audio.BluetoothAudioManager.ScoState.FAILED
-                                        if (state == failedEnum) {
-                                            // Update UI toggle
-                                            _useBluetoothMic.postValue(false)
-                                            // Inform the service via binder (best-effort)
-                                            try { serviceBinder?.setUseBluetoothMic(false) } catch (_: Throwable) {}
-                                            // Notify user
-                                            try { _toastMessageLiveData.postValue("Bluetooth mic unavailable") } catch (_: Throwable) {}
+                                        when (state) {
+                                            com.dimadesu.lifestreamer.audio.BluetoothAudioManager.ScoState.FAILED -> {
+                                                _useBluetoothMic.postValue(false)
+                                                try { serviceBinder?.setUseBluetoothMic(false) } catch (_: Throwable) {}
+                                                try { _toastMessageLiveData.postValue("Bluetooth mic unavailable") } catch (_: Throwable) {}
+                                            }
+                                            com.dimadesu.lifestreamer.audio.BluetoothAudioManager.ScoState.DISCONNECTED -> {
+                                                _useBluetoothMic.postValue(false)
+                                                try { serviceBinder?.setUseBluetoothMic(false) } catch (_: Throwable) {}
+                                                try { _toastMessageLiveData.postValue("Bluetooth mic disconnected") } catch (_: Throwable) {}
+                                            }
+                                            else -> {}
                                         }
                                     } catch (_: Throwable) {}
                                 }
