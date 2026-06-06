@@ -112,6 +112,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     @SuppressLint("MissingPermission")
     private fun bindProperties() {
+        childFragmentManager.setFragmentResultListener(
+            ExplanationDialogFragment.SYS_AUDIO_TAG, viewLifecycleOwner
+        ) { _, result ->
+            if (result.getBoolean(ExplanationDialogFragment.RESULT_CONFIRMED)) {
+                previewViewModel.sysAudioExplanationShown = true
+                previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+            }
+        }
+
+        childFragmentManager.setFragmentResultListener(
+            ExplanationDialogFragment.RTMP_AUDIO_TAG, viewLifecycleOwner
+        ) { _, result ->
+            if (result.getBoolean(ExplanationDialogFragment.RESULT_CONFIRMED)) {
+                previewViewModel.rtmpAudioExplanationShown = true
+                val rtmpIndex = previewViewModel.pendingRtmpIndex ?: return@setFragmentResultListener
+                previewViewModel.pendingRtmpIndex = null
+                previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
+            }
+        }
+
         binding.liveButton.setOnClickListener {
             // Use streamStatus as single source of truth for determining action
             val currentStatus = previewViewModel.streamStatus.value
@@ -177,16 +197,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.systemAudioToggleButton.setOnClickListener {
             val isTurningOn = previewViewModel.useSystemAudioForCameraLiveData.value != true
             if (isTurningOn && !previewViewModel.sysAudioExplanationShown) {
-                androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                    .setTitle(R.string.audio_out_explanation_title)
-                    .setMessage(R.string.audio_out_explanation_message)
-                    .setPositiveButton(R.string.continue_button) { dialog, _ ->
-                        previewViewModel.sysAudioExplanationShown = true
-                        dialog.dismiss()
-                        previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                if (childFragmentManager.findFragmentByTag(ExplanationDialogFragment.SYS_AUDIO_TAG) == null) {
+                    ExplanationDialogFragment.newInstance(
+                        R.string.audio_out_explanation_title,
+                        R.string.audio_out_explanation_message,
+                        ExplanationDialogFragment.SYS_AUDIO_TAG
+                    ).show(childFragmentManager, ExplanationDialogFragment.SYS_AUDIO_TAG)
+                }
             } else {
                 previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
             }
@@ -1132,16 +1149,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
         val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
         if (isSwitchingTo && !previewViewModel.rtmpAudioExplanationShown) {
-            androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle(R.string.rtmp_audio_explanation_title)
-                .setMessage(R.string.rtmp_audio_explanation_message)
-                .setPositiveButton(R.string.continue_button) { dialog, _ ->
-                    previewViewModel.rtmpAudioExplanationShown = true
-                    dialog.dismiss()
-                    previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
-                }
-                .setNegativeButton(android.R.string.cancel, null)
-                .show()
+            previewViewModel.pendingRtmpIndex = rtmpIndex
+            if (childFragmentManager.findFragmentByTag(ExplanationDialogFragment.RTMP_AUDIO_TAG) == null) {
+                ExplanationDialogFragment.newInstance(
+                    R.string.rtmp_audio_explanation_title,
+                    R.string.rtmp_audio_explanation_message,
+                    ExplanationDialogFragment.RTMP_AUDIO_TAG
+                ).show(childFragmentManager, ExplanationDialogFragment.RTMP_AUDIO_TAG)
+            }
         } else {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
         }
