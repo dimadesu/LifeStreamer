@@ -1847,6 +1847,31 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         service?.setStreamStatus(StreamStatus.STARTING)
 
+        val existingProjection = startupMediaProjection
+            ?: streamingMediaProjection
+            ?: mediaProjectionHelper.getMediaProjection()
+
+        if (existingProjection != null) {
+            Log.i(TAG, "startStreamWithMediaProjection: reusing existing MediaProjection token")
+            streamingMediaProjection = existingProjection
+            startupMediaProjection = existingProjection
+            viewModelScope.launch {
+                try {
+                    setAudioSourceBasedOnVideoSource()
+                    setupAudioLevelMonitoring()
+                    service?.setStreamStatus(StreamStatus.CONNECTING)
+                    startStreamInternal(onSuccess, onError)
+                } catch (e: Exception) {
+                    val error = "Failed to configure MediaProjection audio: ${e.message}"
+                    Log.e(TAG, error, e)
+                    _streamerErrorLiveData.postValue(error)
+                    service?.setStreamStatus(StreamStatus.ERROR)
+                    onError(error)
+                }
+            }
+            return
+        }
+
         mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { mediaProjection ->
             Log.i(TAG, "MediaProjection callback received - mediaProjection: ${if (mediaProjection != null) "SUCCESS" else "NULL"}")
             if (mediaProjection != null) {
