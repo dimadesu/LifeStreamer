@@ -47,11 +47,12 @@ class BluetoothAudioManager(
     private var scoDisconnectReceiver: BroadcastReceiver? = null
     private var btDeviceReceiver: BroadcastReceiver? = null
     private var btDeviceMonitorJob: Job? = null
+    @Volatile private var isHandlingDisconnect = false
     
     /**
      * SCO negotiation state exposed to UI
      */
-    enum class ScoState { IDLE, TRYING, USING_BT, FAILED }
+    enum class ScoState { IDLE, TRYING, USING_BT, FAILED, DISCONNECTED }
     
     private val _scoStateFlow = MutableStateFlow(ScoState.IDLE)
     val scoStateFlow: StateFlow<ScoState> = _scoStateFlow.asStateFlow()
@@ -395,17 +396,23 @@ class BluetoothAudioManager(
 
     /**
      * Handle SCO disconnection by reverting to built-in mic.
+     * Guarded against multiple concurrent invocations (Android sends several broadcasts).
      */
     private fun handleScoDisconnect(streamerInstance: ISingleStreamer?) {
+        if (isHandlingDisconnect) return
+        isHandlingDisconnect = true
+        _scoStateFlow.tryEmit(ScoState.DISCONNECTED)
         scope.launch(Dispatchers.Default) {
             try {
                 stopScoAndResetAudio()
                 delay(250)
                 recreateMicSource(streamerInstance)
                 delay(150)
-                _scoStateFlow.tryEmit(ScoState.IDLE)
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to revert to mic on SCO disconnect: ${t.message}")
+            } finally {
+                isHandlingDisconnect = false
+                _scoStateFlow.tryEmit(ScoState.IDLE)
             }
         }
     }
