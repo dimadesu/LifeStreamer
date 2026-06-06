@@ -27,6 +27,11 @@
     <!-- Audio source labels -->
     <string name="audio_source_microphone">Microphone</string>
     <string name="audio_source_bluetooth">Bluetooth</string>
+    <string name="audio_out_explanation_title">Audio Output Capture</string>
+    <string name="audio_out_explanation_message">Records audio output and uses it as stream audio instead of microphone.\n\nIncludes media (music, videos, browser audio), games and other app sounds. Excludes notifications and alarms.\n\nSome apps can block their audio capture.</string>
+    <string name="continue_button">Continue</string>
+    <string name="rtmp_audio_explanation_title">ExoPlayer Audio Capture</string>
+    <string name="rtmp_audio_explanation_message">LifeStreamer uses ExoPlayer to playback RTMP or SRT stream.\n\nApp needs your permission to capture ExoPlayer audio output.\n\nOn newer Android devices please choose to capture LifeStreamer app or entire device when prompted.</string>
     <string name="audio_source_rtmp">Media Projection Audio</string>
     <string name="audio_source_none">No Audio</string>
 

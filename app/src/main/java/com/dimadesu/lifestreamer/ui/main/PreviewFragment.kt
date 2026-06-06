@@ -80,7 +80,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
     // BLUETOOTH_CONNECT permission launcher
     private lateinit var bluetoothConnectLauncher: ActivityResultLauncher<String>
-    // UI messages from service (notification-start feedback)
+
+    // Track whether each explanation dialog has been shown this session.
+    // Independent flags so both dialogs are shown regardless of MP grant order.
+    private var rtmpAudioExplanationShown = false
+    private var sysAudioExplanationShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -145,7 +149,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.switchSourceButton.setOnClickListener {
-            previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = 1)
+            toggleVideoSourceWithExplanation(rtmpIndex = 1)
         }
 
         binding.rtmpSrvrButton.setOnClickListener {
@@ -176,7 +180,23 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.systemAudioToggleButton.setOnClickListener {
-            previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+            val isTurningOn = previewViewModel.useSystemAudioForCameraLiveData.value != true
+            if (isTurningOn && !sysAudioExplanationShown) {
+                sysAudioExplanationShown = true
+                androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.audio_out_explanation_title)
+                    .setMessage(R.string.audio_out_explanation_message)
+                    .setPositiveButton(R.string.continue_button) { dialog, _ ->
+                        dialog.dismiss()
+                        previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+                    }
+                    .setNegativeButton(android.R.string.cancel) { _, _ ->
+                        sysAudioExplanationShown = false // reset so it shows again if user cancelled
+                    }
+                    .show()
+            } else {
+                previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+            }
         }
 
         previewViewModel.useSystemAudioForCameraLiveData.observe(viewLifecycleOwner) { enabled ->
@@ -1113,6 +1133,30 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     /**
+     * Toggle RTMP video source, showing an explanation dialog before requesting
+     * MediaProjection permission when the user is switching to RTMP for the first time.
+     */
+    private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
+        val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
+        if (isSwitchingTo && !rtmpAudioExplanationShown) {
+            rtmpAudioExplanationShown = true
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle(R.string.rtmp_audio_explanation_title)
+                .setMessage(R.string.rtmp_audio_explanation_message)
+                .setPositiveButton(R.string.continue_button) { dialog, _ ->
+                    dialog.dismiss()
+                    previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ ->
+                    rtmpAudioExplanationShown = false // reset so it shows again if user cancelled
+                }
+                .show()
+        } else {
+            previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
+        }
+    }
+
+    /**
      * Rebuild dynamic RTMP source buttons (RTMP SRC 2, 3, ...) in the container.
      * The first RTMP SRC button is always in XML; this handles additional sources.
      */
@@ -1135,7 +1179,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 backgroundTintList = getButtonColorStateList(requireContext(), activeIndex == i)
                 visibility = if (activeIndex != null && activeIndex != i) View.GONE else View.VISIBLE
                 setOnClickListener {
-                    previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = i)
+                    toggleVideoSourceWithExplanation(rtmpIndex = i)
                 }
             }
             container.addView(button)

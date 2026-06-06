@@ -540,6 +540,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var _useSystemAudioForCamera = false
     val useSystemAudioForCameraLiveData = MutableLiveData(false)
 
+    fun hasMediaProjection(): Boolean =
+        startupMediaProjection != null
+                || streamingMediaProjection != null
+                || mediaProjectionHelper.getMediaProjection() != null
+
     fun toggleSystemAudioForCamera(
         mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
     ) {
@@ -3365,6 +3370,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                             }
                                         }
                                     )
+                                    // MediaProjectionService.startForeground() (ID 1001) overwrote
+                                    // CameraStreamerService notification — restore it.
+                                    try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
                                 }
                             }
                             // Return early; the actual switch will happen in the projection callback
@@ -3400,6 +3408,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 }
                             }
                         )
+                        // MediaProjectionService (ID 1001) may have overwritten the
+                        // CameraStreamerService notification — restore it.
+                        try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
                     }
                 }
                 // If this exact RTMP index is active, switch back to camera
