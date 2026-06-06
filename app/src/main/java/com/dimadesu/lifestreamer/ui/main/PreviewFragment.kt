@@ -176,7 +176,20 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.systemAudioToggleButton.setOnClickListener {
-            previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+            val isTurningOn = previewViewModel.useSystemAudioForCameraLiveData.value != true
+            if (isTurningOn && !previewViewModel.hasMediaProjection()) {
+                androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.audio_out_explanation_title)
+                    .setMessage(R.string.audio_out_explanation_message)
+                    .setPositiveButton(R.string.continue_button) { dialog, _ ->
+                        dialog.dismiss()
+                        previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            } else {
+                previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
+            }
         }
 
         previewViewModel.useSystemAudioForCameraLiveData.observe(viewLifecycleOwner) { enabled ->

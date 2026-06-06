@@ -540,6 +540,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var _useSystemAudioForCamera = false
     val useSystemAudioForCameraLiveData = MutableLiveData(false)
 
+    fun hasMediaProjection(): Boolean =
+        startupMediaProjection != null
+                || streamingMediaProjection != null
+                || mediaProjectionHelper.getMediaProjection() != null
+
     fun toggleSystemAudioForCamera(
         mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
     ) {
