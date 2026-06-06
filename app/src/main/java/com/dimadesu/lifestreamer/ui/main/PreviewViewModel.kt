@@ -545,6 +545,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 || streamingMediaProjection != null
                 || mediaProjectionHelper.getMediaProjection() != null
 
+    var rtmpAudioExplanationShown = false
+    var sysAudioExplanationShown = false
+
     fun toggleSystemAudioForCamera(
         mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
     ) {
@@ -622,7 +625,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
-    private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -2268,25 +2270,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 rtmpRetryJob = null
                 Log.d(TAG, "Cancelled RTMP retry job before reconnection")
                 
-                // For RTMP/Bitmap sources with MediaProjection audio: switch to microphone before close()
-                // MediaProjection tokens become invalid after close(), so we can't reuse them
-                // We'll upgrade back to MediaProjection after successful reconnection with a fresh token
-                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
-                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
-                val hasMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
-                
-                if (isRtmpOrBitmap && hasMediaProjectionAudio) {
-                    try {
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                        needsMediaProjectionAudioRestore = true
-                        Log.d(TAG, "Switched to conditional source before reconnection (will restore MediaProjection after)")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to switch audio source before reconnection: ${e.message}")
-                        needsMediaProjectionAudioRestore = false
-                    }
-                }
-                
                 // Clean up current connection
                 // Only call stopStream() if stream was actually started
                 // If open() failed, the stream is not running and stopStream() will hang
@@ -2433,26 +2416,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null
-                    
-                    // Restore MediaProjection audio if we switched to microphone before reconnection
-                    if (needsMediaProjectionAudioRestore) {
-                        Log.d(TAG, "Restoring MediaProjection audio after reconnection")
-                        needsMediaProjectionAudioRestore = false
-                        
-                        try {
-                            // Get MediaProjection from helper if we don't have it yet
-                            val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                            if (mediaProjection != null) {
-                                // Set MediaProjection audio source directly
-                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
-                                Log.i(TAG, "Restored MediaProjection audio after reconnection")
-                            } else {
-                                Log.w(TAG, "Could not restore MediaProjection audio: MediaProjection not available")
-                            }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
-                        }
-                    }
                     
                     // If reconnected with bitmap source and user had RTMP toggled,
                     // restart the RTMP source retry loop so it eventually switches back to RTMP video.
@@ -4568,21 +4531,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 storageRepository.saveAudioSourceType(sourceType)
                 Log.d(TAG, "Saved audio source type to DataStore")
 
-                // Only switch to built-in mic if BT mic and SYS AUDIO are both inactive.
-                // When BT or MP is active, the preference is saved and will apply next time
+                // Only switch to built-in mic if BT mic, SYS AUDIO, and RTMP source are all inactive.
+                // When BT, MP, or RTMP is active, the preference is saved and will apply next time
                 // ConditionalAudioSourceFactory is used (e.g. after SYS AUDIO is toggled off).
                 val btActive = _useBluetoothMic.value == true
                 val sysAudioActive = _useSystemAudioForCamera
-                if (btActive || sysAudioActive) {
+                val rtmpActive = _activeRtmpIndex.value != null
+                if (btActive || sysAudioActive || rtmpActive) {
                     Log.i(TAG, "Audio source preference saved but not applied — " +
-                            "BT=$btActive, SYS=$sysAudioActive override is active")
+                            "BT=$btActive, SYS=$sysAudioActive, RTMP=$rtmpActive override is active")
                 } else {
                     currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
                     Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
                 }
                 
                 // If audio monitoring is enabled and we actually switched the source, restart passthrough
-                if (!btActive && !sysAudioActive && _isMonitorAudioOn.value == true) {
+                if (!btActive && !sysAudioActive && !rtmpActive && _isMonitorAudioOn.value == true) {
                     Log.i(TAG, "Restarting audio passthrough with new settings")
                     service?.stopAudioPassthrough()
                     delay(100) // Small delay to ensure clean restart
