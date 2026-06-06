@@ -625,7 +625,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     private var lastDisconnectReason: String? = null
     private var rotationIgnoredDuringReconnection: Int? = null // Store rotation changes during reconnection
-    private var needsMediaProjectionAudioRestore = false // Track if we need to restore MediaProjection audio after reconnection
     
     // LiveData for reconnection status UI feedback
     private val _reconnectionStatusLiveData = MutableLiveData<String?>()
@@ -2271,23 +2270,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 rtmpRetryJob = null
                 Log.d(TAG, "Cancelled RTMP retry job before reconnection")
                 
-                // For sources using MediaProjection audio: switch to microphone before close()
-                // MediaProjection tokens become invalid after close(), so we can't reuse them.
-                // This covers both RTMP/Bitmap (own-app MP) and camera/UVC with SYS AUDIO (full-phone MP).
-                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val hasMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
-                
-                if (hasMediaProjectionAudio) {
-                    try {
-                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                        needsMediaProjectionAudioRestore = true
-                        Log.d(TAG, "Switched to conditional source before reconnection (will restore via setAudioSourceBasedOnVideoSource after)")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to switch audio source before reconnection: ${e.message}")
-                        needsMediaProjectionAudioRestore = false
-                    }
-                }
-                
                 // Clean up current connection
                 // Only call stopStream() if stream was actually started
                 // If open() failed, the stream is not running and stopStream() will hang
@@ -2434,21 +2416,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null
-                    
-                    // Restore MediaProjection audio if we switched to microphone before reconnection.
-                    // Use setAudioSourceBasedOnVideoSource() to correctly handle all cases:
-                    // - RTMP/Bitmap → MP without captureFullPhone
-                    // - UVC/Camera + SYS AUDIO → MP with captureFullPhone=true
-                    if (needsMediaProjectionAudioRestore) {
-                        Log.d(TAG, "Restoring MediaProjection audio after reconnection")
-                        needsMediaProjectionAudioRestore = false
-                        try {
-                            setAudioSourceBasedOnVideoSource()
-                            Log.i(TAG, "Restored audio source after reconnection")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to restore audio source after reconnection: ${e.message}")
-                        }
-                    }
                     
                     // If reconnected with bitmap source and user had RTMP toggled,
                     // restart the RTMP source retry loop so it eventually switches back to RTMP video.
