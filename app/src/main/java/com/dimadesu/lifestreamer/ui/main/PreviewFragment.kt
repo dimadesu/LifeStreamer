@@ -177,17 +177,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.systemAudioToggleButton.setOnClickListener {
             val isTurningOn = previewViewModel.useSystemAudioForCameraLiveData.value != true
             if (isTurningOn && !previewViewModel.sysAudioExplanationShown) {
-                previewViewModel.sysAudioExplanationShown = true
                 androidx.appcompat.app.AlertDialog.Builder(requireContext())
                     .setTitle(R.string.audio_out_explanation_title)
                     .setMessage(R.string.audio_out_explanation_message)
                     .setPositiveButton(R.string.continue_button) { dialog, _ ->
+                        previewViewModel.sysAudioExplanationShown = true
                         dialog.dismiss()
                         previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
                     }
-                    .setNegativeButton(android.R.string.cancel) { _, _ ->
-                        previewViewModel.sysAudioExplanationShown = false
-                    }
+                    .setNegativeButton(android.R.string.cancel, null)
                     .show()
             } else {
                 previewViewModel.toggleSystemAudioForCamera(mediaProjectionLauncher)
@@ -1134,17 +1132,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
         val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
         if (isSwitchingTo && !previewViewModel.rtmpAudioExplanationShown) {
-            previewViewModel.rtmpAudioExplanationShown = true
             androidx.appcompat.app.AlertDialog.Builder(requireContext())
                 .setTitle(R.string.rtmp_audio_explanation_title)
                 .setMessage(R.string.rtmp_audio_explanation_message)
                 .setPositiveButton(R.string.continue_button) { dialog, _ ->
+                    previewViewModel.rtmpAudioExplanationShown = true
                     dialog.dismiss()
                     previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
                 }
-                .setNegativeButton(android.R.string.cancel) { _, _ ->
-                    previewViewModel.rtmpAudioExplanationShown = false
-                }
+                .setNegativeButton(android.R.string.cancel, null)
                 .show()
         } else {
             previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
