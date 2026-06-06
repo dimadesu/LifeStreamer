@@ -145,7 +145,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         binding.switchSourceButton.setOnClickListener {
-            previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = 1)
+            toggleVideoSourceWithExplanation(rtmpIndex = 1)
         }
 
         binding.rtmpSrvrButton.setOnClickListener {
@@ -1126,6 +1126,27 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     /**
+     * Toggle RTMP video source, showing an explanation dialog before requesting
+     * MediaProjection permission when the user is switching to RTMP for the first time.
+     */
+    private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
+        val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
+        if (isSwitchingTo && !previewViewModel.hasMediaProjection()) {
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle(R.string.rtmp_audio_explanation_title)
+                .setMessage(R.string.rtmp_audio_explanation_message)
+                .setPositiveButton(R.string.continue_button) { dialog, _ ->
+                    dialog.dismiss()
+                    previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        } else {
+            previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
+        }
+    }
+
+    /**
      * Rebuild dynamic RTMP source buttons (RTMP SRC 2, 3, ...) in the container.
      * The first RTMP SRC button is always in XML; this handles additional sources.
      */
@@ -1148,7 +1169,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 backgroundTintList = getButtonColorStateList(requireContext(), activeIndex == i)
                 visibility = if (activeIndex != null && activeIndex != i) View.GONE else View.VISIBLE
                 setOnClickListener {
-                    previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = i)
+                    toggleVideoSourceWithExplanation(rtmpIndex = i)
                 }
             }
             container.addView(button)

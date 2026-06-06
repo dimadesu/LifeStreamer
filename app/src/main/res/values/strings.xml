@@ -30,6 +30,8 @@
     <string name="audio_out_explanation_title">Audio Output Capture</string>
     <string name="audio_out_explanation_message">Records audio output and uses it as stream audio instead of microphone.\n\nThis includes media, games and other app sounds. Notifications and alarms are not captured.\n\nSome apps can block their audio capture.</string>
     <string name="continue_button">Continue</string>
+    <string name="rtmp_audio_explanation_title">Audio Capture Permission</string>
+    <string name="rtmp_audio_explanation_message">LS uses ExoPlayer to play RTMP or SRT stream. App needs your permission to record ExoPlayer audio output.</string>
     <string name="audio_source_rtmp">Media Projection Audio</string>
     <string name="audio_source_none">No Audio</string>
 
