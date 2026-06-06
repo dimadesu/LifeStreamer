@@ -4571,21 +4571,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 storageRepository.saveAudioSourceType(sourceType)
                 Log.d(TAG, "Saved audio source type to DataStore")
 
-                // Only switch to built-in mic if BT mic and SYS AUDIO are both inactive.
-                // When BT or MP is active, the preference is saved and will apply next time
+                // Only switch to built-in mic if BT mic, SYS AUDIO, and RTMP source are all inactive.
+                // When BT, MP, or RTMP is active, the preference is saved and will apply next time
                 // ConditionalAudioSourceFactory is used (e.g. after SYS AUDIO is toggled off).
                 val btActive = _useBluetoothMic.value == true
                 val sysAudioActive = _useSystemAudioForCamera
-                if (btActive || sysAudioActive) {
+                val rtmpActive = _activeRtmpIndex.value != null
+                if (btActive || sysAudioActive || rtmpActive) {
                     Log.i(TAG, "Audio source preference saved but not applied — " +
-                            "BT=$btActive, SYS=$sysAudioActive override is active")
+                            "BT=$btActive, SYS=$sysAudioActive, RTMP=$rtmpActive override is active")
                 } else {
                     currentStreamer.setAudioSource(ConditionalAudioSourceFactory())
                     Log.i(TAG, "Audio source changed to: ${getAudioSourceName(sourceType)}")
                 }
                 
                 // If audio monitoring is enabled and we actually switched the source, restart passthrough
-                if (!btActive && !sysAudioActive && _isMonitorAudioOn.value == true) {
+                if (!btActive && !sysAudioActive && !rtmpActive && _isMonitorAudioOn.value == true) {
                     Log.i(TAG, "Restarting audio passthrough with new settings")
                     service?.stopAudioPassthrough()
                     delay(100) // Small delay to ensure clean restart
