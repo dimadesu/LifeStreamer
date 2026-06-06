@@ -2271,19 +2271,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 rtmpRetryJob = null
                 Log.d(TAG, "Cancelled RTMP retry job before reconnection")
                 
-                // For RTMP/Bitmap sources with MediaProjection audio: switch to microphone before close()
-                // MediaProjection tokens become invalid after close(), so we can't reuse them
-                // We'll upgrade back to MediaProjection after successful reconnection with a fresh token
-                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                // For sources using MediaProjection audio: switch to microphone before close()
+                // MediaProjection tokens become invalid after close(), so we can't reuse them.
+                // This covers both RTMP/Bitmap (own-app MP) and camera/UVC with SYS AUDIO (full-phone MP).
                 val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
-                val isRtmpOrBitmap = currentVideoSource != null && currentVideoSource !is io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
                 val hasMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
                 
-                if (isRtmpOrBitmap && hasMediaProjectionAudio) {
+                if (hasMediaProjectionAudio) {
                     try {
                         currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
                         needsMediaProjectionAudioRestore = true
-                        Log.d(TAG, "Switched to conditional source before reconnection (will restore MediaProjection after)")
+                        Log.d(TAG, "Switched to conditional source before reconnection (will restore via setAudioSourceBasedOnVideoSource after)")
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to switch audio source before reconnection: ${e.message}")
                         needsMediaProjectionAudioRestore = false
@@ -2437,23 +2435,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Clear any stored rotation since we successfully reconnected with locked orientation
                     rotationIgnoredDuringReconnection = null
                     
-                    // Restore MediaProjection audio if we switched to microphone before reconnection
+                    // Restore MediaProjection audio if we switched to microphone before reconnection.
+                    // Use setAudioSourceBasedOnVideoSource() to correctly handle all cases:
+                    // - RTMP/Bitmap → MP without captureFullPhone
+                    // - UVC/Camera + SYS AUDIO → MP with captureFullPhone=true
                     if (needsMediaProjectionAudioRestore) {
                         Log.d(TAG, "Restoring MediaProjection audio after reconnection")
                         needsMediaProjectionAudioRestore = false
-                        
                         try {
-                            // Get MediaProjection from helper if we don't have it yet
-                            val mediaProjection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                            if (mediaProjection != null) {
-                                // Set MediaProjection audio source directly
-                                currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(mediaProjection))
-                                Log.i(TAG, "Restored MediaProjection audio after reconnection")
-                            } else {
-                                Log.w(TAG, "Could not restore MediaProjection audio: MediaProjection not available")
-                            }
+                            setAudioSourceBasedOnVideoSource()
+                            Log.i(TAG, "Restored audio source after reconnection")
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to restore MediaProjection audio: ${e.message}")
+                            Log.w(TAG, "Failed to restore audio source after reconnection: ${e.message}")
                         }
                     }
                     
