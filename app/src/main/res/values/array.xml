@@ -4,7 +4,10 @@
         <item>24</item>
         <item>25</item>
         <item>30</item>
+        <item>50</item>
         <item>60</item>
+        <item>100</item>
+        <item>120</item>
     </string-array>
 
     <string-array name="moblin_regulator_mode_entries">
