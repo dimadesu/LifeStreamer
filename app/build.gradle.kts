@@ -20,7 +20,7 @@ android {
         compileSdk = 36
 
         versionCode = 23
-        versionName = "1.34.0"
+        versionName = "1.34.0-unlock-high-fps-01"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
