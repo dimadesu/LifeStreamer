@@ -332,32 +332,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
             videoResolutionListPreference.entryValues = this
         }
 
-        // Inflates video fps
-        val supportedFramerates = streamerInfo.video.getSupportedFramerates(
-            requireContext(), encoder, requireContext().defaultCameraId
-        )
-        videoFpsListPreference.entryValues.filter { fps ->
-            supportedFramerates.any { it.contains(fps.toString().toIntOrNull() ?: 0) }
+        // Inflates video fps based on video encoder capabilities (not camera)
+        val supportedFramerateRange = streamerInfo.video.getSupportedFramerate(encoder)
+        val defaultFpsList = resources.getStringArray(R.array.FpsEntries)
+        defaultFpsList.filter { fps ->
+            supportedFramerateRange.contains(fps.toIntOrNull() ?: 0)
         }.toTypedArray().run {
             videoFpsListPreference.entries = this
             videoFpsListPreference.entryValues = this
         }
-        videoFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
-            val fps = (newValue as? String)?.toIntOrNull() ?: return@setOnPreferenceChangeListener true
-            val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-            val unsupportedCameras = cameraManager.cameraIdList.filter {
-                !cameraManager.getCameraCharacteristics(it).isFpsSupported(fps)
-            }
-            if (unsupportedCameras.isNotEmpty()) {
-                DialogUtils.showAlertDialog(
-                    requireContext(), getString(R.string.warning), resources.getQuantityString(
-                        R.plurals.camera_frame_rate_not_supported,
-                        unsupportedCameras.size,
-                        unsupportedCameras.joinToString(", "),
-                        fps
-                    )
-                )
-            }
+        videoFpsListPreference.setOnPreferenceChangeListener { _, _ ->
             true
         }
 
