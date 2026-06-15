@@ -37,6 +37,8 @@ class RTMPVideoSource (
     }
 
     override val timebase = Timebase.UPTIME
+    
+    private var targetFps = 30
 
     init {
         // Register format listener immediately to catch format changes as soon as possible
@@ -247,6 +249,8 @@ class RTMPVideoSource (
     }
 
     override suspend fun configure(config: VideoSourceConfig) {
+        targetFps = config.fps
+        surfaceProcessor?.setTargetFps(targetFps)
         // Using main exoPlayer instance for both streaming and preview
         withContext(Dispatchers.Main) {
             if (!exoPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) {
@@ -569,6 +573,7 @@ class RTMPVideoSource (
                 // Create surface processor with SDR profile (most RTMP streams are SDR)
                 val processorFactory = DefaultSurfaceProcessorFactory()
                 surfaceProcessor = processorFactory.create(DynamicRangeProfile.sdr, dispatcherProvider)
+                surfaceProcessor!!.setTargetFps(targetFps)
 
                 // Create input surface that ExoPlayer will render to
                 val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920

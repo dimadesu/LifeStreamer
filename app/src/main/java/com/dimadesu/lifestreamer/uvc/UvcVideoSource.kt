@@ -101,6 +101,8 @@ class UvcVideoSource(
     @Volatile
     private var isCameraReady = false
 
+    private var targetFps = 30
+
     override val timebase = Timebase.UPTIME
 
     init {
@@ -206,7 +208,9 @@ class UvcVideoSource(
     }
 
     override suspend fun configure(config: VideoSourceConfig) {
-        Log.d(TAG, "configure() called")
+        Log.d(TAG, "configure() called with fps: ${config.fps}")
+        targetFps = config.fps
+        surfaceProcessor?.setTargetFps(targetFps)
         // UVC camera configuration is handled through CameraHelper
         // Resolution/format is set via showVideoFormatDialog in UvcTestActivity
         updateCachedFormat()
@@ -423,6 +427,7 @@ class UvcVideoSource(
                 // Create surface processor
                 val processorFactory = DefaultSurfaceProcessorFactory()
                 surfaceProcessor = processorFactory.create(DynamicRangeProfile.sdr, dispatcherProvider)
+                surfaceProcessor!!.setTargetFps(targetFps)
 
                 // Create input surface for camera
                 val width = cachedWidth.get()
