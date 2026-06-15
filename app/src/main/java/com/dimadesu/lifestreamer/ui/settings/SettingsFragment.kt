@@ -341,7 +341,22 @@ class SettingsFragment : PreferenceFragmentCompat() {
             videoFpsListPreference.entries = this
             videoFpsListPreference.entryValues = this
         }
-        videoFpsListPreference.setOnPreferenceChangeListener { _, _ ->
+        videoFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
+            val fps = (newValue as? String)?.toIntOrNull() ?: return@setOnPreferenceChangeListener true
+            val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            val unsupportedCameras = cameraManager.cameraIdList.filter {
+                !cameraManager.getCameraCharacteristics(it).isFpsSupported(fps)
+            }
+            if (unsupportedCameras.isNotEmpty()) {
+                DialogUtils.showAlertDialog(
+                    requireContext(), getString(R.string.warning), resources.getQuantityString(
+                        R.plurals.camera_frame_rate_not_supported,
+                        unsupportedCameras.size,
+                        unsupportedCameras.joinToString(", "),
+                        fps
+                    )
+                )
+            }
             true
         }
 
