@@ -80,7 +80,13 @@
     <string name="video_resolution_key">video_resolution_key</string>
     <string name="default_video_resolution">1920x1080</string>
 
-    <string name="video_fps">Frames per second</string>
+    <string name="camera_fps">FPS of Android cameras</string>
+    <string name="camera_fps_key">camera_fps_key</string>
+    <string name="match_fps_title">Set video encoder FPS to FPS of Android cameras</string>
+    <string name="match_fps_key">match_fps_key</string>
+    <string name="video_fps_note_summary">For best results, set video encoder FPS to FPS of main video source you plan to use.\n\nFor example, RTMP and USB sources can have different FPS from FPS of Android cameras.</string>
+    <string name="video_fps_note_key">video_fps_note_key</string>
+    <string name="video_fps">Video encoder FPS</string>
     <string name="video_fps_key">video_fps_key</string>
     <string name="default_fps">30</string>
 

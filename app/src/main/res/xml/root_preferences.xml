@@ -60,6 +60,26 @@
                 app:defaultValue="@string/default_fps"
                 app:entries="@array/FpsEntries"
                 app:entryValues="@array/FpsEntries"
+                app:key="@string/camera_fps_key"
+                app:title="@string/camera_fps"
+                app:useSimpleSummaryProvider="true" />
+
+            <SwitchPreference
+                app:defaultValue="true"
+                app:key="@string/match_fps_key"
+                app:title="@string/match_fps_title"
+                app:disableDependentsState="true" />
+
+            <Preference
+                app:key="@string/video_fps_note_key"
+                app:summary="@string/video_fps_note_summary"
+                app:selectable="false" />
+
+            <ListPreference
+                app:dependency="@string/match_fps_key"
+                app:defaultValue="@string/default_fps"
+                app:entries="@array/FpsEntries"
+                app:entryValues="@array/FpsEntries"
                 app:key="@string/video_fps_key"
                 app:title="@string/video_fps"
                 app:useSimpleSummaryProvider="true" />

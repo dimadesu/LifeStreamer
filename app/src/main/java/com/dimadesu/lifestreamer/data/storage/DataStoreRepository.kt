@@ -109,9 +109,17 @@ class DataStoreRepository(
                 "x"
             )?.let { Size(it[0].toInt(), it[1].toInt()) }
                 ?: ApplicationConstants.Video.defaultResolution
-        val fps =
+        val cameraFps =
+            preferences[stringPreferencesKey(context.getString(R.string.camera_fps_key))]?.toInt()
+                ?: ApplicationConstants.Video.defaultFps
+        val matchFps =
+            preferences[booleanPreferencesKey(context.getString(R.string.match_fps_key))] ?: true
+        val fps = if (matchFps) {
+            cameraFps
+        } else {
             preferences[stringPreferencesKey(context.getString(R.string.video_fps_key))]?.toInt()
                 ?: ApplicationConstants.Video.defaultFps
+        }
         val profile =
             preferences[stringPreferencesKey(context.getString(R.string.video_profile_key))]?.toInt()
                 ?: VideoConfig.getBestProfile(mimeType)
@@ -123,6 +131,7 @@ class DataStoreRepository(
             startBitrate = startBitrate,
             resolution = resolution,
             fps = fps,
+            cameraFps = cameraFps,
             profile = profile,
             level = level
         )

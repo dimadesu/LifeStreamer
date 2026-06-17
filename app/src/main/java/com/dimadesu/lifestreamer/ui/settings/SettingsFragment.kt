@@ -76,6 +76,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<ListPreference>(R.string.video_resolution_key) ?: error("video_resolution_key not found")
     }
 
+    private val cameraFpsListPreference: ListPreference by lazy {
+        findPreferenceSafe<ListPreference>(R.string.camera_fps_key) ?: error("camera_fps_key not found")
+    }
+
     private val videoFpsListPreference: ListPreference by lazy {
         findPreferenceSafe<ListPreference>(R.string.video_fps_key) ?: error("video_fps_key not found")
     }
@@ -332,17 +336,36 @@ class SettingsFragment : PreferenceFragmentCompat() {
             videoResolutionListPreference.entryValues = this
         }
 
-        // Inflates video fps
-        val supportedFramerates = streamerInfo.video.getSupportedFramerates(
-            requireContext(), encoder, requireContext().defaultCameraId
-        )
+        // Inflates video fps based on encoder capabilities
+        val encoderFpsRange = streamerInfo.video.getSupportedFramerate(encoder)
         videoFpsListPreference.entryValues.filter { fps ->
-            supportedFramerates.any { it.contains(fps.toString().toIntOrNull() ?: 0) }
+            encoderFpsRange.contains(fps.toString().toIntOrNull() ?: 0)
         }.toTypedArray().run {
             videoFpsListPreference.entries = this
             videoFpsListPreference.entryValues = this
         }
-        videoFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
+        val savedVideoFps = videoFpsListPreference.value
+        videoFpsListPreference.value =
+            if (!resetToDefaults && videoFpsListPreference.findIndexOfValue(savedVideoFps) >= 0) savedVideoFps
+            else getString(R.string.default_fps)
+        videoFpsListPreference.refreshStaleSettingUi()
+
+        // Inflates camera fps based on hardware capabilities
+        val supportedFramerates = streamerInfo.video.getSupportedFramerates(
+            requireContext(), encoder, requireContext().defaultCameraId
+        )
+        cameraFpsListPreference.entryValues.filter { fps ->
+            supportedFramerates.any { it.contains(fps.toString().toIntOrNull() ?: 0) }
+        }.toTypedArray().run {
+            cameraFpsListPreference.entries = this
+            cameraFpsListPreference.entryValues = this
+        }
+        val savedCameraFps = cameraFpsListPreference.value
+        cameraFpsListPreference.value =
+            if (!resetToDefaults && cameraFpsListPreference.findIndexOfValue(savedCameraFps) >= 0) savedCameraFps
+            else getString(R.string.default_fps)
+        cameraFpsListPreference.refreshStaleSettingUi()
+        cameraFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
             val fps = (newValue as? String)?.toIntOrNull() ?: return@setOnPreferenceChangeListener true
             val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
             val unsupportedCameras = cameraManager.cameraIdList.filter {
