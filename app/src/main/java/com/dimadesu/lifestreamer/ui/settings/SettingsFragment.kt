@@ -346,7 +346,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         val savedVideoFps = videoFpsListPreference.value
         videoFpsListPreference.value =
-            if (!resetToDefaults && videoFpsListPreference.findIndexOfValue(savedVideoFps) >= 0) savedVideoFps
+            if (videoFpsListPreference.findIndexOfValue(savedVideoFps) >= 0) savedVideoFps
             else getString(R.string.default_fps)
         videoFpsListPreference.refreshStaleSettingUi()
 
@@ -362,7 +362,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         val savedCameraFps = cameraFpsListPreference.value
         cameraFpsListPreference.value =
-            if (!resetToDefaults && cameraFpsListPreference.findIndexOfValue(savedCameraFps) >= 0) savedCameraFps
+            if (cameraFpsListPreference.findIndexOfValue(savedCameraFps) >= 0) savedCameraFps
             else getString(R.string.default_fps)
         cameraFpsListPreference.refreshStaleSettingUi()
         cameraFpsListPreference.setOnPreferenceChangeListener { _, newValue ->
