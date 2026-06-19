@@ -3923,6 +3923,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         .map { it != null }
         .asLiveData()
 
+    val videoConfigLiveData: LiveData<VideoConfig?> = storageRepository.videoConfigFlow.asLiveData()
+
     private val _isSrtlaStatsVisible = MutableLiveData(false)
     val isSrtlaStatsVisible: LiveData<Boolean> = _isSrtlaStatsVisible
 
