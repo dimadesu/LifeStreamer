@@ -329,9 +329,31 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun loadVideoSettings(encoder: String, resetToDefaults: Boolean = false) {
         // Inflates video resolutions
-        streamerInfo.video.getSupportedResolutions(
+        val hardwareResolutions = streamerInfo.video.getSupportedResolutions(
             requireContext(), encoder
-        ).map { it.toString() }.toTypedArray().run {
+        )
+        val codecSupport = streamerInfo.video.getSupportedResolutions(encoder)
+        val codecSupportedWidths = codecSupport.first
+        val codecSupportedHeights = codecSupport.second
+
+        val standardResolutions = listOf(
+            android.util.Size(4032, 3024),
+            android.util.Size(3840, 2160),
+            android.util.Size(2560, 1440),
+            android.util.Size(1920, 1440),
+            android.util.Size(1920, 1080),
+            android.util.Size(1664, 936),
+            android.util.Size(1280, 720),
+            android.util.Size(1024, 768),
+            android.util.Size(960, 540),
+            android.util.Size(854, 480),
+            android.util.Size(640, 360),
+            android.util.Size(426, 240)
+        ).filter { codecSupportedWidths.contains(it.width) && codecSupportedHeights.contains(it.height) }
+
+        (hardwareResolutions + standardResolutions).distinct()
+            .sortedWith(compareByDescending<android.util.Size> { it.height }.thenByDescending { it.width })
+            .map { it.toString() }.toTypedArray().run {
             videoResolutionListPreference.entries = this
             videoResolutionListPreference.entryValues = this
         }
