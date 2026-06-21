@@ -80,6 +80,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<ListPreference>(R.string.camera_fps_key) ?: error("camera_fps_key not found")
     }
 
+    private val videoResolutionHardwareFilterPreference: SwitchPreference by lazy {
+        findPreferenceSafe<SwitchPreference>(R.string.video_resolution_hardware_filter_key) ?: error("video_resolution_hardware_filter_key not found")
+    }
+
     private val videoFpsListPreference: ListPreference by lazy {
         findPreferenceSafe<ListPreference>(R.string.video_fps_key) ?: error("video_fps_key not found")
     }
@@ -324,10 +328,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
+        videoResolutionHardwareFilterPreference.setOnPreferenceChangeListener { _, newValue ->
+            videoEncoderListPreference.value?.let { loadVideoSettings(it, showHardwareOnly = newValue as Boolean) }
+            true
+        }
+
         videoEncoderListPreference.value?.let { loadVideoSettings(it) }
     }
 
-    private fun loadVideoSettings(encoder: String, resetToDefaults: Boolean = false) {
+    private fun loadVideoSettings(encoder: String, resetToDefaults: Boolean = false, showHardwareOnly: Boolean = videoResolutionHardwareFilterPreference.isChecked) {
         // Inflates video resolutions
         val hardwareResolutions = streamerInfo.video.getSupportedResolutions(
             requireContext(), encoder
@@ -351,12 +360,23 @@ class SettingsFragment : PreferenceFragmentCompat() {
             android.util.Size(426, 240)
         ).filter { codecSupportedWidths.contains(it.width) && codecSupportedHeights.contains(it.height) }
 
-        (hardwareResolutions + standardResolutions).distinct()
+        val finalResolutions = if (showHardwareOnly) {
+            hardwareResolutions
+        } else {
+            standardResolutions
+        }
+
+        finalResolutions
             .sortedWith(compareByDescending<android.util.Size> { it.height }.thenByDescending { it.width })
             .map { it.toString() }.toTypedArray().run {
             videoResolutionListPreference.entries = this
             videoResolutionListPreference.entryValues = this
         }
+        val savedVideoResolution = videoResolutionListPreference.value
+        videoResolutionListPreference.value =
+            if (videoResolutionListPreference.findIndexOfValue(savedVideoResolution) >= 0) savedVideoResolution
+            else getString(R.string.default_video_resolution)
+        videoResolutionListPreference.refreshStaleSettingUi()
 
         // Inflates video fps based on encoder capabilities
         val encoderFpsRange = streamerInfo.video.getSupportedFramerate(encoder)

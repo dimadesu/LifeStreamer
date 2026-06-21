@@ -80,6 +80,10 @@
     <string name="video_resolution_key">video_resolution_key</string>
     <string name="default_video_resolution">1920x1080</string>
 
+    <string name="video_resolution_hardware_filter_title">Show resolutions that Android cameras support</string>
+    <string name="video_resolution_hardware_filter_summary">Note: If the selected resolution isn\'t supported by all Android cameras, some may switch to an unexpected size.</string>
+    <string name="video_resolution_hardware_filter_key">video_resolution_hardware_filter_key</string>
+
     <string name="camera_fps">FPS of Android cameras</string>
     <string name="camera_fps_key">camera_fps_key</string>
     <string name="match_fps_title">Set video encoder FPS to FPS of Android cameras</string>
