@@ -24,9 +24,7 @@ import io.github.thibaultbee.streampack.core.elements.processing.video.ISurfaceP
 import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
 import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.SurfaceOutput
 import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
-import io.github.thibaultbee.streampack.core.pipelines.outputs.SurfaceDescriptor
 import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
-import android.graphics.Rect
 
 class RTMPVideoSource (
     private val exoPlayer: ExoPlayer,
@@ -38,21 +36,6 @@ class RTMPVideoSource (
 
     override val timebase = Timebase.UPTIME
 
-    init {
-        // Register format listener immediately to catch format changes as soon as possible
-        Handler(Looper.getMainLooper()).post {
-            try {
-                if (!isFormatListenerRegistered) {
-                    exoPlayer.addListener(formatListener)
-                    isFormatListenerRegistered = true
-                    updateCachedFormat() // Get initial format if available
-                    Log.d(TAG, "Format listener registered on RTMPVideoSource init")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to register format listener on init: ${e.message}")
-            }
-        }
-    }
     /*
      * ExoPlayer must be accessed from the main thread (see ExoPlayer docs).
      * Reading `exoPlayer.videoFormat` from background coroutines/threads can
@@ -66,39 +49,33 @@ class RTMPVideoSource (
     private val cachedFormatHeight = AtomicInteger(0)
     private val cachedRotation = AtomicInteger(0)
 
-    // Expose the current provider via a MutableStateFlow. We recreate and emit a
-    // new provider instance whenever cached format values change so consumers
-    // (the rendering pipeline) can react and recompute viewports immediately.
-    private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(object : ISourceInfoProvider {
-        override fun getSurfaceSize(targetResolution: Size): Size {
-            val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
-            val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-            val rotation = cachedRotation.get()
-            return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
-        }
-
-        override val rotationDegrees: Int
-            get() = cachedRotation.get()
-
-        override val isMirror: Boolean = false
-    })
-    override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
-
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
+                // Return the true RTMP video dimensions so the outer pipeline's
+                // SurfaceProcessor can calculate the correct letterbox/pillarbox
+                // viewport to fit the source into the encoder target resolution.
+                // Our internal SurfaceProcessor does NOT do letterboxing — it's
+                // just a frame splitter (ExoPlayer → output + preview).
                 val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-                val rotation = cachedRotation.get()
-                return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
+                return Size(w, h)
             }
 
-            override val rotationDegrees: Int
-                get() = cachedRotation.get()
+            // RTMP video has no orientation — always tell StreamPack the relative rotation is 0.
+            // This means StreamPack will not rotate the GL quad, and the viewport rect is
+            // calculated using the un-rotated source size, giving correct letterboxing.
+            override fun getRelativeRotationDegrees(targetRotation: Int, requiredMirroring: Boolean): Int = 0
+
+            override val rotationDegrees: Int get() = 0
 
             override val isMirror: Boolean = false
         }
     }
+
+    private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(makeInfoProvider())
+    override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
+
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow: StateFlow<Boolean> get() = _isStreamingFlow
     override suspend fun startStream() {
@@ -246,9 +223,23 @@ class RTMPVideoSource (
         }
     }
 
+
     override suspend fun configure(config: VideoSourceConfig) {
-        // Using main exoPlayer instance for both streaming and preview
+        Log.d(TAG, "configure: resolution=${config.resolution}")
+        // Register the format listener on the main thread (ExoPlayer must be touched
+        // from main thread only). Done here rather than in init{} to guarantee that
+        // all class properties (including formatListener itself) are fully initialized.
         withContext(Dispatchers.Main) {
+            if (!isFormatListenerRegistered) {
+                try {
+                    exoPlayer.addListener(formatListener)
+                    isFormatListenerRegistered = true
+                    updateCachedFormat() // pick up format if already available
+                    Log.d(TAG, "Format listener registered in configure()")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to register format listener in configure(): ${e.message}")
+                }
+            }
             if (!exoPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) {
                 return@withContext
             }
@@ -293,7 +284,6 @@ class RTMPVideoSource (
         try {
             inputSurface?.let { surface ->
                 surfaceProcessor?.removeInputSurface(surface)
-                inputSurface = null
             }
             surfaceProcessor?.release()
             surfaceProcessor = null
@@ -381,16 +371,57 @@ class RTMPVideoSource (
                 } catch (ignored: Exception) {
                 }
 
-                // If we now have valid dimensions and we're previewing, reinitialize surface processor
+                // If we now have valid dimensions and we're active, reinitialize surface processor
                 // to ensure correct sizing
-                if (w > 0 && h > 0 && _isPreviewingFlow.value) {
-                    Log.d(TAG, "Format updated while previewing - reinitializing surface processor")
-                    try {
-                        initializeSurfaceProcessor()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to reinitialize surface processor after format update: ${e.message}")
+                if (w > 0 && h > 0) {
+                    if (_isPreviewingFlow.value || _isStreamingFlow.value) {
+                        Log.d(TAG, "Format updated while active - reinitializing surface processor")
+                        // Execute entirely on main thread to avoid ExoPlayer crashing
+                        // when we release the surface it's actively rendering to.
+                        Handler(Looper.getMainLooper()).post {
+                            try {
+                                // 1. Detach ExoPlayer from the old surface
+                                exoPlayer.clearVideoSurface()
+
+                                // 2. Safely release old surface processor
+                                inputSurface?.let { input ->
+                                    surfaceProcessor?.removeInputSurface(input)
+                                }
+                                surfaceProcessor?.release()
+                                surfaceProcessor = null
+                                inputSurface = null
+                                outputSurfaceOutput = null
+                                previewSurfaceOutput = null
+
+                                // 3. Re-initialize processor with new dimensions
+                                initializeSurfaceProcessor()
+                                
+                                // 4. Re-attach ExoPlayer to the new input surface
+                                inputSurface?.let { input ->
+                                    exoPlayer.setVideoSurface(input)
+                                    Log.d(TAG, "Re-attached ExoPlayer to new input surface after format update")
+                                } ?: run {
+                                    // If no surface processor, attach directly to output/preview if available
+                                    if (_isStreamingFlow.value && outputSurface != null) {
+                                        exoPlayer.setVideoSurface(outputSurface)
+                                    } else if (_isPreviewingFlow.value && previewSurface != null) {
+                                        exoPlayer.setVideoSurface(previewSurface)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to reinitialize surface processor after format update: ${e.message}")
+                            }
+                        }
+                    } else if (surfaceProcessor != null) {
+                        // Format arrived before streaming started but after surfaces were set up.
+                        // The existing outputSurfaceOutput was created with default dimensions (full-frame
+                        // viewport). Force-recreate it now with the real video dimensions so that when
+                        // streaming starts the correct letterbox/pillarbox viewport is already in place.
+                        Log.d(TAG, "Format updated while idle - updating viewport on existing surfaces")
+                        addSurfacesToProcessor(forceRecreate = true)
                     }
                 }
+
             }
         } catch (ignored: Exception) {
         }
@@ -597,7 +628,7 @@ class RTMPVideoSource (
         }
     }
 
-    private fun addSurfacesToProcessor() {
+    private fun addSurfacesToProcessor(forceRecreate: Boolean = false) {
         // Cancel any pending cleanup because we're adding/updating surfaces
         cancelPendingCleanup("addSurfacesToProcessor called")
         surfaceProcessor?.let { processor ->
@@ -609,29 +640,47 @@ class RTMPVideoSource (
                 if (outputSurfaceOutput != null) {
                     try {
                         val existingSurface = outputSurfaceOutput?.targetSurface
-                        if (existingSurface != surface) {
+                        if (existingSurface != surface || forceRecreate) {
                             processor.removeOutputSurface(outputSurfaceOutput!!)
                             outputSurfaceOutput = null
-                            Log.d(TAG, "Recreated output surface output due to surface change")
+                            Log.d(TAG, "Recreated output surface output due to surface change or forceRecreate")
                         }
                     } catch (ignored: Exception) {
                     }
                 }
 
                 if (outputSurfaceOutput == null) {
-                    val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
-                    val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
-                    outputSurfaceOutput = SurfaceOutput(
-                        targetSurface = surface,
-                        targetResolution = Size(width, height),
-                        targetRotation = 0,
-                        isStreaming = { _isStreamingFlow.value },
-                        sourceResolution = Size(width, height),
-                        needMirroring = false,
-                        sourceInfoProvider = _infoProviderFlow.value
-                    )
-                    processor.addOutputSurface(outputSurfaceOutput!!)
-                    Log.d(TAG, "Added output surface to processor: $surface")
+                    val width = cachedFormatWidth.get().takeIf { it > 0 }
+                    val height = cachedFormatHeight.get().takeIf { it > 0 }
+
+                    if (width == null || height == null) {
+                        // Video dimensions not yet known — defer outputSurfaceOutput creation until
+                        // the format listener fires. Creating it now would bake in a wrong viewport
+                        // (full-frame fallback). updateCachedFormat() will call
+                        // addSurfacesToProcessor(forceRecreate=true) once dimensions arrive.
+                        Log.d(TAG, "Output surface deferred: video dimensions not yet known")
+                    } else {
+                        // Internal SurfaceProcessor does NOT letterbox.
+                        // It's a 1:1 frame copy. The outer pipeline handles letterboxing.
+                        val videoSize = Size(width, height)
+                        outputSurfaceOutput = SurfaceOutput(
+                            targetSurface = surface,
+                            targetResolution = videoSize,
+                            targetRotation = 0,
+                            isStreaming = { _isStreamingFlow.value },
+                            sourceResolution = videoSize,
+                            needMirroring = false,
+                            sourceInfoProvider = object : ISourceInfoProvider {
+                                override fun getSurfaceSize(targetResolution: Size): Size {
+                                    return targetResolution // source == target → full-frame
+                                }
+                                override val rotationDegrees: Int get() = 0
+                                override val isMirror: Boolean = false
+                            }
+                        )
+                        processor.addOutputSurface(outputSurfaceOutput!!)
+                        Log.d(TAG, "Added output surface to processor: $surface, videoSize=${width}x${height}, viewport=${outputSurfaceOutput!!.viewportRect}")
+                    }
                 }
             }
 
@@ -662,7 +711,13 @@ class RTMPVideoSource (
                         isStreaming = { _isPreviewingFlow.value },
                         sourceResolution = Size(width, height),
                         needMirroring = false,
-                        sourceInfoProvider = _infoProviderFlow.value
+                        sourceInfoProvider = object : ISourceInfoProvider {
+                            override fun getSurfaceSize(targetResolution: Size): Size {
+                                return targetResolution // source == target → full-frame
+                            }
+                            override val rotationDegrees: Int get() = 0
+                            override val isMirror: Boolean = false
+                        }
                     )
                     processor.addOutputSurface(previewSurfaceOutput!!)
                     Log.d(TAG, "Added preview surface to processor: $surface")
