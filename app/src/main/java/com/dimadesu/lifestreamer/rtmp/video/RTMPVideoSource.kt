@@ -244,10 +244,7 @@ class RTMPVideoSource (
         }
     }
 
-    private var encoderTargetResolution: Size? = null
-
     override suspend fun configure(config: VideoSourceConfig) {
-        encoderTargetResolution = config.resolution
         // Using main exoPlayer instance for both streaming and preview
         withContext(Dispatchers.Main) {
             if (!exoPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) {
@@ -652,7 +649,7 @@ class RTMPVideoSource (
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
                     outputSurfaceOutput = SurfaceOutput(
                         targetSurface = surface,
-                        targetResolution = encoderTargetResolution ?: Size(width, height),
+                        targetResolution = Size(width, height), // Pass 1:1 to StreamPack's processor; it handles the letterboxing!
                         targetRotation = 0,
                         isStreaming = { _isStreamingFlow.value },
                         sourceResolution = Size(width, height),
