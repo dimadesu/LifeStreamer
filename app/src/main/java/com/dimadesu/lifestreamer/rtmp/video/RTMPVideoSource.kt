@@ -73,8 +73,7 @@ class RTMPVideoSource (
         override fun getSurfaceSize(targetResolution: Size): Size {
             val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
             val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-            val rotation = cachedRotation.get()
-            return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
+            return Size(w, h)
         }
 
         override val rotationDegrees: Int
@@ -89,8 +88,7 @@ class RTMPVideoSource (
             override fun getSurfaceSize(targetResolution: Size): Size {
                 val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-                val rotation = cachedRotation.get()
-                return if (rotation == 90 || rotation == 270) Size(h, w) else Size(w, h)
+                return Size(w, h)
             }
 
             override val rotationDegrees: Int
