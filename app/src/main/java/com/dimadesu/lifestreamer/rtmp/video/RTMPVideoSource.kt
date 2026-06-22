@@ -382,12 +382,32 @@ class RTMPVideoSource (
                 } catch (ignored: Exception) {
                 }
 
-                // If we now have valid dimensions and we're previewing, reinitialize surface processor
+                // If we now have valid dimensions and we're active, reinitialize surface processor
                 // to ensure correct sizing
-                if (w > 0 && h > 0 && _isPreviewingFlow.value) {
-                    Log.d(TAG, "Format updated while previewing - reinitializing surface processor")
+                if (w > 0 && h > 0 && (_isPreviewingFlow.value || _isStreamingFlow.value)) {
+                    Log.d(TAG, "Format updated - reinitializing surface processor")
                     try {
+                        // Force recreation of the surface processor to get an input surface
+                        // with the correct dimensions
+                        surfaceProcessor?.release()
+                        surfaceProcessor = null
+                        inputSurface = null
                         initializeSurfaceProcessor()
+                        
+                        // Re-attach ExoPlayer to the new input surface
+                        Handler(Looper.getMainLooper()).post {
+                            inputSurface?.let { input ->
+                                exoPlayer.setVideoSurface(input)
+                                Log.d(TAG, "Re-attached ExoPlayer to new input surface after format update")
+                            } ?: run {
+                                // If no surface processor, attach directly to output/preview if available
+                                if (_isStreamingFlow.value && outputSurface != null) {
+                                    exoPlayer.setVideoSurface(outputSurface)
+                                } else if (_isPreviewingFlow.value && previewSurface != null) {
+                                    exoPlayer.setVideoSurface(previewSurface)
+                                }
+                            }
+                        }
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to reinitialize surface processor after format update: ${e.message}")
                     }
