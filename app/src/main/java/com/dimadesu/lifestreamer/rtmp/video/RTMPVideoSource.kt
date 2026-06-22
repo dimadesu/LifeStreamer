@@ -80,11 +80,13 @@ class RTMPVideoSource (
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
-                // Return the true RTMP video dimensions so StreamPack calculates the correct
-                // letterbox viewport rect to fit the video into the encoder resolution.
-                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
-                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-                return Size(w, h)
+                // The outer StreamPack pipeline has its OWN SurfaceProcessor. If we return the
+                // true video dimensions here, it will letterbox the content AGAIN on top of what
+                // our internal SurfaceProcessor already letterboxed → double letterboxing on stream.
+                // Instead, return the encoder resolution so the outer pipeline sees source==target
+                // and applies a full-frame pass-through viewport. Our internal SurfaceProcessor
+                // (in outputSurfaceOutput) handles all the real letterboxing.
+                return encoderTargetResolution ?: targetResolution
             }
 
             // RTMP video has no orientation — always tell StreamPack the relative rotation is 0.
