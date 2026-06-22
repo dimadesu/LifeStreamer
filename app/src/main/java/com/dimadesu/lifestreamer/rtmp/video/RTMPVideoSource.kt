@@ -30,7 +30,7 @@ import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRang
 import io.github.thibaultbee.streampack.core.pipelines.outputs.SurfaceDescriptor
 import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
 import android.graphics.Rect
-import io.github.thibaultbee.streampack.core.elements.utils.extensions.displayRotation
+import io.github.thibaultbee.streampack.core.elements.utils.extensions.displayRotationDegrees
 
 class RTMPVideoSource (
     private val context: Context,
@@ -77,7 +77,7 @@ class RTMPVideoSource (
                 // applies via rotateFromNaturalOrientation) so the outer pipeline sees source==target
                 // and applies a full-frame pass-through viewport.
                 val oriented = encoderTargetResolution
-                    ?.rotateFromNaturalOrientation(context, context.displayRotation)
+                    ?.rotateFromNaturalOrientation(context, context.displayRotationDegrees)
                     ?: targetResolution
                 Log.d(TAG, "makeInfoProvider.getSurfaceSize: target=$targetResolution, encoderTargetResolution=$encoderTargetResolution, oriented=$oriented")
                 return oriented
@@ -688,7 +688,7 @@ class RTMPVideoSource (
                         Log.d(TAG, "Output surface deferred: video dimensions not yet known")
                     } else {
                         val encRes = (encoderTargetResolution ?: Size(width, height))
-                            .rotateFromNaturalOrientation(context, context.displayRotation)
+                            .rotateFromNaturalOrientation(context, context.displayRotationDegrees)
                         outputSurfaceOutput = SurfaceOutput(
                             targetSurface = surface,
                             targetResolution = encRes, // We do the letterboxing here!
