@@ -52,21 +52,8 @@ class RTMPVideoSource (
 
     override val timebase = Timebase.UPTIME
 
-    init {
-        // Register format listener immediately to catch format changes as soon as possible
-        Handler(Looper.getMainLooper()).post {
-            try {
-                if (!isFormatListenerRegistered) {
-                    exoPlayer.addListener(formatListener)
-                    isFormatListenerRegistered = true
-                    updateCachedFormat() // Get initial format if available
-                    Log.d(TAG, "Format listener registered on RTMPVideoSource init")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to register format listener on init: ${e.message}")
-            }
-        }
-    }
+    // Format listener is registered in configure() once the source is fully set up.
+
     /*
      * ExoPlayer must be accessed from the main thread (see ExoPlayer docs).
      * Reading `exoPlayer.videoFormat` from background coroutines/threads can
@@ -266,8 +253,20 @@ class RTMPVideoSource (
     override suspend fun configure(config: VideoSourceConfig) {
         encoderTargetResolution = config.resolution
         Log.d(TAG, "configure: encoderTargetResolution set to ${config.resolution}")
-        // Using main exoPlayer instance for both streaming and preview
+        // Register the format listener on the main thread (ExoPlayer must be touched
+        // from main thread only). Done here rather than in init{} to guarantee that
+        // all class properties (including formatListener itself) are fully initialized.
         withContext(Dispatchers.Main) {
+            if (!isFormatListenerRegistered) {
+                try {
+                    exoPlayer.addListener(formatListener)
+                    isFormatListenerRegistered = true
+                    updateCachedFormat() // pick up format if already available
+                    Log.d(TAG, "Format listener registered in configure()")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to register format listener in configure(): ${e.message}")
+                }
+            }
             if (!exoPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) {
                 return@withContext
             }
