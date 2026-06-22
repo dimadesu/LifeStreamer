@@ -71,6 +71,9 @@ class RTMPVideoSource (
     // (the rendering pipeline) can react and recompute viewports immediately.
     private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(object : ISourceInfoProvider {
         override fun getSurfaceSize(targetResolution: Size): Size {
+            if (encoderTargetResolution != null && targetResolution == encoderTargetResolution) {
+                return targetResolution
+            }
             val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
             val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
             return Size(w, h)
@@ -86,6 +89,15 @@ class RTMPVideoSource (
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
+                // If StreamPack is asking for the encoder resolution, we MUST return targetResolution
+                // so that StreamPack does not attempt to double-letterbox or mismatch physical buffer sizes.
+                // Our internal SurfaceProcessor will handle the letterboxing to fit the encoder target exactly.
+                if (encoderTargetResolution != null && targetResolution == encoderTargetResolution) {
+                    return targetResolution
+                }
+                
+                // For the preview, we return the true video dimensions so the TextureView
+                // can apply the correct center-crop scaling.
                 val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
                 return Size(w, h)
@@ -244,7 +256,10 @@ class RTMPVideoSource (
         }
     }
 
+    private var encoderTargetResolution: Size? = null
+
     override suspend fun configure(config: VideoSourceConfig) {
+        encoderTargetResolution = config.resolution
         // Using main exoPlayer instance for both streaming and preview
         withContext(Dispatchers.Main) {
             if (!exoPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) {
@@ -649,7 +664,7 @@ class RTMPVideoSource (
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
                     outputSurfaceOutput = SurfaceOutput(
                         targetSurface = surface,
-                        targetResolution = Size(width, height), // Pass 1:1 to StreamPack's processor; it handles the letterboxing!
+                        targetResolution = encoderTargetResolution ?: Size(width, height), // We do the letterboxing here!
                         targetRotation = 0,
                         isStreaming = { _isStreamingFlow.value },
                         sourceResolution = Size(width, height),
