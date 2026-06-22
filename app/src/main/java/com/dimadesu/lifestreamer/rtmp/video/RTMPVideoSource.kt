@@ -255,7 +255,18 @@ class RTMPVideoSource (
     private var encoderTargetResolution: Size? = null
 
     override suspend fun configure(config: VideoSourceConfig) {
+        val previousResolution = encoderTargetResolution
         encoderTargetResolution = config.resolution
+
+        // If resolution changed and we already have an active surface processor,
+        // force-recreate the output SurfaceOutput so it picks up the new targetResolution.
+        // Without this, the old SurfaceOutput keeps its stale baked-in targetResolution.
+        if (previousResolution != null && previousResolution != config.resolution && surfaceProcessor != null) {
+            Log.d(TAG, "Resolution changed ${previousResolution} -> ${config.resolution}, recreating output surface")
+            outputSurfaceOutput = null
+            addSurfacesToProcessor(forceRecreate = true)
+        }
+
         // Using main exoPlayer instance for both streaming and preview
         withContext(Dispatchers.Main) {
             if (!exoPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) {
