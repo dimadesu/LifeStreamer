@@ -671,30 +671,39 @@ class RTMPVideoSource (
                 }
 
                 if (outputSurfaceOutput == null) {
-                    val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
-                    val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
-                    val encRes = encoderTargetResolution ?: Size(width, height)
-                    outputSurfaceOutput = SurfaceOutput(
-                        targetSurface = surface,
-                        targetResolution = encRes, // We do the letterboxing here!
-                        targetRotation = 0,
-                        isStreaming = { _isStreamingFlow.value },
-                        sourceResolution = Size(width, height),
-                        needMirroring = false,
-                        sourceInfoProvider = object : ISourceInfoProvider {
-                            override fun getSurfaceSize(targetResolution: Size): Size {
-                                // Return true video size so viewport rect letterboxes correctly.
-                                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
-                                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-                                return Size(w, h)
+                    val width = cachedFormatWidth.get().takeIf { it > 0 }
+                    val height = cachedFormatHeight.get().takeIf { it > 0 }
+
+                    if (width == null || height == null) {
+                        // Video dimensions not yet known — defer outputSurfaceOutput creation until
+                        // the format listener fires. Creating it now would bake in a wrong viewport
+                        // (full-frame fallback). updateCachedFormat() will call
+                        // addSurfacesToProcessor(forceRecreate=true) once dimensions arrive.
+                        Log.d(TAG, "Output surface deferred: video dimensions not yet known")
+                    } else {
+                        val encRes = encoderTargetResolution ?: Size(width, height)
+                        outputSurfaceOutput = SurfaceOutput(
+                            targetSurface = surface,
+                            targetResolution = encRes, // We do the letterboxing here!
+                            targetRotation = 0,
+                            isStreaming = { _isStreamingFlow.value },
+                            sourceResolution = Size(width, height),
+                            needMirroring = false,
+                            sourceInfoProvider = object : ISourceInfoProvider {
+                                override fun getSurfaceSize(targetResolution: Size): Size {
+                                    // Return true video size so viewport rect letterboxes correctly.
+                                    val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+                                    val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+                                    return Size(w, h)
+                                }
+                                // No rotation — RTMP video has a fixed orientation.
+                                override val rotationDegrees: Int get() = 0
+                                override val isMirror: Boolean = false
                             }
-                            // No rotation — RTMP video has a fixed orientation.
-                            override val rotationDegrees: Int get() = 0
-                            override val isMirror: Boolean = false
-                        }
-                    )
-                    processor.addOutputSurface(outputSurfaceOutput!!)
-                    Log.d(TAG, "Added output surface to processor: $surface, videoSize=${width}x${height}, encoderRes=$encRes, viewport=${outputSurfaceOutput!!.viewportRect}")
+                        )
+                        processor.addOutputSurface(outputSurfaceOutput!!)
+                        Log.d(TAG, "Added output surface to processor: $surface, videoSize=${width}x${height}, encoderRes=$encRes, viewport=${outputSurfaceOutput!!.viewportRect}")
+                    }
                 }
             }
 
