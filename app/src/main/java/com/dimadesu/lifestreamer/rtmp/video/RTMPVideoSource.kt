@@ -113,7 +113,7 @@ class RTMPVideoSource (
             }
 
             override val rotationDegrees: Int
-                get() = (cachedRotation.get() - lastTargetRotationDegrees + 360) % 360
+                get() = cachedRotation.get()
 
             override val isMirror: Boolean = false
         }
@@ -696,7 +696,7 @@ class RTMPVideoSource (
                                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
                                 return Size(w, h)
                             }
-                            override val rotationDegrees: Int get() = cachedRotation.get()
+                            override val rotationDegrees: Int get() = (cachedRotation.get() - lastTargetRotationDegrees + 360) % 360
                             override val isMirror: Boolean = false
                         }
                     )
