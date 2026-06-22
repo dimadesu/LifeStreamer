@@ -714,7 +714,17 @@ class RTMPVideoSource (
                         isStreaming = { _isPreviewingFlow.value },
                         sourceResolution = Size(width, height),
                         needMirroring = false,
-                        sourceInfoProvider = _infoProviderFlow.value
+                        sourceInfoProvider = object : ISourceInfoProvider {
+                            override fun getSurfaceSize(targetResolution: Size): Size {
+                                // For preview: always return the true video dimensions so the
+                                // viewport rect letterboxes/pillarboxes correctly.
+                                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+                                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+                                return Size(w, h)
+                            }
+                            override val rotationDegrees: Int get() = 0
+                            override val isMirror: Boolean = false
+                        }
                     )
                     processor.addOutputSurface(previewSurfaceOutput!!)
                     Log.d(TAG, "Added preview surface to processor: $surface")
