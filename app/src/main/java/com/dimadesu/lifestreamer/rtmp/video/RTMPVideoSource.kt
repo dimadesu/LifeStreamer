@@ -669,7 +669,17 @@ class RTMPVideoSource (
                         isStreaming = { _isStreamingFlow.value },
                         sourceResolution = Size(width, height),
                         needMirroring = false,
-                        sourceInfoProvider = _infoProviderFlow.value
+                        sourceInfoProvider = object : ISourceInfoProvider {
+                            override fun getSurfaceSize(targetResolution: Size): Size {
+                                // For the internal processor, ALWAYS return the true video size
+                                // so it correctly calculates the letterbox viewport against the encoder target.
+                                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+                                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+                                return Size(w, h)
+                            }
+                            override val rotationDegrees: Int get() = cachedRotation.get()
+                            override val isMirror: Boolean = false
+                        }
                     )
                     processor.addOutputSurface(outputSurfaceOutput!!)
                     Log.d(TAG, "Added output surface to processor: $surface")
