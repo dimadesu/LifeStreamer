@@ -306,7 +306,6 @@ class RTMPVideoSource (
         try {
             inputSurface?.let { surface ->
                 surfaceProcessor?.removeInputSurface(surface)
-                inputSurface = null
             }
             surfaceProcessor?.release()
             surfaceProcessor = null
@@ -406,6 +405,9 @@ class RTMPVideoSource (
                             exoPlayer.clearVideoSurface()
 
                             // 2. Safely release old surface processor
+                            inputSurface?.let { input ->
+                                surfaceProcessor?.removeInputSurface(input)
+                            }
                             surfaceProcessor?.release()
                             surfaceProcessor = null
                             inputSurface = null
