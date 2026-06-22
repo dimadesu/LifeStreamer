@@ -14,6 +14,8 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.VideoSourceConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
 
 import io.github.thibaultbee.streampack.core.elements.sources.video.AbstractPreviewableSource
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,15 @@ class RTMPVideoSource (
 ) : AbstractPreviewableSource(), IVideoSourceInternal {
     companion object {
         private const val TAG = "RTMPVideoSource"
+
+        private val Int.rotationToDegrees: Int
+            get() = when (this) {
+                android.view.Surface.ROTATION_0 -> 0
+                android.view.Surface.ROTATION_90 -> 90
+                android.view.Surface.ROTATION_180 -> 180
+                android.view.Surface.ROTATION_270 -> 270
+                else -> 0
+            }
     }
 
     override val timebase = Timebase.UPTIME
@@ -65,35 +76,20 @@ class RTMPVideoSource (
     private val cachedFormatWidth = AtomicInteger(0)
     private val cachedFormatHeight = AtomicInteger(0)
     private val cachedRotation = AtomicInteger(0)
-
-    // Expose the current provider via a MutableStateFlow. We recreate and emit a
-    // new provider instance whenever cached format values change so consumers
-    // (the rendering pipeline) can react and recompute viewports immediately.
-    private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(object : ISourceInfoProvider {
-        override fun getSurfaceSize(targetResolution: Size): Size {
-            if (encoderTargetResolution != null && targetResolution == encoderTargetResolution) {
-                return targetResolution
-            }
-            val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
-            val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-            return Size(w, h)
-        }
-
-        override val rotationDegrees: Int
-            get() = cachedRotation.get()
-
-        override val isMirror: Boolean = false
-    })
-    override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
+    private var lastTargetRotationDegrees = 0
 
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
-                // If StreamPack is asking for the encoder resolution, we MUST return targetResolution
-                // so that StreamPack does not attempt to double-letterbox or mismatch physical buffer sizes.
-                // Our internal SurfaceProcessor will handle the letterboxing to fit the encoder target exactly.
-                if (encoderTargetResolution != null && targetResolution == encoderTargetResolution) {
-                    return targetResolution
+                // If StreamPack is asking for the encoder resolution (normal or swapped due to rotation),
+                // we MUST return the base config resolution so that StreamPack does not apply scaleX/scaleY.
+                // Our internal SurfaceProcessor will handle the perfect aspect-ratio letterboxing.
+                if (encoderTargetResolution != null) {
+                    val encW = encoderTargetResolution!!.width
+                    val encH = encoderTargetResolution!!.height
+                    if (targetResolution == Size(encW, encH) || targetResolution == Size(encH, encW)) {
+                        return Size(encW, encH)
+                    }
                 }
                 
                 // For the preview, we return the true video dimensions so the TextureView
@@ -103,12 +99,33 @@ class RTMPVideoSource (
                 return Size(w, h)
             }
 
+            override fun getRelativeRotationDegrees(targetRotation: Int, requiredMirroring: Boolean): Int {
+                val degrees = targetRotation.rotationToDegrees
+                if (lastTargetRotationDegrees != degrees) {
+                    lastTargetRotationDegrees = degrees
+                    // Re-evaluate internal processor surfaces when StreamPack's target rotation changes
+                    CoroutineScope(dispatcherProvider.default).launch {
+                        addSurfacesToProcessor()
+                    }
+                }
+                // Return the StreamPack expected rotation so it rotates the viewport
+                return degrees
+            }
+
             override val rotationDegrees: Int
-                get() = cachedRotation.get()
+                get() = (cachedRotation.get() - lastTargetRotationDegrees + 360) % 360
 
             override val isMirror: Boolean = false
         }
     }
+
+    // Expose the current provider via a MutableStateFlow. We recreate and emit a
+    // new provider instance whenever cached format values change so consumers
+    // (the rendering pipeline) can react and recompute viewports immediately.
+    private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(makeInfoProvider())
+    override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
+
+
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow: StateFlow<Boolean> get() = _isStreamingFlow
     override suspend fun startStream() {
