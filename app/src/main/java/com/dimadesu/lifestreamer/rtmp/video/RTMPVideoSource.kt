@@ -80,11 +80,8 @@ class RTMPVideoSource (
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
-                // Always return the encoder target size so StreamPack computes no scale transform.
-                // Our internal SurfaceProcessor handles all aspect-ratio letterboxing.
-                if (encoderTargetResolution != null) {
-                    return encoderTargetResolution!!
-                }
+                // Return the true RTMP video dimensions so StreamPack calculates the correct
+                // letterbox viewport rect to fit the video into the encoder resolution.
                 val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
                 return Size(w, h)
