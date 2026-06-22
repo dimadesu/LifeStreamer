@@ -397,6 +397,8 @@ class RTMPVideoSource (
                             surfaceProcessor?.release()
                             surfaceProcessor = null
                             inputSurface = null
+                            outputSurfaceOutput = null
+                            previewSurfaceOutput = null
 
                             // 3. Re-initialize processor with new dimensions
                             initializeSurfaceProcessor()
