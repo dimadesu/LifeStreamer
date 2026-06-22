@@ -76,44 +76,26 @@ class RTMPVideoSource (
     private val cachedFormatWidth = AtomicInteger(0)
     private val cachedFormatHeight = AtomicInteger(0)
     private val cachedRotation = AtomicInteger(0)
-    private var lastTargetRotationDegrees = 0
 
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
-                // If StreamPack is asking for the encoder resolution (normal or swapped due to rotation),
-                // we MUST return the base config resolution so that StreamPack does not apply scaleX/scaleY.
-                // Our internal SurfaceProcessor will handle the perfect aspect-ratio letterboxing.
+                // Always return the encoder target size so StreamPack computes no scale transform.
+                // Our internal SurfaceProcessor handles all aspect-ratio letterboxing.
                 if (encoderTargetResolution != null) {
-                    val encW = encoderTargetResolution!!.width
-                    val encH = encoderTargetResolution!!.height
-                    if (targetResolution == Size(encW, encH) || targetResolution == Size(encH, encW)) {
-                        return Size(encW, encH)
-                    }
+                    return encoderTargetResolution!!
                 }
-                
-                // For the preview, we return the true video dimensions so the TextureView
-                // can apply the correct center-crop scaling.
                 val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
                 return Size(w, h)
             }
 
-            override fun getRelativeRotationDegrees(targetRotation: Int, requiredMirroring: Boolean): Int {
-                val degrees = targetRotation.rotationToDegrees
-                if (lastTargetRotationDegrees != degrees) {
-                    lastTargetRotationDegrees = degrees
-                    // Re-evaluate internal processor surfaces when StreamPack's target rotation changes
-                    CoroutineScope(dispatcherProvider.default).launch {
-                        addSurfacesToProcessor()
-                    }
-                }
-                // Return the StreamPack expected rotation so it rotates the viewport
-                return degrees
-            }
+            // RTMP video has no orientation — always tell StreamPack the relative rotation is 0.
+            // This means StreamPack will not rotate the GL quad, and the viewport rect is
+            // calculated using the un-rotated source size, giving correct letterboxing.
+            override fun getRelativeRotationDegrees(targetRotation: Int, requiredMirroring: Boolean): Int = 0
 
-            override val rotationDegrees: Int
-                get() = cachedRotation.get()
+            override val rotationDegrees: Int get() = 0
 
             override val isMirror: Boolean = false
         }
@@ -657,7 +639,7 @@ class RTMPVideoSource (
         }
     }
 
-    private fun addSurfacesToProcessor() {
+    private fun addSurfacesToProcessor(forceRecreate: Boolean = false) {
         // Cancel any pending cleanup because we're adding/updating surfaces
         cancelPendingCleanup("addSurfacesToProcessor called")
         surfaceProcessor?.let { processor ->
@@ -669,10 +651,10 @@ class RTMPVideoSource (
                 if (outputSurfaceOutput != null) {
                     try {
                         val existingSurface = outputSurfaceOutput?.targetSurface
-                        if (existingSurface != surface) {
+                        if (existingSurface != surface || forceRecreate) {
                             processor.removeOutputSurface(outputSurfaceOutput!!)
                             outputSurfaceOutput = null
-                            Log.d(TAG, "Recreated output surface output due to surface change")
+                            Log.d(TAG, "Recreated output surface output due to surface change or forceRecreate")
                         }
                     } catch (ignored: Exception) {
                     }
@@ -690,13 +672,13 @@ class RTMPVideoSource (
                         needMirroring = false,
                         sourceInfoProvider = object : ISourceInfoProvider {
                             override fun getSurfaceSize(targetResolution: Size): Size {
-                                // For the internal processor, ALWAYS return the true video size
-                                // so it correctly calculates the letterbox viewport against the encoder target.
+                                // Return true video size so viewport rect letterboxes correctly.
                                 val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
                                 val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
                                 return Size(w, h)
                             }
-                            override val rotationDegrees: Int get() = (cachedRotation.get() - lastTargetRotationDegrees + 360) % 360
+                            // No rotation — RTMP video has a fixed orientation.
+                            override val rotationDegrees: Int get() = 0
                             override val isMirror: Boolean = false
                         }
                     )
