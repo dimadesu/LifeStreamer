@@ -394,45 +394,55 @@ class RTMPVideoSource (
 
                 // If we now have valid dimensions and we're active, reinitialize surface processor
                 // to ensure correct sizing
-                if (w > 0 && h > 0 && (_isPreviewingFlow.value || _isStreamingFlow.value)) {
-                    Log.d(TAG, "Format updated - reinitializing surface processor")
-                    // Execute entirely on main thread to avoid ExoPlayer crashing
-                    // when we release the surface it's actively rendering to.
-                    Handler(Looper.getMainLooper()).post {
-                        try {
-                            // 1. Detach ExoPlayer from the old surface
-                            exoPlayer.clearVideoSurface()
+                if (w > 0 && h > 0) {
+                    if (_isPreviewingFlow.value || _isStreamingFlow.value) {
+                        Log.d(TAG, "Format updated while active - reinitializing surface processor")
+                        // Execute entirely on main thread to avoid ExoPlayer crashing
+                        // when we release the surface it's actively rendering to.
+                        Handler(Looper.getMainLooper()).post {
+                            try {
+                                // 1. Detach ExoPlayer from the old surface
+                                exoPlayer.clearVideoSurface()
 
-                            // 2. Safely release old surface processor
-                            inputSurface?.let { input ->
-                                surfaceProcessor?.removeInputSurface(input)
-                            }
-                            surfaceProcessor?.release()
-                            surfaceProcessor = null
-                            inputSurface = null
-                            outputSurfaceOutput = null
-                            previewSurfaceOutput = null
-
-                            // 3. Re-initialize processor with new dimensions
-                            initializeSurfaceProcessor()
-                            
-                            // 4. Re-attach ExoPlayer to the new input surface
-                            inputSurface?.let { input ->
-                                exoPlayer.setVideoSurface(input)
-                                Log.d(TAG, "Re-attached ExoPlayer to new input surface after format update")
-                            } ?: run {
-                                // If no surface processor, attach directly to output/preview if available
-                                if (_isStreamingFlow.value && outputSurface != null) {
-                                    exoPlayer.setVideoSurface(outputSurface)
-                                } else if (_isPreviewingFlow.value && previewSurface != null) {
-                                    exoPlayer.setVideoSurface(previewSurface)
+                                // 2. Safely release old surface processor
+                                inputSurface?.let { input ->
+                                    surfaceProcessor?.removeInputSurface(input)
                                 }
+                                surfaceProcessor?.release()
+                                surfaceProcessor = null
+                                inputSurface = null
+                                outputSurfaceOutput = null
+                                previewSurfaceOutput = null
+
+                                // 3. Re-initialize processor with new dimensions
+                                initializeSurfaceProcessor()
+                                
+                                // 4. Re-attach ExoPlayer to the new input surface
+                                inputSurface?.let { input ->
+                                    exoPlayer.setVideoSurface(input)
+                                    Log.d(TAG, "Re-attached ExoPlayer to new input surface after format update")
+                                } ?: run {
+                                    // If no surface processor, attach directly to output/preview if available
+                                    if (_isStreamingFlow.value && outputSurface != null) {
+                                        exoPlayer.setVideoSurface(outputSurface)
+                                    } else if (_isPreviewingFlow.value && previewSurface != null) {
+                                        exoPlayer.setVideoSurface(previewSurface)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to reinitialize surface processor after format update: ${e.message}")
                             }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to reinitialize surface processor after format update: ${e.message}")
                         }
+                    } else if (surfaceProcessor != null) {
+                        // Format arrived before streaming started but after surfaces were set up.
+                        // The existing outputSurfaceOutput was created with default dimensions (full-frame
+                        // viewport). Force-recreate it now with the real video dimensions so that when
+                        // streaming starts the correct letterbox/pillarbox viewport is already in place.
+                        Log.d(TAG, "Format updated while idle - updating viewport on existing surfaces")
+                        addSurfacesToProcessor(forceRecreate = true)
                     }
                 }
+
             }
         } catch (ignored: Exception) {
         }
@@ -663,9 +673,10 @@ class RTMPVideoSource (
                 if (outputSurfaceOutput == null) {
                     val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
                     val height = cachedFormatHeight.get().takeIf { it > 0 } ?: 1080
+                    val encRes = encoderTargetResolution ?: Size(width, height)
                     outputSurfaceOutput = SurfaceOutput(
                         targetSurface = surface,
-                        targetResolution = encoderTargetResolution ?: Size(width, height), // We do the letterboxing here!
+                        targetResolution = encRes, // We do the letterboxing here!
                         targetRotation = 0,
                         isStreaming = { _isStreamingFlow.value },
                         sourceResolution = Size(width, height),
@@ -683,7 +694,7 @@ class RTMPVideoSource (
                         }
                     )
                     processor.addOutputSurface(outputSurfaceOutput!!)
-                    Log.d(TAG, "Added output surface to processor: $surface")
+                    Log.d(TAG, "Added output surface to processor: $surface, videoSize=${width}x${height}, encoderRes=$encRes, viewport=${outputSurfaceOutput!!.viewportRect}")
                 }
             }
 
