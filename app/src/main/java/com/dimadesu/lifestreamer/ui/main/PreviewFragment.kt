@@ -245,6 +245,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             updateRtmpButtonColors(activeIndex)
         }
 
+        // Dynamically adjust preview aspect ratio to match the stream resolution.
+        // Also called from onConfigurationChanged so rotation re-applies the correct scale.
+        previewViewModel.videoConfigLiveData.observe(viewLifecycleOwner) { config ->
+            applyPreviewScale(config)
+        }
+
         previewViewModel.streamerErrorLiveData.observe(viewLifecycleOwner) { error ->
             error?.let {
                 showError("Oops", it)
@@ -649,6 +655,52 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
     override fun onDestroyView() {
         super.onDestroyView()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyPreviewScale(previewViewModel.videoConfigLiveData.value)
+    }
+
+    /**
+     * Sizes the PreviewView to exactly match the stream resolution, then visually scales it
+     * down (via scaleX/scaleY) so it fits inside the available screen area.
+     * Using scale instead of layout resize avoids SurfaceView surface destruction, which
+     * would otherwise crash the Samsung Camera HAL during active streams.
+     */
+    private fun applyPreviewScale(config: io.github.thibaultbee.streampack.core.streamers.single.VideoConfig?) {
+        config ?: return
+        val width = config.resolution.width
+        val height = config.resolution.height
+        if (width <= 0 || height <= 0) return
+
+        val isPortrait = resources.configuration.orientation ==
+                android.content.res.Configuration.ORIENTATION_PORTRAIT
+        val targetW = if (isPortrait) height else width
+        val targetH = if (isPortrait) width else height
+
+        // Set the layout size so StreamPack selects the correct camera resolution
+        val lp = binding.preview.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        lp.dimensionRatio = null
+        lp.width = targetW
+        lp.height = targetH
+        binding.preview.layoutParams = lp
+
+        // After the layout pass, scale the view down to fit the visible area
+        binding.root.post {
+            val availableWidth = binding.root.width.toFloat()
+            val availableHeight = binding.root.height.toFloat()
+            if (availableWidth > 0 && availableHeight > 0) {
+                val scale = kotlin.math.min(
+                    availableWidth / targetW.toFloat(),
+                    availableHeight / targetH.toFloat()
+                )
+                binding.preview.pivotX = targetW / 2f
+                binding.preview.pivotY = targetH / 2f
+                binding.preview.scaleX = scale
+                binding.preview.scaleY = scale
+            }
+        }
     }
 
     private fun showPermissionError(vararg permissions: String) {
