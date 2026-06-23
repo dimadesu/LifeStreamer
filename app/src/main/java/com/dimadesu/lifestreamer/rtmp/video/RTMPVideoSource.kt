@@ -14,8 +14,6 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.VideoSourceConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.CoroutineScope
 
 import io.github.thibaultbee.streampack.core.elements.sources.video.AbstractPreviewableSource
 import kotlinx.coroutines.Dispatchers
@@ -26,9 +24,7 @@ import io.github.thibaultbee.streampack.core.elements.processing.video.ISurfaceP
 import io.github.thibaultbee.streampack.core.elements.processing.video.DefaultSurfaceProcessorFactory
 import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.SurfaceOutput
 import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
-import io.github.thibaultbee.streampack.core.pipelines.outputs.SurfaceDescriptor
 import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
-import android.graphics.Rect
 
 class RTMPVideoSource (
     private val exoPlayer: ExoPlayer,
@@ -36,20 +32,9 @@ class RTMPVideoSource (
 ) : AbstractPreviewableSource(), IVideoSourceInternal {
     companion object {
         private const val TAG = "RTMPVideoSource"
-
-        private val Int.rotationToDegrees: Int
-            get() = when (this) {
-                android.view.Surface.ROTATION_0 -> 0
-                android.view.Surface.ROTATION_90 -> 90
-                android.view.Surface.ROTATION_180 -> 180
-                android.view.Surface.ROTATION_270 -> 270
-                else -> 0
-            }
     }
 
     override val timebase = Timebase.UPTIME
-
-    // Format listener is registered in configure() once the source is fully set up.
 
     /*
      * ExoPlayer must be accessed from the main thread (see ExoPlayer docs).
@@ -88,12 +73,8 @@ class RTMPVideoSource (
         }
     }
 
-    // Expose the current provider via a MutableStateFlow. We recreate and emit a
-    // new provider instance whenever cached format values change so consumers
-    // (the rendering pipeline) can react and recompute viewports immediately.
     private val _infoProviderFlow = MutableStateFlow<ISourceInfoProvider>(makeInfoProvider())
     override val infoProviderFlow: StateFlow<ISourceInfoProvider> get() = _infoProviderFlow
-
 
     private val _isStreamingFlow = MutableStateFlow(false)
     override val isStreamingFlow: StateFlow<Boolean> get() = _isStreamingFlow
@@ -732,11 +713,7 @@ class RTMPVideoSource (
                         needMirroring = false,
                         sourceInfoProvider = object : ISourceInfoProvider {
                             override fun getSurfaceSize(targetResolution: Size): Size {
-                                // For preview: always return the true video dimensions so the
-                                // viewport rect letterboxes/pillarboxes correctly.
-                                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
-                                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-                                return Size(w, h)
+                                return targetResolution // source == target → full-frame
                             }
                             override val rotationDegrees: Int get() = 0
                             override val isMirror: Boolean = false
