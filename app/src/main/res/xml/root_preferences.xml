@@ -50,6 +50,12 @@
                 app:title="@string/video_encoder"
                 app:useSimpleSummaryProvider="true" />
 
+            <SwitchPreference
+                app:defaultValue="true"
+                app:key="@string/video_resolution_hardware_filter_key"
+                app:title="@string/video_resolution_hardware_filter_title"
+                app:summary="@string/video_resolution_hardware_filter_summary" />
+
             <ListPreference
                 app:defaultValue="@string/default_video_resolution"
                 app:key="@string/video_resolution_key"
