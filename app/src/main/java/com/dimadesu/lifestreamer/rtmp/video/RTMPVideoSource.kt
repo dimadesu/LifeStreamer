@@ -12,7 +12,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import io.github.thibaultbee.streampack.core.elements.processing.video.source.ISourceInfoProvider
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.VideoSourceConfig
-import io.github.thibaultbee.streampack.core.elements.utils.extensions.rotateFromNaturalOrientation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -30,10 +29,8 @@ import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRang
 import io.github.thibaultbee.streampack.core.pipelines.outputs.SurfaceDescriptor
 import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
 import android.graphics.Rect
-import io.github.thibaultbee.streampack.core.elements.utils.extensions.displayRotationDegrees
 
 class RTMPVideoSource (
-    private val context: Context,
     private val exoPlayer: ExoPlayer,
     private val dispatcherProvider: io.github.thibaultbee.streampack.core.pipelines.IVideoDispatcherProvider
 ) : AbstractPreviewableSource(), IVideoSourceInternal {
@@ -70,17 +67,14 @@ class RTMPVideoSource (
     private fun makeInfoProvider(): ISourceInfoProvider {
         return object : ISourceInfoProvider {
             override fun getSurfaceSize(targetResolution: Size): Size {
-                // The outer StreamPack pipeline has its OWN SurfaceProcessor. If we return the
-                // true video dimensions here, it will letterbox the content AGAIN on top of what
-                // our internal SurfaceProcessor already letterboxed → double letterboxing on stream.
-                // Instead, return the ORIENTED encoder resolution (same transform EncodingPipelineOutput
-                // applies via rotateFromNaturalOrientation) so the outer pipeline sees source==target
-                // and applies a full-frame pass-through viewport.
-                val oriented = encoderTargetResolution
-                    ?.rotateFromNaturalOrientation(context, context.displayRotationDegrees)
-                    ?: targetResolution
-                Log.d(TAG, "makeInfoProvider.getSurfaceSize: target=$targetResolution, encoderTargetResolution=$encoderTargetResolution, oriented=$oriented")
-                return oriented
+                // Return the true RTMP video dimensions so the outer pipeline's
+                // SurfaceProcessor can calculate the correct letterbox/pillarbox
+                // viewport to fit the source into the encoder target resolution.
+                // Our internal SurfaceProcessor does NOT do letterboxing — it's
+                // just a frame splitter (ExoPlayer → output + preview).
+                val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
+                val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
+                return Size(w, h)
             }
 
             // RTMP video has no orientation — always tell StreamPack the relative rotation is 0.
@@ -248,11 +242,9 @@ class RTMPVideoSource (
         }
     }
 
-    private var encoderTargetResolution: Size? = null
 
     override suspend fun configure(config: VideoSourceConfig) {
-        encoderTargetResolution = config.resolution
-        Log.d(TAG, "configure: encoderTargetResolution set to ${config.resolution}")
+        Log.d(TAG, "configure: resolution=${config.resolution}")
         // Register the format listener on the main thread (ExoPlayer must be touched
         // from main thread only). Done here rather than in init{} to guarantee that
         // all class properties (including formatListener itself) are fully initialized.
@@ -687,29 +679,26 @@ class RTMPVideoSource (
                         // addSurfacesToProcessor(forceRecreate=true) once dimensions arrive.
                         Log.d(TAG, "Output surface deferred: video dimensions not yet known")
                     } else {
-                        val encRes = (encoderTargetResolution ?: Size(width, height))
-                            .rotateFromNaturalOrientation(context, context.displayRotationDegrees)
+                        // Internal SurfaceProcessor does NOT letterbox.
+                        // It's a 1:1 frame copy. The outer pipeline handles letterboxing.
+                        val videoSize = Size(width, height)
                         outputSurfaceOutput = SurfaceOutput(
                             targetSurface = surface,
-                            targetResolution = encRes, // We do the letterboxing here!
+                            targetResolution = videoSize,
                             targetRotation = 0,
                             isStreaming = { _isStreamingFlow.value },
-                            sourceResolution = Size(width, height),
+                            sourceResolution = videoSize,
                             needMirroring = false,
                             sourceInfoProvider = object : ISourceInfoProvider {
                                 override fun getSurfaceSize(targetResolution: Size): Size {
-                                    // Return true video size so viewport rect letterboxes correctly.
-                                    val w = cachedFormatWidth.get().takeIf { it > 0 } ?: targetResolution.width
-                                    val h = cachedFormatHeight.get().takeIf { it > 0 } ?: targetResolution.height
-                                    return Size(w, h)
+                                    return targetResolution // source == target → full-frame
                                 }
-                                // No rotation — RTMP video has a fixed orientation.
                                 override val rotationDegrees: Int get() = 0
                                 override val isMirror: Boolean = false
                             }
                         )
                         processor.addOutputSurface(outputSurfaceOutput!!)
-                        Log.d(TAG, "Added output surface to processor: $surface, videoSize=${width}x${height}, encoderRes=$encRes, viewport=${outputSurfaceOutput!!.viewportRect}")
+                        Log.d(TAG, "Added output surface to processor: $surface, videoSize=${width}x${height}, viewport=${outputSurfaceOutput!!.viewportRect}")
                     }
                 }
             }
@@ -767,7 +756,7 @@ class RTMPVideoSource (
             context: Context,
             dispatcherProvider: io.github.thibaultbee.streampack.core.pipelines.IVideoDispatcherProvider
         ): IVideoSourceInternal {
-            val customSrc = RTMPVideoSource(context, exoPlayer, dispatcherProvider)
+            val customSrc = RTMPVideoSource(exoPlayer, dispatcherProvider)
             return customSrc
         }
 
