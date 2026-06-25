@@ -31,7 +31,7 @@
     <string name="audio_out_explanation_message">Record audio output and use it as stream audio instead of the microphone.\n\nIncludes media (music, videos, browser audio), games and other app sounds. Excludes notifications and alarms.\n\nSome apps can block their audio capture.</string>
     <string name="continue_button">Continue</string>
     <string name="rtmp_audio_explanation_title">ExoPlayer Audio Capture</string>
-    <string name="rtmp_audio_explanation_message">LifeStreamer uses ExoPlayer to playback RTMP or SRT streams. App needs your permission to capture ExoPlayer audio output.\n\nNew Android versions ask to choose a single app or the entire device for video capture. This choice has no effect on audio capture. For RTMP SRC feature LS records only its own (ExoPlayer) audio and nothing else.</string>
+    <string name="rtmp_audio_explanation_message">LifeStreamer uses ExoPlayer to playback RTMP or SRT streams. App needs your permission to capture ExoPlayer audio output.\n\nNew Android versions ask to choose a single app or the entire device for video capture. This choice has no effect on audio capture.\n\nLifeStreamer records only its own (ExoPlayer) audio and nothing else for RTMP source.</string>
     <string name="audio_source_rtmp">Media Projection Audio</string>
     <string name="audio_source_none">No Audio</string>
 
