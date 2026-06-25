@@ -51,6 +51,7 @@ import androidx.lifecycle.lifecycleScope
 import com.dimadesu.lifestreamer.ApplicationConstants
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
+import com.dimadesu.lifestreamer.models.StreamOrientation
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.PermissionManager
@@ -397,6 +398,34 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
+        // Apply orientation setting changes in real-time when not streaming
+        lifecycleScope.launch {
+            previewViewModel.streamOrientationFlow.collect { orientation ->
+                val isStreaming = previewViewModel.streamStatus.value.let { status ->
+                    status == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
+                    status == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
+                    status == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
+                }
+                if (!isStreaming) {
+                    val fixedRotation = orientation.toSurfaceRotation()
+                    if (fixedRotation != null) {
+                        val activityOrientation = when (fixedRotation) {
+                            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        }
+                        requireActivity().requestedOrientation = activityOrientation
+                        Log.d(TAG, "Orientation setting changed to $orientation, applied: $activityOrientation")
+                    } else {
+                        requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
+                        Log.d(TAG, "Orientation setting changed to Auto, unlocked")
+                    }
+                }
+            }
+        }
+
         previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
             if (streamer is IStreamer) {
                 // TODO: For background streaming, we don't want to automatically stop streaming
@@ -560,17 +589,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     private fun lockOrientation() {
-        /**
-         * Lock orientation to current position while streaming to prevent disorienting
-         * rotations mid-stream. The user can choose their preferred orientation before
-         * starting the stream (UI follows sensor via ApplicationConstants.supportedOrientation),
-         * and it will stay locked to that orientation until streaming stops.
-         * 
-         * We remember the current orientation first, then lock to it. This allows us to
-         * restore the exact same orientation if the app goes to background and returns.
-         */
-        // Get the actual current orientation from the display
-        val rotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        // If a fixed orientation is set, use that; otherwise lock to current sensor rotation.
+        val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
+        val rotation = if (fixedRotation != null) {
+            fixedRotation
+        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             requireContext().display?.rotation ?: android.view.Surface.ROTATION_0
         } else {
             @Suppress("DEPRECATION")
@@ -583,26 +606,35 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
             else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
-        
+
         rememberedLockedOrientation = currentOrientation
-        rememberedRotation = rotation  // Store the rotation value too
+        rememberedRotation = rotation
         requireActivity().requestedOrientation = currentOrientation
         Log.d(TAG, "Orientation locked to: $currentOrientation (rotation: $rotation)")
-        
-        // Also lock the stream rotation in the service to match the UI orientation
+
         previewViewModel.service?.lockStreamRotation(rotation)
     }
 
     private fun unlockOrientation() {
-        /**
-         * Unlock orientation after streaming stops, returning to sensor-based rotation.
-         * This allows the user to freely rotate the device and choose a new orientation
-         * for the next stream.
-         */
         rememberedLockedOrientation = null
-        rememberedRotation = null  // Clear rotation too
-        requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
-        Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
+        rememberedRotation = null
+        // When a fixed orientation is configured, keep the activity locked to it after
+        // streaming stops — don't revert to free sensor rotation.
+        val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
+        if (fixedRotation != null) {
+            val fixedActivityOrientation = when (fixedRotation) {
+                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            requireActivity().requestedOrientation = fixedActivityOrientation
+            Log.d(TAG, "Orientation kept at fixed setting: $fixedActivityOrientation after stream stop")
+        } else {
+            requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
+            Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
+        }
     }
 
     /**
@@ -828,12 +860,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     }
                 }
             } else {
-                Log.d(TAG, "App returned to foreground - not streaming, ensuring orientation unlocked")
-                // Not streaming - ensure orientation is unlocked
-                // This handles the case where stream was stopped from notification while app was in background
+                Log.d(TAG, "App returned to foreground - not streaming, applying orientation setting")
+                // Not streaming - apply orientation setting (unlock for Auto, keep fixed for others)
+                // This also handles the case where stream was stopped from notification while app was in background
                 if (rememberedLockedOrientation != null) {
-                    unlockOrientation()
-                    Log.d(TAG, "Unlocked orientation that was locked from previous streaming session")
+                    unlockOrientation() // respects fixed setting internally
+                    Log.d(TAG, "Applied orientation after stream stop")
+                } else {
+                    // Apply fixed orientation even if we were never locked (e.g. fresh resume)
+                    val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
+                    if (fixedRotation != null) {
+                        val fixedActivityOrientation = when (fixedRotation) {
+                            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        }
+                        requireActivity().requestedOrientation = fixedActivityOrientation
+                        Log.d(TAG, "Applied fixed orientation setting on resume: $fixedActivityOrientation")
+                    }
                 }
                 // Start preview immediately
                 try {

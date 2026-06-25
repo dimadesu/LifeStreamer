@@ -66,4 +66,20 @@
         <!-- <item>9</item> -->
     </string-array>
 
+    <string-array name="stream_orientation_entries">
+        <item>@string/stream_orientation_entry_auto</item>
+        <item>@string/stream_orientation_entry_portrait</item>
+        <item>@string/stream_orientation_entry_landscape</item>
+        <item>@string/stream_orientation_entry_portrait_reversed</item>
+        <item>@string/stream_orientation_entry_landscape_reversed</item>
+    </string-array>
+
+    <string-array name="stream_orientation_values">
+        <item>@string/stream_orientation_value_auto</item>
+        <item>@string/stream_orientation_value_portrait</item>
+        <item>@string/stream_orientation_value_landscape</item>
+        <item>@string/stream_orientation_value_portrait_reversed</item>
+        <item>@string/stream_orientation_value_landscape_reversed</item>
+    </string-array>
+
 </resources>

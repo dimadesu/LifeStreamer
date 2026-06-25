@@ -361,4 +361,19 @@
     <string name="video_level_high_level62">HighLevel62</string>
     <string name="av_level_unknown">Unknown level</string>
 
+    <!-- Stream orientation setting -->
+    <string name="stream_orientation_key">stream_orientation</string>
+    <string name="stream_orientation_title">Stream orientation</string>
+    <string name="stream_orientation_summary">%s</string>
+    <string name="stream_orientation_value_auto">auto</string>
+    <string name="stream_orientation_value_portrait">portrait</string>
+    <string name="stream_orientation_value_landscape">landscape</string>
+    <string name="stream_orientation_value_portrait_reversed">portrait_reversed</string>
+    <string name="stream_orientation_value_landscape_reversed">landscape_reversed</string>
+    <string name="stream_orientation_entry_auto">Auto (follow device rotation)</string>
+    <string name="stream_orientation_entry_portrait">Portrait</string>
+    <string name="stream_orientation_entry_landscape">Landscape</string>
+    <string name="stream_orientation_entry_portrait_reversed">Portrait (reversed)</string>
+    <string name="stream_orientation_entry_landscape_reversed">Landscape (reversed)</string>
+
 </resources>

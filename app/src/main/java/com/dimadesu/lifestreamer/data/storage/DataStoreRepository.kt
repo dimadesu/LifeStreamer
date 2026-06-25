@@ -344,6 +344,12 @@ class DataStoreRepository(
         }
     }.distinctUntilChanged()
 
+    val streamOrientationFlow: Flow<com.dimadesu.lifestreamer.models.StreamOrientation> = dataStore.data.map { preferences ->
+        val stored = preferences[stringPreferencesKey(context.getString(R.string.stream_orientation_key))]
+            ?: context.getString(R.string.stream_orientation_value_auto)
+        com.dimadesu.lifestreamer.models.StreamOrientation.fromId(stored)
+    }.distinctUntilChanged()
+
     // Save methods for audio settings
     suspend fun saveAudioSourceType(sourceType: Int) {
         dataStore.edit { preferences ->

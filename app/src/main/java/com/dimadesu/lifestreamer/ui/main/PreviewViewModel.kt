@@ -183,6 +183,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _encoderStatsLiveData = MutableLiveData<String?>(null)
     val encoderStatsLiveData: LiveData<String?> get() = _encoderStatsLiveData
 
+    val streamOrientationFlow: StateFlow<com.dimadesu.lifestreamer.models.StreamOrientation> =
+        storageRepository.streamOrientationFlow.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            com.dimadesu.lifestreamer.models.StreamOrientation.AUTO
+        )
+
     // Track whether the UI is in foreground (to avoid camera operations when paused)
     @Volatile
     private var isUiInForeground = true
