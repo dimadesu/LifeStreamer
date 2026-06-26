@@ -356,4 +356,16 @@ class DataStoreRepository(
             preferences[stringPreferencesKey(context.getString(R.string.audio_source_type_key))] = sourceType.toString()
         }
     }
+
+    // --- View Orientation Settings ---
+
+    val viewOrientationSettingFlow: Flow<Int> = dataStore.data.map { preferences ->
+        preferences[intPreferencesKey("view_orientation_setting")] ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }.distinctUntilChanged()
+
+    suspend fun saveViewOrientationSetting(setting: Int) {
+        dataStore.edit { preferences ->
+            preferences[intPreferencesKey("view_orientation_setting")] = setting
+        }
+    }
 }

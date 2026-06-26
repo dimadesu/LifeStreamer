@@ -190,6 +190,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             com.dimadesu.lifestreamer.models.StreamOrientation.AUTO
         )
 
+    val viewOrientationSettingFlow: StateFlow<Int> =
+        storageRepository.viewOrientationSettingFlow.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        )
+
+    fun saveViewOrientationSetting(setting: Int) {
+        viewModelScope.launch {
+            storageRepository.saveViewOrientationSetting(setting)
+        }
+    }
+
     // Track whether the UI is in foreground (to avoid camera operations when paused)
     @Volatile
     private var isUiInForeground = true

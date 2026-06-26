@@ -47,7 +47,9 @@ import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.dimadesu.lifestreamer.ApplicationConstants
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
@@ -236,6 +238,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             requireActivity().requestedOrientation = orientation
             binding.previewRotationButton.text = "VIEW: $label"
             Log.d(TAG, "UI orientation override set to $label ($orientation)")
+            
+            // Persist the selected view orientation
+            previewViewModel.saveViewOrientationSetting(orientation)
+        }
+
+        // Observe persisted view orientation setting and restore it
+        lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                previewViewModel.viewOrientationSettingFlow.collect { savedOrientation ->
+                    // Find the matching index in our cycle array
+                    val index = uiOrientationCycle.indexOfFirst { it.first == savedOrientation }
+                    if (index >= 0 && uiOrientationIndex != index) {
+                        uiOrientationIndex = index
+                        val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
+                        requireActivity().requestedOrientation = orientation
+                        binding.previewRotationButton.text = "VIEW: $label"
+                        Log.d(TAG, "Restored UI orientation to $label ($orientation)")
+                    }
+                }
+            }
         }
 
         previewViewModel.isSrtlaStatsVisible.observe(viewLifecycleOwner) { visible ->
