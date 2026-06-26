@@ -1498,62 +1498,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
-        // Apply rotation changes, but if streamer is currently streaming or reconnecting,
-        // queue the change and apply it when streaming stops to avoid conflicts in encoding pipeline.
-        viewModelScope.launch {
-            rotationRepository.rotationFlow.collect { rotation ->
-                val current = serviceStreamer
-                val isCurrentlyStreaming = current?.isStreamingFlow?.value == true
-                val currentStatus = streamStatus.value
-                val isInStreamingProcess = currentStatus == StreamStatus.STARTING ||
-                                           currentStatus == StreamStatus.CONNECTING ||
-                                           currentStatus == StreamStatus.STREAMING
-                
-                // During reconnection, ignore rotation changes to maintain locked orientation
-                // But remember the latest rotation so we can apply it when reconnection ends
-                if (service?.isReconnecting?.value == true) {
-                    rotationIgnoredDuringReconnection = rotation
-                    Log.i(TAG, "Rotation change to $rotation ignored during reconnection (will apply later)")
-                    return@collect
-                }
-                
-                if (isCurrentlyStreaming || isInStreamingProcess) {
-                    Log.i(TAG, "Rotation change to $rotation queued (streaming: $isCurrentlyStreaming, status: $currentStatus)")
-                    pendingTargetRotation = rotation
-                } else {
-                    try {
-                        current?.setTargetRotation(rotation)
-                        Log.i(TAG, "Rotation change to $rotation applied immediately (not streaming)")
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to set target rotation: $t")
-                    }
-                }
-            }
-        }
-
-        // When streaming stops, apply any pending rotation change.
-        // BUT: Don't apply during reconnection - we want to keep the locked orientation
-        viewModelScope.launch {
-            serviceReadyFlow.collect { isReady ->
-                if (isReady) {
-                    serviceStreamer?.isStreamingFlow?.collect { isStreaming ->
-                        if (!isStreaming && service?.isReconnecting?.value != true) {
-                            pendingTargetRotation?.let { pending ->
-                                Log.i(TAG, "Applying pending rotation $pending after stream stopped")
-                                try {
-                                    serviceStreamer?.setTargetRotation(pending)
-                                } catch (t: Throwable) {
-                                    Log.w(TAG, "Failed to apply pending rotation: $t")
-                                }
-                                pendingTargetRotation = null
-                            }
-                        } else if (!isStreaming && service?.isReconnecting?.value == true) {
-                            Log.i(TAG, "Skipping pending rotation application during reconnection (pending: $pendingTargetRotation)")
-                        }
-                    }
-                }
-            }
-        }
+        // Rotation changes are now handled by CameraStreamerService
         
         // Observe manual stop from notification - cancel reconnection if in progress
         // Use a separate coroutine that waits for service to be ready and then observes the flow
@@ -1728,16 +1673,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             service?.setStreamStatus(StreamStatus.STARTING)
             Log.i(TAG, "startStream() called")
             
-            // Lock stream rotation BEFORE starting to ensure it matches UI orientation
-            // Get current display rotation and lock the service to it
-            // Note: We use WindowManager.defaultDisplay for all API levels here because
-            // Application context doesn't have an associated display. The deprecation
-            // is acceptable since this is just reading the current rotation value.
-            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            @Suppress("DEPRECATION")
-            val currentRotation = windowManager.defaultDisplay.rotation
-            service?.lockStreamRotation(currentRotation)
-            Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
+            // Stream rotation lock is handled by PreviewFragment before calling startStream()
             
             val currentStreamer = serviceStreamer
             val serviceReady = _serviceReady.value
@@ -2165,18 +2101,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Cancel any pending reconnection attempts (already done via service.markUserStoppedManually)
                     reconnectTimer.stop()
                     
-                    // Apply any rotation that was ignored during reconnection
-                    rotationIgnoredDuringReconnection?.let { ignoredRotation ->
-                        viewModelScope.launch {
-                            try {
-                                serviceStreamer?.setTargetRotation(ignoredRotation)
-                                Log.i(TAG, "Applied rotation ($ignoredRotation) that was ignored during reconnection")
-                            } catch (t: Throwable) {
-                                Log.w(TAG, "Failed to apply ignored rotation: $t")
-                            }
-                        }
-                        rotationIgnoredDuringReconnection = null
-                    }
+                    // rotationIgnoredDuringReconnection logic removed
                     
                     // Only set cleanup flag if we didn't take an early exit path
                     // (Early exit paths manage their own cleanup flags)

@@ -619,6 +619,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         lockedStreamRotation = rotation
         savedStreamingOrientation = rotation  // Save for reconnection
         currentRotation = rotation
+        
+        // Apply the rotation to the underlying streamer so it encodes in the correct orientation
+        try {
+            serviceScope.launch {
+                try {
+                    (streamer as? IWithVideoRotation)?.setTargetRotation(rotation)
+                    Log.d(TAG, "lockStreamRotation: applied setTargetRotation(${rotationToString(rotation)}) to streamer")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "lockStreamRotation: failed to setTargetRotation", t)
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "lockStreamRotation: failed to setTargetRotation", t)
+        }
+        
         Log.i(TAG, "lockStreamRotation: Setting lock from ${if (wasLocked != null) rotationToString(wasLocked) else "null"} to ${rotationToString(rotation)}, saved for reconnection")
     }
     

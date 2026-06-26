@@ -582,44 +582,34 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
      * Logs appropriate message if orientation is already saved.
      */
     private fun shouldLockOrientation(context: String): Boolean {
-        val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
+        val savedStreamRotation = previewViewModel.service?.getSavedStreamingOrientation()
         
-        // If Service has saved orientation but Fragment doesn't have it yet, restore UI now
-        if (savedRotation != null && rememberedLockedOrientation == null) {
-            val orientation = when (savedRotation) {
-                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            }
+        // If Service has saved orientation but Fragment doesn't have it yet, restore UI lock now
+        if (savedStreamRotation != null && rememberedLockedOrientation == null) {
+            val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
             requireActivity().requestedOrientation = orientation
             rememberedLockedOrientation = orientation
-            rememberedRotation = savedRotation
-            Log.d(TAG, "$context: Restored UI orientation from Service saved rotation: $orientation (rotation: $savedRotation)")
+            Log.d(TAG, "$context: Restored UI lock from button state during reconnection: $label")
             return false // Already handled, don't call lockOrientation()
         }
         
-        return if (savedRotation == null && rememberedLockedOrientation == null) {
+        return if (savedStreamRotation == null && rememberedLockedOrientation == null) {
             true // No saved orientation, proceed with lock
         } else {
-            Log.d(TAG, "$context: Already have saved orientation (Service: $savedRotation, Fragment: $rememberedLockedOrientation), not re-locking")
+            Log.d(TAG, "$context: Already have saved orientation (Service: $savedStreamRotation, Fragment: $rememberedLockedOrientation), not re-locking")
             false
         }
     }
 
     private fun lockOrientation() {
-        // If a fixed orientation is set, use that; otherwise lock to current sensor rotation.
-        val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
-        val rotation = if (fixedRotation != null) {
-            fixedRotation
-        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        // UI Rotation strictly follows the current physical rotation (or what the button forced)
+        val uiRotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             requireContext().display?.rotation ?: android.view.Surface.ROTATION_0
         } else {
             @Suppress("DEPRECATION")
             requireActivity().windowManager.defaultDisplay.rotation
         }
-        val currentOrientation = when (rotation) {
+        val currentOrientation = when (uiRotation) {
             android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
@@ -627,34 +617,27 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
 
+        // Lock the UI to its current state (so it doesn't spin wildly during the stream)
         rememberedLockedOrientation = currentOrientation
-        rememberedRotation = rotation
+        rememberedRotation = uiRotation
         requireActivity().requestedOrientation = currentOrientation
-        Log.d(TAG, "Orientation locked to: $currentOrientation (rotation: $rotation)")
+        Log.d(TAG, "UI Orientation locked to: $currentOrientation (rotation: $uiRotation)")
 
-        previewViewModel.service?.lockStreamRotation(rotation)
+        // Stream Rotation strictly follows the Settings Menu (fallback to UI rotation if Auto)
+        val fixedStreamRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
+        val streamRotationToLock = fixedStreamRotation ?: uiRotation
+        
+        previewViewModel.service?.lockStreamRotation(streamRotationToLock)
+        Log.d(TAG, "Stream Orientation locked to: $streamRotationToLock")
     }
 
     private fun unlockOrientation() {
         rememberedLockedOrientation = null
         rememberedRotation = null
-        // When a fixed orientation is configured, keep the activity locked to it after
-        // streaming stops — don't revert to free sensor rotation.
-        val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
-        if (fixedRotation != null) {
-            val fixedActivityOrientation = when (fixedRotation) {
-                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            }
-            requireActivity().requestedOrientation = fixedActivityOrientation
-            Log.d(TAG, "Orientation kept at fixed setting: $fixedActivityOrientation after stream stop")
-        } else {
-            requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
-            Log.d(TAG, "Orientation unlocked and remembered orientation cleared")
-        }
+        // Revert UI to whatever the button's state is
+        val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
+        requireActivity().requestedOrientation = orientation
+        Log.d(TAG, "Orientation unlocked, returning to button state: $label")
     }
 
     /**
@@ -780,20 +763,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         } ?: false
         
         if (isInStreamingProcess) {
-            // Get saved orientation from Service (source of truth)
+            // Get saved orientation from Service (source of truth for stream)
             val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
             if (savedRotation != null) {
-                val orientation = when (savedRotation) {
-                    android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                    android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                    android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                    else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                }
+                // Restore UI orientation based solely on button state
+                val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
                 requireActivity().requestedOrientation = orientation
                 rememberedLockedOrientation = orientation
-                rememberedRotation = savedRotation
-                Log.d(TAG, "onStart: Restored orientation from Service: $orientation (rotation: $savedRotation)")
+                Log.d(TAG, "onStart: Restored UI orientation from button state: $label")
             } else {
                 Log.d(TAG, "onStart: No saved orientation in Service, will lock in observer")
             }
@@ -847,22 +824,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             syncButtonState(currentStatus)
             
             if (isInStreamingProcess) {
-                Log.d(TAG, "onResume: Secondary check - restoring orientation from Service (status: $currentStatus)")
+                Log.d(TAG, "onResume: Secondary check - restoring orientation (status: $currentStatus)")
                 
-                // Get saved rotation from Service (survives Fragment lifecycle)
                 val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
                 if (savedRotation != null) {
-                    val orientation = when (savedRotation) {
-                        android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                        android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                        android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                        else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    }
+                    val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
                     requireActivity().requestedOrientation = orientation
                     rememberedLockedOrientation = orientation
-                    rememberedRotation = savedRotation
-                    Log.d(TAG, "Restored orientation from Service: $orientation (rotation: $savedRotation)")
+                    Log.d(TAG, "onResume: Restored UI orientation from button state: $label")
                 } else {
                     // Fallback to locking current orientation if we don't have a saved one
                     lockOrientation()
