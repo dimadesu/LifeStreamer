@@ -878,19 +878,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     unlockOrientation() // respects fixed setting internally
                     Log.d(TAG, "Applied orientation after stream stop")
                 } else {
-                    // Apply fixed orientation even if we were never locked (e.g. fresh resume)
-                    val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
-                    if (fixedRotation != null) {
-                        val fixedActivityOrientation = when (fixedRotation) {
-                            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        }
-                        requireActivity().requestedOrientation = fixedActivityOrientation
-                        Log.d(TAG, "Applied fixed orientation setting on resume: $fixedActivityOrientation")
-                    }
+                    // Do nothing on fresh resume - the viewOrientationSettingFlow observer will handle restoring
+                    // the user's preferred View button orientation automatically.
                 }
                 // Start preview immediately
                 try {
