@@ -74,10 +74,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         PreviewViewModelFactory(requireActivity().application)
     }
 
-    // Remember the orientation AND rotation that was locked when streaming started
-    // This allows us to restore the exact same orientation when returning from background
-    private var rememberedLockedOrientation: Int? = null
-    private var rememberedRotation: Int? = null
+    // No longer remembering locked UI orientation because the View button DataStore handles UI orientation exclusively.
 
     // Manual override of the whole-app (Activity) orientation, cycled via the preview button.
     // AUTO = follow the sensor (ApplicationConstants.supportedOrientation); other values force
@@ -249,7 +246,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 previewViewModel.viewOrientationSettingFlow.collect { savedOrientation ->
                     // Find the matching index in our cycle array
                     val index = uiOrientationCycle.indexOfFirst { it.first == savedOrientation }
-                    if (index >= 0 && uiOrientationIndex != index) {
+                    if (index >= 0) {
                         uiOrientationIndex = index
                         val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
                         requireActivity().requestedOrientation = orientation
@@ -349,15 +346,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     lockOrientation()
                 }
             } else {
-                // Only unlock if we're truly stopped AND not reconnecting
-                val shouldStayLocked = currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
-                                      currentStatus == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
-                                      isReconnecting
-                if (!shouldStayLocked) {
-                    unlockOrientation()
-                } else {
-                    Log.d(TAG, "Keeping orientation locked - status: $currentStatus, reconnecting: $isReconnecting")
-                }
+                // Stream stopped. UI orientation manages itself via the View button DataStore.
             }
         }
         
@@ -383,13 +372,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.NOT_STREAMING,
                     com.dimadesu.lifestreamer.models.StreamStatus.ERROR -> {
-                        // Unlock orientation only when truly stopped and not reconnecting
-                        val isReconnecting = previewViewModel.isReconnectingLiveData.value ?: false
-                        if (previewViewModel.isStreamingLiveData.value == false && !isReconnecting) {
-                            unlockOrientation()
-                        } else {
-                            Log.d(TAG, "Keeping lock despite $status - streaming: ${previewViewModel.isStreamingLiveData.value}, reconnecting: $isReconnecting")
-                        }
+                        // Stream stopped. UI orientation manages itself via the View button DataStore.
                     }
                     com.dimadesu.lifestreamer.models.StreamStatus.STREAMING -> {
                         // Orientation should already be locked by isStreamingLiveData observer
@@ -440,33 +423,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
-        // Apply orientation setting changes in real-time when not streaming
-        lifecycleScope.launch {
-            previewViewModel.streamOrientationFlow.collect { orientation ->
-                val isStreaming = previewViewModel.streamStatus.value.let { status ->
-                    status == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
-                    status == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
-                    status == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
-                }
-                if (!isStreaming) {
-                    val fixedRotation = orientation.toSurfaceRotation()
-                    if (fixedRotation != null) {
-                        val activityOrientation = when (fixedRotation) {
-                            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        }
-                        requireActivity().requestedOrientation = activityOrientation
-                        Log.d(TAG, "Orientation setting changed to $orientation, applied: $activityOrientation")
-                    } else {
-                        requireActivity().requestedOrientation = ApplicationConstants.supportedOrientation
-                        Log.d(TAG, "Orientation setting changed to Auto, unlocked")
-                    }
-                }
-            }
-        }
+        // streamOrientationFlow is no longer observed here for UI orientation changes, 
+        // as the local UI preview orientation is now strictly driven by the viewOrientationSettingFlow.
 
         previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
             if (streamer is IStreamer) {
@@ -598,68 +556,35 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     /**
-     * Helper to check if we should lock orientation for a NEW stream.
-     * Returns true if orientation should be locked (no saved state exists).
-     * If Service has a saved orientation but Fragment doesn't, restores UI to match Service.
-     * Logs appropriate message if orientation is already saved.
+     * Helper to check if we should lock stream orientation for a NEW stream.
+     * Returns true if stream orientation should be locked (no saved state exists in service).
      */
     private fun shouldLockOrientation(context: String): Boolean {
         val savedStreamRotation = previewViewModel.service?.getSavedStreamingOrientation()
         
-        // If Service has saved orientation but Fragment doesn't have it yet, restore UI lock now
-        if (savedStreamRotation != null && rememberedLockedOrientation == null) {
-            val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
-            requireActivity().requestedOrientation = orientation
-            rememberedLockedOrientation = orientation
-            Log.d(TAG, "$context: Restored UI lock from button state during reconnection: $label")
-            return false // Already handled, don't call lockOrientation()
-        }
-        
-        return if (savedStreamRotation == null && rememberedLockedOrientation == null) {
-            true // No saved orientation, proceed with lock
+        return if (savedStreamRotation == null) {
+            true // No saved stream orientation, proceed with lock
         } else {
-            Log.d(TAG, "$context: Already have saved orientation (Service: $savedStreamRotation, Fragment: $rememberedLockedOrientation), not re-locking")
+            Log.d(TAG, "$context: Already have saved stream orientation (Service: $savedStreamRotation), not re-locking")
             false
         }
     }
 
     private fun lockOrientation() {
-        // UI Rotation strictly follows the current physical rotation (or what the button forced)
+        // Find current physical rotation for fallback
         val uiRotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             requireContext().display?.rotation ?: android.view.Surface.ROTATION_0
         } else {
             @Suppress("DEPRECATION")
             requireActivity().windowManager.defaultDisplay.rotation
         }
-        val currentOrientation = when (uiRotation) {
-            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
 
-        // Lock the UI to its current state (so it doesn't spin wildly during the stream)
-        rememberedLockedOrientation = currentOrientation
-        rememberedRotation = uiRotation
-        requireActivity().requestedOrientation = currentOrientation
-        Log.d(TAG, "UI Orientation locked to: $currentOrientation (rotation: $uiRotation)")
-
-        // Stream Rotation strictly follows the Settings Menu (fallback to UI rotation if Auto)
+        // Stream Rotation strictly follows the Settings Menu (fallback to physical rotation if Auto)
         val fixedStreamRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
         val streamRotationToLock = fixedStreamRotation ?: uiRotation
         
         previewViewModel.service?.lockStreamRotation(streamRotationToLock)
         Log.d(TAG, "Stream Orientation locked to: $streamRotationToLock")
-    }
-
-    private fun unlockOrientation() {
-        rememberedLockedOrientation = null
-        rememberedRotation = null
-        // Revert UI to whatever the button's state is
-        val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
-        requireActivity().requestedOrientation = orientation
-        Log.d(TAG, "Orientation unlocked, returning to button state: $label")
     }
 
     /**
@@ -786,16 +711,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         
         if (isInStreamingProcess) {
             // Get saved orientation from Service (source of truth for stream)
-            val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
-            if (savedRotation != null) {
-                // Restore UI orientation based solely on button state
-                val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
-                requireActivity().requestedOrientation = orientation
-                rememberedLockedOrientation = orientation
-                Log.d(TAG, "onStart: Restored UI orientation from button state: $label")
-            } else {
-                Log.d(TAG, "onStart: No saved orientation in Service, will lock in observer")
-            }
+            Log.d(TAG, "onStart: Stream running, UI orientation handles itself via DataStore flow")
         }
         
         // NOTE: Permission request moved to onResume() to fix preview freeze when quickly
@@ -849,15 +765,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.d(TAG, "onResume: Secondary check - restoring orientation (status: $currentStatus)")
                 
                 val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
-                if (savedRotation != null) {
-                    val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
-                    requireActivity().requestedOrientation = orientation
-                    rememberedLockedOrientation = orientation
-                    Log.d(TAG, "onResume: Restored UI orientation from button state: $label")
-                } else {
-                    // Fallback to locking current orientation if we don't have a saved one
+                if (savedRotation == null) {
+                    // Lock the STREAM orientation since we're starting a new stream
                     lockOrientation()
-                    Log.d(TAG, "No saved orientation in Service, locked to current position")
+                    Log.d(TAG, "onResume: No saved stream orientation in Service, locking stream")
                 }
                 
                 // SECOND: Give the orientation change time to propagate before restarting preview
@@ -874,13 +785,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 Log.d(TAG, "App returned to foreground - not streaming, applying orientation setting")
                 // Not streaming - apply orientation setting (unlock for Auto, keep fixed for others)
                 // This also handles the case where stream was stopped from notification while app was in background
-                if (rememberedLockedOrientation != null) {
-                    unlockOrientation() // respects fixed setting internally
-                    Log.d(TAG, "Applied orientation after stream stop")
-                } else {
-                    // Do nothing on fresh resume - the viewOrientationSettingFlow observer will handle restoring
-                    // the user's preferred View button orientation automatically.
-                }
+                // Do nothing on fresh resume - the viewOrientationSettingFlow observer will handle restoring
+                // the user's preferred View button orientation automatically.
                 // Start preview immediately
                 try {
                     inflateStreamerPreview()
