@@ -278,6 +278,13 @@
                     android:backgroundTint="@color/button_gray"
                     app:goneUnless="@{viewmodel.isSrtlaEndpoint}" />
 
+                <Button
+                    android:id="@+id/previewRotationButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="VIEW: AUTO"
+                    android:backgroundTint="@color/button_gray" />
+
             </LinearLayout>
 
         </ScrollView>

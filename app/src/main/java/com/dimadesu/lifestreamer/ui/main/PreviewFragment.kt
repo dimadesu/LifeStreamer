@@ -77,6 +77,18 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     private var rememberedLockedOrientation: Int? = null
     private var rememberedRotation: Int? = null
 
+    // Manual override of the whole-app (Activity) orientation, cycled via the preview button.
+    // AUTO = follow the sensor (ApplicationConstants.supportedOrientation); other values force
+    // the entire UI (preview + controls) to that orientation, overriding the sensor.
+    private val uiOrientationCycle = listOf<Pair<Int, String>>(
+        ApplicationConstants.supportedOrientation to "AUTO",
+        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT to "PORTRAIT",
+        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE to "LANDSCAPE",
+        ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT to "PORT REV",
+        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE to "LAND REV"
+    )
+    private var uiOrientationIndex = 0
+
     // MediaProjection permission launcher - connects to MediaProjectionHelper
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
     // BLUETOOTH_CONNECT permission launcher
@@ -216,6 +228,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
         binding.srtlaStatsButton.setOnClickListener {
             previewViewModel.setSrtlaStatsVisible(binding.srtlaStatsScrollView.visibility != View.VISIBLE)
+        }
+
+        binding.previewRotationButton.setOnClickListener {
+            uiOrientationIndex = (uiOrientationIndex + 1) % uiOrientationCycle.size
+            val (orientation, label) = uiOrientationCycle[uiOrientationIndex]
+            requireActivity().requestedOrientation = orientation
+            binding.previewRotationButton.text = "VIEW: $label"
+            Log.d(TAG, "UI orientation override set to $label ($orientation)")
         }
 
         previewViewModel.isSrtlaStatsVisible.observe(viewLifecycleOwner) { visible ->
