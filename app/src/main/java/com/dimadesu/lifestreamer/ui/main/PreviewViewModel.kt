@@ -82,6 +82,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.Bitma
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
+import io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.srtla.SrtlaManager
@@ -1728,14 +1729,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             service?.setStreamStatus(StreamStatus.STARTING)
             Log.i(TAG, "startStream() called")
             
-            // Lock stream rotation BEFORE starting to ensure it matches UI orientation
-            // Get current display rotation and lock the service to it
-            // Note: We use WindowManager.defaultDisplay for all API levels here because
-            // Application context doesn't have an associated display. The deprecation
-            // is acceptable since this is just reading the current rotation value.
-            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            @Suppress("DEPRECATION")
-            val currentRotation = windowManager.defaultDisplay.rotation
+            // Lock stream rotation BEFORE starting to ensure it matches the user's
+            // orientation preference.  If a fixed orientation is configured, honour it
+            // instead of blindly reading the display (which in split-screen is always portrait).
+            val fixedRotation = streamOrientationFlow.value.toSurfaceRotation()
+            val currentRotation = if (fixedRotation != null) {
+                Log.i(TAG, "Using fixed stream orientation setting: ${streamOrientationFlow.value}")
+                fixedRotation
+            } else {
+                val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                @Suppress("DEPRECATION")
+                val displayRotation = windowManager.defaultDisplay.rotation
+                Log.i(TAG, "Using display rotation (AUTO): $displayRotation")
+                displayRotation
+            }
+            // Tell StreamPack's encoder about the rotation so it builds the correct dimensions
+            try {
+                (serviceStreamer as? IWithVideoRotation)?.setTargetRotation(currentRotation)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to set target rotation on streamer: ${t.message}")
+            }
             service?.lockStreamRotation(currentRotation)
             Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
             

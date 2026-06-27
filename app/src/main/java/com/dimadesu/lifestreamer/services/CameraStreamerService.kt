@@ -1080,6 +1080,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             } else {
                 detectCurrentRotation()
             }
+            // Explicitly tell StreamPack's encoder pipeline about the rotation.
+            // lockStreamRotation only updates internal tracking variables; without this
+            // call the encoder may use a stale targetRotation (e.g. portrait from split-screen).
+            try {
+                (streamer as? IWithVideoRotation)?.setTargetRotation(currentRotation)
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Applied target rotation ${rotationToString(currentRotation)} to streamer")
+            } catch (t: Throwable) {
+                Log.w(TAG, "startStreamFromConfiguredEndpoint: Failed to set target rotation: ${t.message}")
+            }
             lockStreamRotation(currentRotation)
             Log.i(TAG, "startStreamFromConfiguredEndpoint: Pre-locked stream rotation to ${rotationToString(currentRotation)}")
             
