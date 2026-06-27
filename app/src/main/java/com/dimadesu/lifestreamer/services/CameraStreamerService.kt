@@ -930,12 +930,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     private fun detectCurrentRotation() {
         try {
-            val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display?.rotation ?: Surface.ROTATION_0
-            } else {
-                @Suppress("DEPRECATION")
-                (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.rotation ?: Surface.ROTATION_0
-            }
+            // Using WindowManager explicitly is safer in a Service context because 
+            // Context.display can throw UnsupportedOperationException if the service 
+            // is not explicitly associated with a display.
+            @Suppress("DEPRECATION")
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            @Suppress("DEPRECATION")
+            val rotation = windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
             
             currentRotation = rotation
             Log.i(TAG, "Detected device rotation: ${rotationToString(rotation)}")
