@@ -409,13 +409,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 if (!isStreaming) {
                     val fixedRotation = orientation.toSurfaceRotation()
                     if (fixedRotation != null) {
-                        val activityOrientation = when (fixedRotation) {
-                            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        }
+                        val activityOrientation = fixedRotation.toActivityOrientation()
                         requireActivity().requestedOrientation = activityOrientation
                         Log.d(TAG, "Orientation setting changed to $orientation, applied: $activityOrientation")
                     } else {
@@ -566,13 +560,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         
         // If Service has saved orientation but Fragment doesn't have it yet, restore UI now
         if (savedRotation != null && rememberedLockedOrientation == null) {
-            val orientation = when (savedRotation) {
-                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            }
+            val orientation = savedRotation.toActivityOrientation()
             requireActivity().requestedOrientation = orientation
             rememberedLockedOrientation = orientation
             rememberedRotation = savedRotation
@@ -599,13 +587,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             @Suppress("DEPRECATION")
             requireActivity().windowManager.defaultDisplay.rotation
         }
-        val currentOrientation = when (rotation) {
-            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
+        val currentOrientation = rotation.toActivityOrientation()
 
         rememberedLockedOrientation = currentOrientation
         rememberedRotation = rotation
@@ -622,13 +604,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // streaming stops — don't revert to free sensor rotation.
         val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
         if (fixedRotation != null) {
-            val fixedActivityOrientation = when (fixedRotation) {
-                android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            }
+            val fixedActivityOrientation = fixedRotation.toActivityOrientation()
             requireActivity().requestedOrientation = fixedActivityOrientation
             Log.d(TAG, "Orientation kept at fixed setting: $fixedActivityOrientation after stream stop")
         } else {
@@ -763,13 +739,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             // Get saved orientation from Service (source of truth)
             val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
             if (savedRotation != null) {
-                val orientation = when (savedRotation) {
-                    android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                    android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                    android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                    else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                }
+                val orientation = savedRotation.toActivityOrientation()
                 requireActivity().requestedOrientation = orientation
                 rememberedLockedOrientation = orientation
                 rememberedRotation = savedRotation
@@ -832,13 +802,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 // Get saved rotation from Service (survives Fragment lifecycle)
                 val savedRotation = previewViewModel.service?.getSavedStreamingOrientation()
                 if (savedRotation != null) {
-                    val orientation = when (savedRotation) {
-                        android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                        android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                        android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                        else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    }
+                    val orientation = savedRotation.toActivityOrientation()
                     requireActivity().requestedOrientation = orientation
                     rememberedLockedOrientation = orientation
                     rememberedRotation = savedRotation
@@ -870,13 +834,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     // Apply fixed orientation even if we were never locked (e.g. fresh resume)
                     val fixedRotation = previewViewModel.streamOrientationFlow.value.toSurfaceRotation()
                     if (fixedRotation != null) {
-                        val fixedActivityOrientation = when (fixedRotation) {
-                            android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                            android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                            android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        }
+                        val fixedActivityOrientation = fixedRotation.toActivityOrientation()
                         requireActivity().requestedOrientation = fixedActivityOrientation
                         Log.d(TAG, "Applied fixed orientation setting on resume: $fixedActivityOrientation")
                     }
@@ -1320,4 +1278,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     companion object {
         private const val TAG = "PreviewFragment"
     }
+
+    private fun Int.toActivityOrientation(): Int = when (this) {
+        android.view.Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        android.view.Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        android.view.Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+        android.view.Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+        else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    }
+
 }
