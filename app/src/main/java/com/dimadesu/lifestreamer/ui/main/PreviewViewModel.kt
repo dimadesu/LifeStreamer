@@ -3080,14 +3080,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "No MediaProjection available, using mic")
         }
         
-        // Apply saved rotation BEFORE restarting stream to maintain original orientation
-        service?.getSavedStreamingOrientation()?.let { savedRotation ->
-            Log.i(TAG, "Applying saved rotation $savedRotation before RTMP restart")
-            try {
-                currentStreamer.setTargetRotation(savedRotation)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to apply saved rotation: ${e.message}")
+        // Apply rotation BEFORE restarting stream to maintain consistent orientation
+        val fixedRotation = streamOrientationFlow.value.toSurfaceRotation()
+        val rotationToApply = if (fixedRotation != null) {
+            Log.i(TAG, "Applying fixed orientation setting $fixedRotation before RTMP restart")
+            fixedRotation
+        } else {
+            val savedRotation = service?.getSavedStreamingOrientation()
+            if (savedRotation != null) {
+                Log.i(TAG, "Applying saved rotation $savedRotation before RTMP restart")
+                savedRotation
+            } else {
+                val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.rotation
             }
+        }
+        
+        try {
+            currentStreamer.setTargetRotation(rotationToApply)
+            service?.lockStreamRotation(rotationToApply)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to apply rotation before RTMP restart: ${e.message}")
         }
         
         // Restart the stream
