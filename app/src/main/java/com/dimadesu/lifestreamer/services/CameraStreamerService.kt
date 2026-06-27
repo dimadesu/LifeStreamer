@@ -1077,9 +1077,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             if (fixedRotation != null) {
                 currentRotation = fixedRotation
                 Log.i(TAG, "startStreamFromConfiguredEndpoint: Using fixed orientation setting ${rotationToString(fixedRotation)}")
+            } else if (savedStreamingOrientation != null) {
+                // If we are reconnecting and the setting is AUTO, we must resume in the exact
+                // same orientation we started the stream in to avoid glitching the ingest server.
+                currentRotation = savedStreamingOrientation!!
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Reconnecting - Restoring saved orientation ${rotationToString(currentRotation)}")
             } else {
                 detectCurrentRotation()
             }
+            
             // Explicitly tell StreamPack's encoder pipeline about the rotation.
             // lockStreamRotation only updates internal tracking variables; without this
             // call the encoder may use a stale targetRotation (e.g. portrait from split-screen).
