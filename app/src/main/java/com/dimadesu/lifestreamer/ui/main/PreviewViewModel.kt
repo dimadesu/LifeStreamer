@@ -1731,7 +1731,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             // Lock stream rotation BEFORE starting to ensure it matches the user's
             // orientation preference.  If a fixed orientation is configured, honour it
-            // instead of blindly reading the display (which in split-screen is always portrait).
+            // instead of blindly reading the display.
             val fixedRotation = streamOrientationFlow.value.toSurfaceRotation()
             val currentRotation = if (fixedRotation != null) {
                 Log.i(TAG, "Using fixed stream orientation setting: ${streamOrientationFlow.value}")
