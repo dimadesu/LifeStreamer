@@ -45,6 +45,15 @@
             app:title="@string/settings">
 
             <ListPreference
+                app:key="@string/stream_orientation_key"
+                app:title="@string/stream_orientation_title"
+                app:summary="@string/stream_orientation_summary"
+                app:defaultValue="@string/stream_orientation_value_auto"
+                app:entryValues="@array/stream_orientation_values"
+                app:entries="@array/stream_orientation_entries"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
                 app:defaultValue="@string/default_video_encoder"
                 app:key="@string/video_encoder_key"
                 app:title="@string/video_encoder"

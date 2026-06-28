@@ -114,6 +114,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Local rotation provider (we register our own to avoid calling StreamerService.onCreate)
     private var localRotationProvider: IRotationProvider? = null
     private var localRotationListener: IRotationProvider.Listener? = null
+
+    // Cached stream orientation setting — updated from DataStore flow on each change
+    @Volatile
+    private var cachedStreamOrientation: com.dimadesu.lifestreamer.models.StreamOrientation =
+        com.dimadesu.lifestreamer.models.StreamOrientation.AUTO
     
     // Audio passthrough manager for monitoring microphone input (lazy init after context available)
     private val audioPassthroughManager by lazy { 
@@ -289,6 +294,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             Log.i(TAG, "SENSOR: Ignoring rotation change to ${rotationToString(rotation)} - LOCKED to ${rotationToString(lockedStreamRotation!!)}")
                             return
                         }
+                        // If a fixed orientation is configured, sensor changes don't apply
+                        if (cachedStreamOrientation.toSurfaceRotation() != null) {
+                            Log.i(TAG, "SENSOR: Ignoring rotation change to ${rotationToString(rotation)} - fixed orientation setting active")
+                            return
+                        }
                         Log.i(TAG, "SENSOR: Rotation changed to ${rotationToString(rotation)} - NOT LOCKED, applying")
                         
                         // When not streaming, update rotation normally
@@ -361,6 +371,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
         }
         
+        // Keep cachedStreamOrientation in sync with DataStore; apply fixed rotation immediately
+        serviceScope.launch {
+            storageRepository.streamOrientationFlow.collect { orientation ->
+                cachedStreamOrientation = orientation
+                Log.i(TAG, "Stream orientation setting updated: $orientation")
+                val fixedRotation = orientation.toSurfaceRotation()
+                if (fixedRotation != null && lockedStreamRotation == null) {
+                    try {
+                        (streamer as? IWithVideoRotation)?.setTargetRotation(fixedRotation)
+                        currentRotation = fixedRotation
+                        Log.i(TAG, "Applied fixed orientation to streamer: ${rotationToString(fixedRotation)}")
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+
         // Observe audio config changes and update passthrough if monitoring is active
         serviceScope.launch {
             storageRepository.audioConfigFlow
@@ -843,10 +869,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         
         if (lockedStreamRotation == null) {
             // First time streaming - detect and save the orientation
-            detectCurrentRotation() // Updates currentRotation variable
+            // If a fixed orientation is configured, use it; otherwise use the current sensor rotation
+            val fixedRotation = cachedStreamOrientation.toSurfaceRotation()
+            if (fixedRotation != null) {
+                currentRotation = fixedRotation
+                Log.i(TAG, "onStreamingStart: INITIAL START - Using fixed orientation setting ${rotationToString(fixedRotation)}")
+            } else {
+                detectCurrentRotation() // Updates currentRotation variable
+            }
             lockedStreamRotation = currentRotation
             savedStreamingOrientation = currentRotation
-            Log.i(TAG, "onStreamingStart: INITIAL START - Detected and locked to ${rotationToString(currentRotation)}, saved for reconnection")
+            Log.i(TAG, "onStreamingStart: INITIAL START - Locked to ${rotationToString(currentRotation)}, saved for reconnection")
         } else if (savedStreamingOrientation != null) {
             // Reconnection - restore the saved orientation
             lockedStreamRotation = savedStreamingOrientation
@@ -897,12 +930,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     private fun detectCurrentRotation() {
         try {
-            val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display?.rotation ?: Surface.ROTATION_0
-            } else {
-                @Suppress("DEPRECATION")
-                (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.rotation ?: Surface.ROTATION_0
-            }
+            // Using WindowManager explicitly is safer in a Service context because 
+            // Context.display can throw UnsupportedOperationException if the service 
+            // is not explicitly associated with a display.
+            @Suppress("DEPRECATION")
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            @Suppress("DEPRECATION")
+            val rotation = windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
             
             currentRotation = rotation
             Log.i(TAG, "Detected device rotation: ${rotationToString(rotation)}")
@@ -1040,8 +1074,28 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private suspend fun startStreamFromConfiguredEndpoint() {
         try {
             // Lock stream rotation BEFORE starting to ensure consistent orientation
-            // Detect current rotation and lock to it (same as PreviewViewModel.startStream())
-            detectCurrentRotation()
+            val fixedRotation = cachedStreamOrientation.toSurfaceRotation()
+            if (fixedRotation != null) {
+                currentRotation = fixedRotation
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Using fixed orientation setting ${rotationToString(fixedRotation)}")
+            } else if (savedStreamingOrientation != null) {
+                // If we are reconnecting and the setting is AUTO, we must resume in the exact
+                // same orientation we started the stream in to avoid glitching the ingest server.
+                currentRotation = savedStreamingOrientation!!
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Reconnecting - Restoring saved orientation ${rotationToString(currentRotation)}")
+            } else {
+                detectCurrentRotation()
+            }
+            
+            // Explicitly tell StreamPack's encoder pipeline about the rotation.
+            // lockStreamRotation only updates internal tracking variables; without this
+            // call the encoder may use a stale targetRotation (e.g. portrait from split-screen).
+            try {
+                (streamer as? IWithVideoRotation)?.setTargetRotation(currentRotation)
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: Applied target rotation ${rotationToString(currentRotation)} to streamer")
+            } catch (t: Throwable) {
+                Log.w(TAG, "startStreamFromConfiguredEndpoint: Failed to set target rotation: ${t.message}")
+            }
             lockStreamRotation(currentRotation)
             Log.i(TAG, "startStreamFromConfiguredEndpoint: Pre-locked stream rotation to ${rotationToString(currentRotation)}")
             

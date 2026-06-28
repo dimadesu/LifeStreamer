@@ -82,6 +82,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.Bitma
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
+import io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.srtla.SrtlaManager
@@ -182,6 +183,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Encoder stats display
     private val _encoderStatsLiveData = MutableLiveData<String?>(null)
     val encoderStatsLiveData: LiveData<String?> get() = _encoderStatsLiveData
+
+    val streamOrientationFlow: StateFlow<com.dimadesu.lifestreamer.models.StreamOrientation> =
+        storageRepository.streamOrientationFlow.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            com.dimadesu.lifestreamer.models.StreamOrientation.AUTO
+        )
 
     // Track whether the UI is in foreground (to avoid camera operations when paused)
     @Volatile
@@ -1721,14 +1729,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             service?.setStreamStatus(StreamStatus.STARTING)
             Log.i(TAG, "startStream() called")
             
-            // Lock stream rotation BEFORE starting to ensure it matches UI orientation
-            // Get current display rotation and lock the service to it
-            // Note: We use WindowManager.defaultDisplay for all API levels here because
-            // Application context doesn't have an associated display. The deprecation
-            // is acceptable since this is just reading the current rotation value.
-            val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            @Suppress("DEPRECATION")
-            val currentRotation = windowManager.defaultDisplay.rotation
+            // Lock stream rotation BEFORE starting to ensure it matches the user's
+            // orientation preference.  If a fixed orientation is configured, honour it
+            // instead of blindly reading the display.
+            val fixedRotation = streamOrientationFlow.value.toSurfaceRotation()
+            val currentRotation = if (fixedRotation != null) {
+                Log.i(TAG, "Using fixed stream orientation setting: ${streamOrientationFlow.value}")
+                fixedRotation
+            } else {
+                val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                @Suppress("DEPRECATION")
+                val displayRotation = windowManager.defaultDisplay.rotation
+                Log.i(TAG, "Using display rotation (AUTO): $displayRotation")
+                displayRotation
+            }
+            // Tell StreamPack's encoder about the rotation so it builds the correct dimensions
+            try {
+                (serviceStreamer as? IWithVideoRotation)?.setTargetRotation(currentRotation)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to set target rotation on streamer: ${t.message}")
+            }
             service?.lockStreamRotation(currentRotation)
             Log.i(TAG, "Pre-locked stream rotation to $currentRotation before starting")
             
@@ -3060,14 +3080,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "No MediaProjection available, using mic")
         }
         
-        // Apply saved rotation BEFORE restarting stream to maintain original orientation
-        service?.getSavedStreamingOrientation()?.let { savedRotation ->
-            Log.i(TAG, "Applying saved rotation $savedRotation before RTMP restart")
-            try {
-                currentStreamer.setTargetRotation(savedRotation)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to apply saved rotation: ${e.message}")
+        // Apply rotation BEFORE restarting stream to maintain consistent orientation
+        val fixedRotation = streamOrientationFlow.value.toSurfaceRotation()
+        val rotationToApply = if (fixedRotation != null) {
+            Log.i(TAG, "Applying fixed orientation setting $fixedRotation before RTMP restart")
+            fixedRotation
+        } else {
+            val savedRotation = service?.getSavedStreamingOrientation()
+            if (savedRotation != null) {
+                Log.i(TAG, "Applying saved rotation $savedRotation before RTMP restart")
+                savedRotation
+            } else {
+                val windowManager = application.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.rotation
             }
+        }
+        
+        try {
+            currentStreamer.setTargetRotation(rotationToApply)
+            service?.lockStreamRotation(rotationToApply)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to apply rotation before RTMP restart: ${e.message}")
         }
         
         // Restart the stream
