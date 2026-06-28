@@ -2581,6 +2581,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * This works for ALL audio sources (mic, Bluetooth, ExoPlayer/MediaProjection).
      */
     private fun setupAudioLevelMonitoring() {
+        if (!isUiInForeground) {
+            Log.i(TAG, "Skipping setupAudioLevelMonitoring because UI is in background")
+            return
+        }
         val streamer = serviceStreamer ?: return
         val audioProcessor = streamer.audioInput?.processor ?: run {
             Log.w(TAG, "Audio processor not available for level monitoring")
