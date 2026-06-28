@@ -2647,12 +2647,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val audioInput = streamer.audioInput ?: return@launch
                 audioInput.sourceFlow.filterNotNull().first()     // source is set
                 streamer.audioConfigFlow.filterNotNull().first()   // configure() has been called on source
-                if (streamer.isStreamingFlow.value != true) {
-                    audioInput.startCapture()
-                    Log.i(TAG, "Audio capture started for VU meter")
-                } else {
-                    Log.d(TAG, "Audio capture already active for streaming - skipping startCapture for VU meter")
-                }
+                audioInput.startCapture()
+                Log.i(TAG, "Audio capture started for VU meter")
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to start audio capture: ${t.message}")
             }
@@ -2681,16 +2677,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
             // stopCapture is a suspend function — launch it and let it complete independently
             val audioInput = serviceStreamer?.audioInput
-            val isStreaming = serviceStreamer?.isStreamingFlow?.value == true
             stopCaptureJob?.cancel()
             stopCaptureJob = viewModelScope.launch {
                 try {
-                    if (!isStreaming) {
-                        audioInput?.stopCapture()
-                        Log.i(TAG, "Audio capture stopped for VU meter")
-                    } else {
-                        Log.d(TAG, "Skipping audio capture stop for VU meter - stream is running")
-                    }
+                    audioInput?.stopCapture()
+                    Log.i(TAG, "Audio capture stopped for VU meter")
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to stop audio capture: ${t.message}")
                 }
