@@ -203,6 +203,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun onUiResumed() {
         isUiInForeground = true
+        
+        // Restart audio level monitoring if we are not streaming
+        if (serviceStreamer?.isStreamingFlow?.value != true) {
+            setupAudioLevelMonitoring()
+        }
+        
         // Apply any pending configs that were skipped while in background
         val savedVideoConfig = pendingVideoConfig
         val savedAudioConfig = pendingAudioConfig
@@ -254,6 +260,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun onUiPaused() {
         isUiInForeground = false
+        
+        // Disable audio level monitoring when in background, unless we are actively streaming
+        if (serviceStreamer?.isStreamingFlow?.value != true) {
+            Log.i(TAG, "UI paused and not streaming: disabling audio level monitoring")
+            disableAudioLevelMonitoring()
+        }
     }
 
     /**
