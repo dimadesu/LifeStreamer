@@ -204,10 +204,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     fun onUiResumed() {
         isUiInForeground = true
         
-        // Restart audio level monitoring if we are not streaming
-        if (serviceStreamer?.isStreamingFlow?.value != true) {
-            setupAudioLevelMonitoring()
-        }
+        // Restart audio level monitoring (if already streaming, it will just re-attach the effect)
+        setupAudioLevelMonitoring()
         
         // Apply any pending configs that were skipped while in background
         val savedVideoConfig = pendingVideoConfig
@@ -261,11 +259,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     fun onUiPaused() {
         isUiInForeground = false
         
-        // Disable audio level monitoring when in background, unless we are actively streaming
-        if (serviceStreamer?.isStreamingFlow?.value != true) {
-            Log.i(TAG, "UI paused and not streaming: disabling audio level monitoring")
-            disableAudioLevelMonitoring()
-        }
+        Log.i(TAG, "UI paused: disabling audio level monitoring")
+        disableAudioLevelMonitoring()
     }
 
     /**
@@ -1498,7 +1493,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
-        // Clear bitrate display and handle background state when streaming stops
+        // Clear bitrate display when streaming stops
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
@@ -1506,11 +1501,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (!isStreaming) {
                             Log.i(TAG, "Streamer stopped - clearing bitrate display")
                             _bitrateLiveData.postValue(null)
-                            
-                            if (!isUiInForeground) {
-                                Log.i(TAG, "Streamer stopped in background - disabling audio monitoring")
-                                disableAudioLevelMonitoring()
-                            }
                         }
                     }
                 }
@@ -2657,8 +2647,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val audioInput = streamer.audioInput ?: return@launch
                 audioInput.sourceFlow.filterNotNull().first()     // source is set
                 streamer.audioConfigFlow.filterNotNull().first()   // configure() has been called on source
-                audioInput.startCapture()
-                Log.i(TAG, "Audio capture started for pre-stream VU meter")
+                if (streamer.isStreamingFlow.value != true) {
+                    audioInput.startCapture()
+                    Log.i(TAG, "Audio capture started for VU meter")
+                } else {
+                    Log.d(TAG, "Audio capture already active for streaming - skipping startCapture for VU meter")
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to start audio capture: ${t.message}")
             }
@@ -2687,11 +2681,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _audioLevelFlow.value = com.dimadesu.lifestreamer.audio.AudioLevel.SILENT
             // stopCapture is a suspend function — launch it and let it complete independently
             val audioInput = serviceStreamer?.audioInput
+            val isStreaming = serviceStreamer?.isStreamingFlow?.value == true
             stopCaptureJob?.cancel()
             stopCaptureJob = viewModelScope.launch {
                 try {
-                    audioInput?.stopCapture()
-                    Log.i(TAG, "Audio capture stopped")
+                    if (!isStreaming) {
+                        audioInput?.stopCapture()
+                        Log.i(TAG, "Audio capture stopped for VU meter")
+                    } else {
+                        Log.d(TAG, "Skipping audio capture stop for VU meter - stream is running")
+                    }
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to stop audio capture: ${t.message}")
                 }
