@@ -203,6 +203,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun onUiResumed() {
         isUiInForeground = true
+        
+        // Restart audio level monitoring (if already streaming, it will just re-attach the effect)
+        setupAudioLevelMonitoring()
+        
         // Apply any pending configs that were skipped while in background
         val savedVideoConfig = pendingVideoConfig
         val savedAudioConfig = pendingAudioConfig
@@ -254,6 +258,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     fun onUiPaused() {
         isUiInForeground = false
+        
+        Log.i(TAG, "UI paused: disabling audio level monitoring")
+        disableAudioLevelMonitoring()
     }
 
     /**
@@ -2569,6 +2576,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * This works for ALL audio sources (mic, Bluetooth, ExoPlayer/MediaProjection).
      */
     private fun setupAudioLevelMonitoring() {
+        if (!isUiInForeground) {
+            Log.i(TAG, "Skipping setupAudioLevelMonitoring because UI is in background")
+            return
+        }
         val streamer = serviceStreamer ?: return
         val audioProcessor = streamer.audioInput?.processor ?: run {
             Log.w(TAG, "Audio processor not available for level monitoring")
@@ -2637,7 +2648,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 audioInput.sourceFlow.filterNotNull().first()     // source is set
                 streamer.audioConfigFlow.filterNotNull().first()   // configure() has been called on source
                 audioInput.startCapture()
-                Log.i(TAG, "Audio capture started for pre-stream VU meter")
+                Log.i(TAG, "Audio capture started for VU meter")
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to start audio capture: ${t.message}")
             }
@@ -2670,7 +2681,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             stopCaptureJob = viewModelScope.launch {
                 try {
                     audioInput?.stopCapture()
-                    Log.i(TAG, "Audio capture stopped")
+                    Log.i(TAG, "Audio capture stopped for VU meter")
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to stop audio capture: ${t.message}")
                 }
