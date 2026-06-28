@@ -1498,7 +1498,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
         }
-        // Clear bitrate display when streaming stops
+        // Clear bitrate display and handle background state when streaming stops
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
@@ -1506,6 +1506,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (!isStreaming) {
                             Log.i(TAG, "Streamer stopped - clearing bitrate display")
                             _bitrateLiveData.postValue(null)
+                            
+                            if (!isUiInForeground) {
+                                Log.i(TAG, "Streamer stopped in background - disabling audio monitoring")
+                                disableAudioLevelMonitoring()
+                            }
                         }
                     }
                 }
