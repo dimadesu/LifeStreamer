@@ -37,6 +37,7 @@ import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.srtla.SrtlaManager
+import com.dimadesu.bondbunny.moblink.MoblinkManager
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -208,6 +209,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private lateinit var openPendingIntent: PendingIntent
     
     // Audio permission checker for debugging
+
+    /**
+     * Moblink relay server. Started early (before stream start) so relays can pre-connect.
+     * Null when Moblink is not configured. Set by the ViewModel or by the service itself
+     * once LifeStreamer has its own Moblink settings screen.
+     */
+    var moblinkManager: MoblinkManager? = null
+        private set
+
     /**
      * Override onCreate to use both camera and mediaProjection service types
      */
@@ -461,6 +471,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         // Stop embedded SRTLA proxy if running
         try { if (SrtlaManager.isRunning) SrtlaManager.stop() } catch (_: Exception) {}
+
+        // Stop Moblink manager (if running) when the service is destroyed
+        try { moblinkManager?.stop(); moblinkManager = null } catch (_: Exception) {}
 
         // Ensure audio passthrough is stopped - Quit from notification may call
         // Activity.finishAndRemoveTask() which doesn't always guarantee the
@@ -1159,7 +1172,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             val srtlaConfig = storageRepository.srtlaConfigFlow.first()
             if (srtlaConfig != null) {
                 Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")
-                SrtlaManager.start(this, srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort)
+                SrtlaManager.start(this, srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort, moblinkManager)
             }
 
             try {
@@ -1297,6 +1310,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 customNotificationUtils.notify(notification)
             } catch (_: Throwable) {}
         }
+
+        /** Expose the Moblink relay manager so the ViewModel can observe relay status. */
+        fun getMoblinkManager(): MoblinkManager? = this@CameraStreamerService.moblinkManager
     }
 
     private val customBinder = CameraStreamerServiceBinder()
