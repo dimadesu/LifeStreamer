@@ -231,6 +231,27 @@ class DataStoreRepository(
         )
     }.distinctUntilChanged()
 
+    /** Config needed to start the Moblink relay server. Null when disabled or not in SRTLA mode. */
+    data class MoblinkConfig(val name: String, val password: String, val port: Int)
+
+    val moblinkConfigFlow: Flow<MoblinkConfig?> = dataStore.data.map { preferences ->
+        // Moblink only makes sense when Bond Bunny SRTLA bonding is active
+        val endpointTypeId =
+            preferences[stringPreferencesKey(context.getString(R.string.endpoint_type_key))]?.toInt()
+                ?: EndpointType.SRT.id
+        if (EndpointType.fromId(endpointTypeId) != EndpointType.SRTLA) return@map null
+        val enabled = preferences[booleanPreferencesKey(context.getString(R.string.moblink_enabled_key))] ?: false
+        if (!enabled) return@map null
+        MoblinkConfig(
+            name = preferences[stringPreferencesKey(context.getString(R.string.moblink_name_key))]
+                ?: context.getString(R.string.default_moblink_name),
+            password = preferences[stringPreferencesKey(context.getString(R.string.moblink_password_key))]
+                ?: context.getString(R.string.default_moblink_password),
+            port = preferences[stringPreferencesKey(context.getString(R.string.moblink_port_key))]?.toIntOrNull()
+                ?: context.getString(R.string.default_moblink_port).toInt(),
+        )
+    }.distinctUntilChanged()
+
     // Flow for RTMP video source URL (primary, index 1)
     val rtmpVideoSourceUrlFlow: Flow<String> = dataStore.data.map { preferences ->
         preferences[stringPreferencesKey(context.getString(R.string.rtmp_source_url_key))]

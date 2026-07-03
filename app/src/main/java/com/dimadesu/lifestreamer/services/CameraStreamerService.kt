@@ -414,6 +414,74 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     }
                 }
         }
+
+        // Start Moblink relay server early so relays can pre-connect before stream start.
+        // Reacts to settings changes at runtime (toggle, password, port).
+        serviceScope.launch {
+            storageRepository.moblinkConfigFlow.collect { config ->
+                val current = moblinkManager
+                if (config == null) {
+                    // Moblink disabled or not in SRTLA mode — stop if running
+                    if (current != null) {
+                        Log.i(TAG, "Moblink disabled — stopping manager")
+                        current.stop()
+                        moblinkManager = null
+                    }
+                } else if (current == null) {
+                    // Moblink enabled and not yet running — start it
+                    Log.i(TAG, "Moblink enabled — starting manager (port=${config.port})")
+                    val mgr = MoblinkManager(this@CameraStreamerService, config.name, config.password, config.port)
+                    mgr.start(object : MoblinkManager.Listener() {
+                        override fun onRelayTunnelReady(relayId: String, name: String, host: String, port: Int) {
+                            Log.i(TAG, "Moblink relay tunnel ready: '$name' @ $host:$port")
+                        }
+                        override fun onRelayTunnelClosed(relayId: String, host: String, port: Int) {
+                            Log.i(TAG, "Moblink relay tunnel closed: $relayId @ $host:$port")
+                        }
+                        override fun onRelayConnected(relayId: String, name: String) {
+                            Log.i(TAG, "Moblink relay connected: '$name'")
+                        }
+                        override fun onRelayDisconnected(relayId: String) {
+                            Log.i(TAG, "Moblink relay disconnected: $relayId")
+                        }
+                        override fun onRelayStatus(relayId: String, name: String, batteryPercentage: Int?, thermalState: com.dimadesu.bondbunny.moblink.ThermalState?) {
+                            Log.i(TAG, "Moblink relay '$name' battery=$batteryPercentage thermal=$thermalState")
+                        }
+                        override fun onLog(message: String) {
+                            Log.i(TAG, "Moblink: $message")
+                        }
+                    })
+                    moblinkManager = mgr
+                } else {
+                    // Config changed while running — restart with new settings
+                    Log.i(TAG, "Moblink config changed — restarting manager")
+                    current.stop()
+                    moblinkManager = null
+                    val mgr = MoblinkManager(this@CameraStreamerService, config.name, config.password, config.port)
+                    mgr.start(object : MoblinkManager.Listener() {
+                        override fun onRelayTunnelReady(relayId: String, name: String, host: String, port: Int) {
+                            Log.i(TAG, "Moblink relay tunnel ready: '$name' @ $host:$port")
+                        }
+                        override fun onRelayTunnelClosed(relayId: String, host: String, port: Int) {
+                            Log.i(TAG, "Moblink relay tunnel closed: $relayId @ $host:$port")
+                        }
+                        override fun onRelayConnected(relayId: String, name: String) {
+                            Log.i(TAG, "Moblink relay connected: '$name'")
+                        }
+                        override fun onRelayDisconnected(relayId: String) {
+                            Log.i(TAG, "Moblink relay disconnected: $relayId")
+                        }
+                        override fun onRelayStatus(relayId: String, name: String, batteryPercentage: Int?, thermalState: com.dimadesu.bondbunny.moblink.ThermalState?) {
+                            Log.i(TAG, "Moblink relay '$name' battery=$batteryPercentage thermal=$thermalState")
+                        }
+                        override fun onLog(message: String) {
+                            Log.i(TAG, "Moblink: $message")
+                        }
+                    })
+                    moblinkManager = mgr
+                }
+            }
+        }
     }
 
     private fun initNotificationPendingIntents() {
