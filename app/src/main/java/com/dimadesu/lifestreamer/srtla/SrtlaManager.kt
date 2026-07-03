@@ -20,6 +20,9 @@ import kotlinx.coroutines.withContext
  * [start] calls [MoblinkManager.connectToSrtla] to activate tunnels for any waiting relays.
  * On [stop], the destination is cleared so relays park in the waiting room and remain
  * WebSocket-connected for the next stream start.
+ *
+ * Call [addMoblinkRelay] / [removeMoblinkRelay] from your [MoblinkManager.Listener] callbacks
+ * so each relay's UDP socket is registered with the native SRTLA bonding layer.
  */
 object SrtlaManager {
 
@@ -73,6 +76,7 @@ object SrtlaManager {
         Log.i(TAG, "SRTLA proxy ready (isRunning=$isRunning)")
 
         // Phase 2: activate Moblink tunnels now that the SRTLA destination port is known.
+        Log.i(TAG, "Moblink phase 2 check: moblinkManager=${if (moblinkManager != null) "SET" else "NULL"}, isRunning=$isRunning")
         if (moblinkManager != null && isRunning) {
             Log.i(TAG, "Activating Moblink relay tunnels → $receiverHost:$receiverPort")
             moblinkManager.connectToSrtla(receiverHost, receiverPort.toIntOrNull() ?: 0)
@@ -80,14 +84,47 @@ object SrtlaManager {
     }
 
     /**
+     * Register a Moblink relay with the native SRTLA bonding layer.
+     * Call this from [MoblinkManager.Listener.onRelayTunnelReady].
+     */
+    fun addMoblinkRelay(relayId: String, relayHost: String, relayPort: Int) {
+        val s = sender
+        if (s == null) {
+            Log.w(TAG, "addMoblinkRelay called but SRTLA is not running — relay $relayId ignored")
+            return
+        }
+        Log.i(TAG, "Adding Moblink relay to SRTLA bonding: $relayId @ $relayHost:$relayPort")
+        s.addMoblinkRelay(relayId, relayHost, relayPort)
+    }
+
+    /**
+     * Remove a Moblink relay from the native SRTLA bonding layer.
+     * Call this from [MoblinkManager.Listener.onRelayTunnelClosed].
+     */
+    fun removeMoblinkRelay(relayId: String) {
+        val s = sender
+        if (s == null) {
+            Log.w(TAG, "removeMoblinkRelay called but SRTLA is not running — relay $relayId ignored")
+            return
+        }
+        Log.i(TAG, "Removing Moblink relay from SRTLA bonding: $relayId")
+        s.removeMoblinkRelay(relayId)
+    }
+
+    /**
      * Stop the SRTLA proxy and release all resources.
      *
-     * If a [MoblinkManager] was passed to [start], call [MoblinkManager.connectToSrtla] with
-     * an empty host / port=0 before calling [stop] so relays park in the waiting room and
-     * remain connected for the next stream.
+     * @param moblinkManager If provided, the Moblink destination is reset so relays park in
+     *   the waiting room and remain WebSocket-connected for the next stream start.
      */
-    fun stop() {
+    fun stop(moblinkManager: MoblinkManager? = null) {
         Log.i(TAG, "Stopping SRTLA")
+        // Reset Moblink destination before stopping SRTLA so relay sessions know to park.
+        // Do this before sender.stop() so any in-flight tunnel tracking is still valid.
+        if (moblinkManager != null) {
+            Log.i(TAG, "Resetting Moblink destination — relays will wait for next stream")
+            moblinkManager.connectToSrtla("", 0)
+        }
         sender?.stop()
         sender = null
     }
