@@ -5,33 +5,139 @@ import android.util.Log
 import com.dimadesu.bondbunny.NativeSrtlaJni
 import com.dimadesu.bondbunny.SrtlaSender
 import com.dimadesu.bondbunny.moblink.MoblinkManager
+import com.dimadesu.bondbunny.moblink.ThermalState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 /**
- * Manages the embedded SRTLA native proxy within LifeStreamer.
+ * Manages the embedded SRTLA native proxy and Moblink relay server within LifeStreamer.
  *
- * Delegates all network management and native lifecycle to [SrtlaSender]
- * from the shared srtla-lib module (bond-bunny/srtla-lib).
+ * Owns both [SrtlaSender] (native SRTLA bonding) and [MoblinkManager] (WebSocket relay
+ * server). All relay wiring is handled internally — callers never need to know about
+ * Moblink details.
  *
- * ### Moblink integration
- * Pass an already-started [MoblinkManager] to [start]. After the SRTLA stack is running,
- * [start] calls [MoblinkManager.connectToSrtla] to activate tunnels for any waiting relays.
- * On [stop], the destination is cleared so relays park in the waiting room and remain
- * WebSocket-connected for the next stream start.
+ * ### Lifecycle
  *
- * Call [addMoblinkRelay] / [removeMoblinkRelay] from your [MoblinkManager.Listener] callbacks
- * so each relay's UDP socket is registered with the native SRTLA bonding layer.
+ * **Phase 1 — Moblink server (call as early as possible):**
+ * ```
+ * SrtlaManager.startMoblink(context, name, password, port)
+ * ```
+ * Relays connect, authenticate, and report battery/thermal status. No video flows yet.
+ * Call [stopMoblink] on service destroy or when Moblink is disabled in settings.
+ *
+ * **Phase 2 — SRTLA proxy (call when starting a stream):**
+ * ```
+ * SrtlaManager.start(context, host, port, listenPort)
+ * ```
+ * Starts the native SRTLA bonding proxy. If Moblink is active, tunnels are activated
+ * automatically — no extra call needed.
+ *
+ * **Stream stop:**
+ * ```
+ * SrtlaManager.stop()
+ * ```
+ * Stops SRTLA and parks Moblink relays (resets destination so they wait for next stream).
+ * The Moblink WebSocket server stays alive.
  */
 object SrtlaManager {
 
     private const val TAG = "SrtlaManager"
 
+    // -------------------------------------------------------------------------
+    // State
+    // -------------------------------------------------------------------------
+
     private var sender: SrtlaSender? = null
+    private var moblinkManager: MoblinkManager? = null
+
+    /** SRTLA receiver address — saved so we can pass it to connectToSrtla(). */
+    private var srtlaHost: String = ""
+    private var srtlaPort: Int = 0
 
     /** True when the native SRTLA thread is running. */
     val isRunning: Boolean get() = NativeSrtlaJni.isRunningSrtlaNative()
+
+    // -------------------------------------------------------------------------
+    // Relay status for UI
+    // -------------------------------------------------------------------------
+
+    /** Snapshot of a connected Moblink relay's state. */
+    data class RelayInfo(
+        val id: String,
+        val name: String,
+        val battery: Int?,
+        val thermal: ThermalState?,
+        val tunnelActive: Boolean,
+    )
+
+    private val _relays = MutableStateFlow<List<RelayInfo>>(emptyList())
+
+    /** Observable list of connected Moblink relays with their latest status. */
+    val relays: StateFlow<List<RelayInfo>> = _relays.asStateFlow()
+
+    /** Internal mutable map keyed by relay ID for efficient updates. */
+    private val relayMap = LinkedHashMap<String, RelayInfo>()
+
+    private fun publishRelays() {
+        _relays.value = relayMap.values.toList()
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 1: Moblink server lifecycle
+    // -------------------------------------------------------------------------
+
+    /**
+     * Start (or restart) the Moblink WebSocket server.
+     *
+     * Idempotent with same parameters. If called with different parameters while already
+     * running, the old server is stopped and a new one is started (matching Moblin's
+     * `reloadMoblinkStreamer()` pattern).
+     *
+     * If SRTLA is already running, tunnels are activated immediately for any waiting relays.
+     */
+    fun startMoblink(context: Context, name: String, password: String, port: Int) {
+        val current = moblinkManager
+        if (current != null) {
+            // Already running — stop first so we can restart with new config
+            Log.i(TAG, "Restarting Moblink server with new config")
+            current.stop()
+            moblinkManager = null
+            relayMap.clear()
+            publishRelays()
+        }
+
+        Log.i(TAG, "Starting Moblink server (port=$port, name='$name')")
+        val mgr = MoblinkManager(context, name, password, port)
+        mgr.start(makeMoblinkListener())
+        moblinkManager = mgr
+
+        // If SRTLA is already running (mid-stream enable), activate tunnels immediately
+        if (isRunning && srtlaPort != 0) {
+            Log.i(TAG, "SRTLA already running — activating Moblink tunnels → $srtlaHost:$srtlaPort")
+            mgr.connectToSrtla(srtlaHost, srtlaPort)
+        }
+    }
+
+    /**
+     * Stop the Moblink WebSocket server and disconnect all relays.
+     * The SRTLA proxy is unaffected.
+     */
+    fun stopMoblink() {
+        val mgr = moblinkManager ?: return
+        Log.i(TAG, "Stopping Moblink server")
+        mgr.stop()
+        moblinkManager = null
+        relayMap.clear()
+        publishRelays()
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2: SRTLA proxy lifecycle
+    // -------------------------------------------------------------------------
 
     /**
      * Start the SRTLA proxy.
@@ -39,15 +145,14 @@ object SrtlaManager {
      * Suspends until the native library has been launched and the listen port is
      * bound (~300 ms). Idempotent: does nothing if [isRunning] is already true.
      *
-     * @param moblinkManager Optional pre-started [MoblinkManager]. If provided, tunnels are
-     *   activated for all waiting relays once SRTLA is running.
+     * If the Moblink server is active, tunnels are activated automatically for all
+     * waiting relays.
      */
     suspend fun start(
         context: Context,
         receiverHost: String,
         receiverPort: String,
         listenPort: String,
-        moblinkManager: MoblinkManager? = null,
     ) {
         if (isRunning) {
             Log.i(TAG, "Already running — skipping start")
@@ -75,57 +180,98 @@ object SrtlaManager {
         delay(300)
         Log.i(TAG, "SRTLA proxy ready (isRunning=$isRunning)")
 
-        // Phase 2: activate Moblink tunnels now that the SRTLA destination port is known.
-        Log.i(TAG, "Moblink phase 2 check: moblinkManager=${if (moblinkManager != null) "SET" else "NULL"}, isRunning=$isRunning")
-        if (moblinkManager != null && isRunning) {
+        // Save destination for Moblink tunnel activation
+        srtlaHost = receiverHost
+        srtlaPort = receiverPort.toIntOrNull() ?: 0
+
+        // Activate Moblink tunnels if server is running
+        val mgr = moblinkManager
+        if (mgr != null && isRunning && srtlaPort != 0) {
             Log.i(TAG, "Activating Moblink relay tunnels → $receiverHost:$receiverPort")
-            moblinkManager.connectToSrtla(receiverHost, receiverPort.toIntOrNull() ?: 0)
+            mgr.connectToSrtla(srtlaHost, srtlaPort)
         }
-    }
-
-    /**
-     * Register a Moblink relay with the native SRTLA bonding layer.
-     * Call this from [MoblinkManager.Listener.onRelayTunnelReady].
-     */
-    fun addMoblinkRelay(relayId: String, relayHost: String, relayPort: Int) {
-        val s = sender
-        if (s == null) {
-            Log.w(TAG, "addMoblinkRelay called but SRTLA is not running — relay $relayId ignored")
-            return
-        }
-        Log.i(TAG, "Adding Moblink relay to SRTLA bonding: $relayId @ $relayHost:$relayPort")
-        s.addMoblinkRelay(relayId, relayHost, relayPort)
-    }
-
-    /**
-     * Remove a Moblink relay from the native SRTLA bonding layer.
-     * Call this from [MoblinkManager.Listener.onRelayTunnelClosed].
-     */
-    fun removeMoblinkRelay(relayId: String) {
-        val s = sender
-        if (s == null) {
-            Log.w(TAG, "removeMoblinkRelay called but SRTLA is not running — relay $relayId ignored")
-            return
-        }
-        Log.i(TAG, "Removing Moblink relay from SRTLA bonding: $relayId")
-        s.removeMoblinkRelay(relayId)
     }
 
     /**
      * Stop the SRTLA proxy and release all resources.
-     *
-     * @param moblinkManager If provided, the Moblink destination is reset so relays park in
-     *   the waiting room and remain WebSocket-connected for the next stream start.
+     * Moblink relays are parked (destination reset) but stay WebSocket-connected.
      */
-    fun stop(moblinkManager: MoblinkManager? = null) {
+    fun stop() {
         Log.i(TAG, "Stopping SRTLA")
-        // Reset Moblink destination before stopping SRTLA so relay sessions know to park.
-        // Do this before sender.stop() so any in-flight tunnel tracking is still valid.
-        if (moblinkManager != null) {
-            Log.i(TAG, "Resetting Moblink destination — relays will wait for next stream")
-            moblinkManager.connectToSrtla("", 0)
+
+        // Park Moblink relays before stopping SRTLA so tunnel tracking is still valid
+        val mgr = moblinkManager
+        if (mgr != null) {
+            Log.i(TAG, "Parking Moblink relays — they will wait for next stream")
+            mgr.connectToSrtla("", 0)
         }
+
         sender?.stop()
         sender = null
+        srtlaHost = ""
+        srtlaPort = 0
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal Moblink listener
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates the [MoblinkManager.Listener] that wires relay events to:
+     * 1. [SrtlaSender] — register/deregister relay sockets for bonding
+     * 2. [_relays] — update observable relay status for UI
+     */
+    private fun makeMoblinkListener() = object : MoblinkManager.Listener() {
+
+        override fun onRelayConnected(relayId: String, name: String) {
+            Log.i(TAG, "Moblink relay connected: '$name'")
+            relayMap[relayId] = RelayInfo(relayId, name, null, null, tunnelActive = false)
+            publishRelays()
+        }
+
+        override fun onRelayDisconnected(relayId: String) {
+            Log.i(TAG, "Moblink relay disconnected: $relayId")
+            relayMap.remove(relayId)
+            publishRelays()
+        }
+
+        override fun onRelayTunnelReady(relayId: String, name: String, host: String, port: Int) {
+            Log.i(TAG, "Moblink relay tunnel ready: '$name' @ $host:$port")
+            // Register with native SRTLA bonding layer
+            sender?.addMoblinkRelay(relayId, host, port)
+            // Update UI state
+            val existing = relayMap[relayId]
+            relayMap[relayId] = (existing ?: RelayInfo(relayId, name, null, null, false))
+                .copy(tunnelActive = true)
+            publishRelays()
+        }
+
+        override fun onRelayTunnelClosed(relayId: String, host: String, port: Int) {
+            Log.i(TAG, "Moblink relay tunnel closed: $relayId @ $host:$port")
+            // Deregister from native SRTLA bonding layer
+            sender?.removeMoblinkRelay(relayId)
+            // Update UI state — relay stays connected, just no tunnel
+            val existing = relayMap[relayId]
+            if (existing != null) {
+                relayMap[relayId] = existing.copy(tunnelActive = false)
+                publishRelays()
+            }
+        }
+
+        override fun onRelayStatus(
+            relayId: String,
+            name: String,
+            batteryPercentage: Int?,
+            thermalState: ThermalState?,
+        ) {
+            val existing = relayMap[relayId]
+            relayMap[relayId] = (existing ?: RelayInfo(relayId, name, null, null, false))
+                .copy(battery = batteryPercentage, thermal = thermalState)
+            publishRelays()
+        }
+
+        override fun onLog(message: String) {
+            Log.i(TAG, "Moblink: $message")
+        }
     }
 }

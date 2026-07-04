@@ -798,19 +798,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // If SRTLA mode, start the embedded SRTLA proxy before opening the SRT connection.
             // SrtlaManager.start() is a suspend function — it returns only after the native
             // listen port is bound (~300 ms), so no extra delay is needed here.
+            // Moblink tunnel activation is handled internally by SrtlaManager.
             val srtlaConfig = storageRepository.srtlaConfigFlow.first()
             if (srtlaConfig != null) {
                 Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")
                 SrtlaManager.start(getApplication(), srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort)
-
-                // Activate Moblink relay tunnels now that SRTLA is running.
-                val mgr = serviceBinder?.getMoblinkManager()
-                if (mgr != null) {
-                    Log.i(TAG, "Activating Moblink relay tunnels → ${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort}")
-                    mgr.connectToSrtla(srtlaConfig.receiverHost, srtlaConfig.receiverPort.toIntOrNull() ?: 0)
-                } else {
-                    Log.w(TAG, "moblinkManager not available via binder — Moblink tunnels will not activate")
-                }
             }
 
             // Add timeout to prevent hanging
@@ -1006,7 +998,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Stop embedded SRTLA proxy if it was running
             if (SrtlaManager.isRunning) {
                 Log.i(TAG, "stopServiceStreaming: Stopping embedded SRTLA proxy")
-                withContext(kotlinx.coroutines.Dispatchers.IO) { SrtlaManager.stop(serviceBinder?.getMoblinkManager()) }
+                withContext(kotlinx.coroutines.Dispatchers.IO) { SrtlaManager.stop() }
             }
 
             // Don't stop the service - keep it alive like notification stop does
@@ -2063,7 +2055,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Stop SRTLA proxy since we're aborting the session entirely
                         if (SrtlaManager.isRunning) {
                             Log.i(TAG, "stopStream() - Stopping SRTLA during reconnection cancel")
-                            SrtlaManager.stop(serviceBinder?.getMoblinkManager())
+                            SrtlaManager.stop()
                         }
 
                         // If we were actually streaming, do slow cleanup in background with flag
@@ -2122,7 +2114,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Stop SRTLA proxy if it was started for this connection attempt
                         if (SrtlaManager.isRunning) {
                             Log.i(TAG, "stopStream() - Stopping SRTLA during connection abort")
-                            SrtlaManager.stop(serviceBinder?.getMoblinkManager())
+                            SrtlaManager.stop()
                         }
                         
                         // Cancel any pending reconnection attempts
@@ -2401,7 +2393,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during pre-reconnect cleanup: ${e.message}", e)
-                if (SrtlaManager.isRunning) SrtlaManager.stop(serviceBinder?.getMoblinkManager())
+                if (SrtlaManager.isRunning) SrtlaManager.stop()
                 service?.cancelReconnection()
                 service?.setStreamStatus(StreamStatus.ERROR)
                 _streamerErrorLiveData.postValue("Reconnection failed: ${e.message}")
@@ -2440,7 +2432,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val currentStreamer = serviceStreamer
                 if (currentStreamer == null) {
                     Log.w(TAG, "Reconnection failed: streamer no longer available")
-                    if (SrtlaManager.isRunning) SrtlaManager.stop(serviceBinder?.getMoblinkManager())
+                    if (SrtlaManager.isRunning) SrtlaManager.stop()
                     service?.cancelReconnection()
                     service?.setStreamStatus(StreamStatus.ERROR)
                     return@launch
@@ -2456,7 +2448,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val (sourcesValid, sourceError) = validateSourcesConfigured(currentStreamer)
                 if (!sourcesValid) {
                     Log.e(TAG, "Reconnection failed: $sourceError")
-                    if (SrtlaManager.isRunning) SrtlaManager.stop(serviceBinder?.getMoblinkManager())
+                    if (SrtlaManager.isRunning) SrtlaManager.stop()
                     service?.setReconnectionMessage("Reconnection failed. Sources not configured")
                     service?.cancelReconnection()
                     service?.setStreamStatus(StreamStatus.ERROR)
