@@ -413,7 +413,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (config != null) {
                     SrtlaManager.startMoblink(
                         this@CameraStreamerService,
-                        config.name, config.password, config.port
+                        config.password, config.port
                     )
                 } else {
                     SrtlaManager.stopMoblink()

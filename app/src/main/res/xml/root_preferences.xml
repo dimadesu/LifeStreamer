@@ -300,12 +300,6 @@
                 app:title="@string/moblink_port"
                 app:useSimpleSummaryProvider="true" />
 
-            <EditTextPreference
-                app:defaultValue="@string/default_moblink_name"
-                app:key="@string/moblink_name_key"
-                app:title="@string/moblink_name"
-                app:useSimpleSummaryProvider="true" />
-
         </PreferenceCategory>
 
         <PreferenceCategory

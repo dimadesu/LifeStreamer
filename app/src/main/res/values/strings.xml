@@ -225,9 +225,6 @@
     <string name="moblink_port_key">moblink_port_key</string>
     <string name="moblink_port">Moblink server port</string>
     <string name="default_moblink_port">7777</string>
-    <string name="moblink_name_key">moblink_name_key</string>
-    <string name="moblink_name">Streamer name (shown on relay phones)</string>
-    <string name="default_moblink_name">LifeStreamer</string>
 
     <!-- RTMP source -->
     <string name="rtmp_source_category_title">RTMP (or SRT) as source</string>

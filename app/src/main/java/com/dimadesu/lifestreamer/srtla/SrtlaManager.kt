@@ -65,8 +65,8 @@ object SrtlaManager {
      *
      * If SRTLA is already running, tunnels are activated immediately.
      */
-    fun startMoblink(context: Context, name: String, password: String, port: Int) {
-        ensureEngine(context).startMoblink(name, password, port)
+    fun startMoblink(context: Context, password: String, port: Int) {
+        ensureEngine(context).startMoblink(password, port)
         _relays.value = engine?.relays ?: emptyList()
     }
 
