@@ -37,7 +37,6 @@ import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.srtla.SrtlaManager
-
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -209,9 +208,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private lateinit var openPendingIntent: PendingIntent
     
     // Audio permission checker for debugging
-
-
-
     /**
      * Override onCreate to use both camera and mediaProjection service types
      */
@@ -1321,8 +1317,6 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 customNotificationUtils.notify(notification)
             } catch (_: Throwable) {}
         }
-
-
     }
 
     private val customBinder = CameraStreamerServiceBinder()
