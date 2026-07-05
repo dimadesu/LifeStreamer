@@ -286,12 +286,14 @@
             <SwitchPreference
                 android:defaultValue="false"
                 app:key="@string/moblink_enabled_key"
+                app:summary="@string/moblink_summary"
                 app:title="@string/moblink_enabled" />
 
             <EditTextPreference
                 app:defaultValue="@string/default_moblink_password"
                 app:key="@string/moblink_password_key"
                 app:title="@string/moblink_password"
+                app:dialogMessage="@string/moblink_password_hint"
                 app:useSimpleSummaryProvider="true" />
 
             <EditTextPreference

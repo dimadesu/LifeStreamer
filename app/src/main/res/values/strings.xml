@@ -218,9 +218,11 @@
 
     <!-- Moblink relay server settings (within SRTLA mode) -->
     <string name="moblink_enabled_key">moblink_enabled_key</string>
-    <string name="moblink_enabled">Enable Moblink relay bonding</string>
+    <string name="moblink_enabled">Moblink streamer server</string>
+    <string name="moblink_summary">Connect phones running Moblink app to the same Wi-Fi to use their cellular data as additional SRTLA bonding connections.</string>
     <string name="moblink_password_key">moblink_password_key</string>
-    <string name="moblink_password">Moblink password</string>
+    <string name="moblink_password">Moblink server password</string>
+    <string name="moblink_password_hint">Relays connect using this password</string>
     <string name="default_moblink_password">1234</string>
     <string name="moblink_port_key">moblink_port_key</string>
     <string name="moblink_port">Moblink server port</string>
