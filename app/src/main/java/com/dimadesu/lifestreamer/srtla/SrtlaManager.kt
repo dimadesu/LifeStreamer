@@ -89,6 +89,25 @@ object SrtlaManager {
      * bound (~300 ms). If the Moblink server is active, tunnels are activated
      * automatically.
      */
+    private val engineListener = object : SrtlaEngine.Listener {
+        override fun onSrtlaStatus(message: String) {
+            Log.i(TAG, "SrtlaSender: $message")
+        }
+        override fun onSrtlaError(message: String) {
+            Log.e(TAG, "SrtlaSender error: $message")
+        }
+        override fun onRelaysChanged(relays: List<SrtlaEngine.RelayInfo>) {
+            _relays.value = relays
+        }
+    }
+
+    private fun ensureEngine(context: Context): SrtlaEngine {
+        return engine ?: SrtlaEngine(context.applicationContext).also {
+            it.addListener(engineListener)
+            engine = it
+        }
+    }
+
     suspend fun start(
         context: Context,
         receiverHost: String,
@@ -103,17 +122,7 @@ object SrtlaManager {
         val e = ensureEngine(context)
 
         withContext(Dispatchers.IO) {
-            e.startSrtla(receiverHost, receiverPort, listenPort, object : SrtlaEngine.Listener {
-                override fun onSrtlaStatus(message: String) {
-                    Log.i(TAG, "SrtlaSender: $message")
-                }
-                override fun onSrtlaError(message: String) {
-                    Log.e(TAG, "SrtlaSender error: $message")
-                }
-                override fun onRelaysChanged(relays: List<SrtlaEngine.RelayInfo>) {
-                    _relays.value = relays
-                }
-            })
+            e.startSrtla(receiverHost, receiverPort, listenPort)
         }
 
         // Give the native pthread time to bind the listen port before the SRT stack
@@ -130,11 +139,4 @@ object SrtlaManager {
         engine?.stopSrtla()
     }
 
-    // -------------------------------------------------------------------------
-    // Engine management
-    // -------------------------------------------------------------------------
-
-    private fun ensureEngine(context: Context): SrtlaEngine {
-        return engine ?: SrtlaEngine(context.applicationContext).also { engine = it }
-    }
 }
