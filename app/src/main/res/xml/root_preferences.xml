@@ -282,6 +282,25 @@
                 app:title="@string/srtla_passphrase"
                 app:useSimpleSummaryProvider="true" />
 
+            <!-- Moblink relay bonding settings -->
+            <SwitchPreference
+                android:defaultValue="false"
+                app:key="@string/moblink_enabled_key"
+                app:summary="@string/moblink_summary"
+                app:title="@string/moblink_enabled" />
+
+            <EditTextPreference
+                app:defaultValue="@string/default_moblink_password"
+                app:key="@string/moblink_password_key"
+                app:title="@string/moblink_password"
+                app:dialogMessage="@string/moblink_password_hint"
+                app:useSimpleSummaryProvider="true" />
+
+            <EditTextPreference
+                app:defaultValue="@string/default_moblink_port"
+                app:key="@string/moblink_port_key"
+                app:title="@string/moblink_port"
+                app:useSimpleSummaryProvider="true" />
 
         </PreferenceCategory>
 

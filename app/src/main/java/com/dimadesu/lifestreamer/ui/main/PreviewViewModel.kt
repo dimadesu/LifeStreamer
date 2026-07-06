@@ -798,6 +798,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // If SRTLA mode, start the embedded SRTLA proxy before opening the SRT connection.
             // SrtlaManager.start() is a suspend function — it returns only after the native
             // listen port is bound (~300 ms), so no extra delay is needed here.
+            // Moblink tunnel activation is handled internally by SrtlaManager.
             val srtlaConfig = storageRepository.srtlaConfigFlow.first()
             if (srtlaConfig != null) {
                 Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")

@@ -230,6 +230,13 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             }
         }
 
+        // Observe Moblink relay status and push to SrtlaStatsView
+        viewLifecycleOwner.lifecycleScope.launch {
+            com.dimadesu.lifestreamer.srtla.SrtlaManager.relays.collect { relays ->
+                binding.srtlaStatsView.setRelays(relays)
+            }
+        }
+
         // Setup audio source spinner
         setupAudioSourceSpinner()
 

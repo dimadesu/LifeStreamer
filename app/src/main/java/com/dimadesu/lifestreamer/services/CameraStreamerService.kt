@@ -404,6 +404,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     }
                 }
         }
+
+        // Start Moblink relay server early so relays can pre-connect before stream start.
+        // Reacts to settings changes at runtime (toggle, password, port).
+        // All Moblink lifecycle is delegated to SrtlaManager.
+        serviceScope.launch {
+            storageRepository.moblinkConfigFlow.collect { config ->
+                if (config != null) {
+                    SrtlaManager.startMoblink(
+                        this@CameraStreamerService,
+                        config.password, config.port
+                    )
+                } else {
+                    SrtlaManager.stopMoblink()
+                }
+            }
+        }
     }
 
     private fun initNotificationPendingIntents() {
@@ -459,8 +475,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try { releaseWakeLock() } catch (_: Exception) {}
         try { releaseNetworkWakeLock() } catch (_: Exception) {}
 
-        // Stop embedded SRTLA proxy if running
+        // Stop embedded SRTLA proxy if running (automatically parks Moblink relays)
         try { if (SrtlaManager.isRunning) SrtlaManager.stop() } catch (_: Exception) {}
+
+        // Stop Moblink server when the service is destroyed
+        try { SrtlaManager.stopMoblink() } catch (_: Exception) {}
 
         // Ensure audio passthrough is stopped - Quit from notification may call
         // Activity.finishAndRemoveTask() which doesn't always guarantee the
@@ -1156,6 +1175,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
             // If SRTLA mode, start the embedded SRTLA proxy before opening the SRT connection.
             // SrtlaManager.start() is a suspend fun that returns once the listen port is bound.
+            // Moblink tunnel activation is handled internally by SrtlaManager.
             val srtlaConfig = storageRepository.srtlaConfigFlow.first()
             if (srtlaConfig != null) {
                 Log.i(TAG, "SRTLA mode: starting embedded SRTLA proxy (${srtlaConfig.receiverHost}:${srtlaConfig.receiverPort})")
