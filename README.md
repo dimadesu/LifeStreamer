@@ -7,7 +7,8 @@ LifeStreamer is an Android app designed for IRL live streaming based on [StreamP
 ## Features
 
 - Restream RTMP feed or USB video/audio (UVC) from action camera like DJI Osmo Action 4 as SRT HEVC/H.265 with amazing dynamic/adaptive bitrate algorithm from [Belabox](https://belabox.net/) or [Moblin](https://github.com/eerimoq/moblin).
-- Can stream SRTLA or use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
+- SRTLA connection bonding. Combine internet from multiple networks or SIM cards to improve resilience. Alternatively, use SRTLA bonding via [Bond Bunny](https://github.com/dimadesu/bond-bunny) app.
+- Moblink streamer server. Use additional phones as bonding connections using [Moblink](https://github.com/eerimoq/moblink) relay app.
 - Can use feed from any RTMP or SRT server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
 - USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: Phones can lower USB audio quality when USB video is used.
 - Background mode (foreground service) allows streaming with app in background, phone locked and screen off. Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings and bitrate. Note: Performance has improved significantly since switching from "debug" to "release" builds.
@@ -24,18 +25,19 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 
 ### Video
 
-- Phone cameras.
+- Android device cameras.
 - RTMP video. [Watch RTMP source demo.](https://www.youtube.com/watch?v=_zlWsQYxrE4)
 - SRT video.
-- USB Video (UVC). [Watch USB source demo.](https://www.youtube.com/watch?v=RlPWbekqPx4)
+- USB video (UVC). [Watch USB source demo.](https://www.youtube.com/watch?v=RlPWbekqPx4)
 
 ### Audio
 
-- Built-in phone microphones.
+- Android device microphones.
 - USB audio: USB headphones, USB audio interfaces, wireless mic receivers, etc.
   - With USB video LifeStreamer is using USB audio from USB camera if available.
 - Mics from Bluetooth headphones, earbuds, etc.
 - For RTMP and SRT sources app uses Media Projection Audio to record RTMP/SRT player audio - kind of like phone screen recorder.
+- Record device's audio output (system audio).
 
 ![LifeStreamer app: inputs and outputs diagram](docs/LifeStreamer-inputs-outputs-diagram.png)
 
