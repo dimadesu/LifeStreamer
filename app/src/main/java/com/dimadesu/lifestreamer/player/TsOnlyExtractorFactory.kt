@@ -18,6 +18,7 @@ package com.dimadesu.lifestreamer.player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.extractor.ts.TsExtractor
 
 /**
@@ -27,6 +28,6 @@ import androidx.media3.extractor.ts.TsExtractor
 @UnstableApi
 class TsOnlyExtractorFactory : ExtractorsFactory {
     override fun createExtractors(): Array<Extractor> = arrayOf(
-        TsExtractor()
+        TsExtractor(SubtitleParser.Factory.UNSUPPORTED)
     )
 }
