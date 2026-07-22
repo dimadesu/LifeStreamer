@@ -18,7 +18,7 @@ package com.dimadesu.lifestreamer.models
 import androidx.annotation.StringRes
 import com.dimadesu.lifestreamer.R
 
-enum class EndpointType(val id: Int, @StringRes val labelResId: Int) {
+enum class EndpointType(val id: Int, @param:StringRes val labelResId: Int) {
     SRT(2, R.string.to_srt),
     SRTLA(8, R.string.to_srtla),
     RTMP(3, R.string.to_rtmp),
