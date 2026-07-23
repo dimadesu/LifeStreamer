@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.graphics.SurfaceTexture;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 
@@ -98,9 +99,19 @@ public class UvcTestActivity extends AppCompatActivity {
 
         if (intent.getAction() != null && intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_ATTACHED)) {
             if (!mIsCameraConnected) {
-                mUsbDevice = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                mUsbDevice = getParcelableExtraCompat(intent, UsbManager.EXTRA_DEVICE, UsbDevice.class);
                 selectDevice(mUsbDevice);
             }
+        }
+    }
+
+    private static <T> T getParcelableExtraCompat(Intent intent, String name, Class<T> clazz) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return intent.getParcelableExtra(name, clazz);
+        } else {
+            @SuppressWarnings("deprecation")
+            T value = intent.getParcelableExtra(name);
+            return value;
         }
     }
 

@@ -491,8 +491,8 @@ class RTMPVideoSource (
         }
     }
 
-    override suspend fun startPreview(previewSurface: Surface) {
-        setPreview(previewSurface)
+    override suspend fun startPreview(surface: Surface) {
+        setPreview(surface)
         startPreview()
     }
 
