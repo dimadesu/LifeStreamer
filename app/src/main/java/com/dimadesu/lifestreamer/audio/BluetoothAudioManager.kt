@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
@@ -390,7 +391,7 @@ class BluetoothAudioManager(
         }
         
         val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-        context.registerReceiver(receiver, filter)
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         scoDisconnectReceiver = receiver
     }
 
@@ -441,7 +442,7 @@ class BluetoothAudioManager(
             addAction(android.bluetooth.BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
         }
         
-        context.registerReceiver(receiver, filter)
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         btDeviceReceiver = receiver
         
         // Start polling monitor as fallback
