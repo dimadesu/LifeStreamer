@@ -16,7 +16,7 @@ android {
         applicationId = "com.dimadesu.lifestreamer"
 
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         compileSdk = 36
 
         versionCode = 31

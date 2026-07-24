@@ -18,8 +18,7 @@ class KnownIssuesActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        @Suppress("DEPRECATION")
-        onBackPressed()
+        onBackPressedDispatcher.onBackPressed()
         return true
     }
 }
