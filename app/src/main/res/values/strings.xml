@@ -227,6 +227,8 @@
     <string name="moblink_port_key">moblink_port_key</string>
     <string name="moblink_port">Moblink server port</string>
     <string name="default_moblink_port">7777</string>
+    <string name="moblink_bitrate_note">Recommended. When using Moblink relays, set \"Bitrate algorithm\" setting to \"Moblin slow\". This can help maintain a higher overall bitrate.</string>
+    <string name="moblink_bitrate_note_key">moblink_bitrate_note_key</string>
 
     <!-- RTMP source -->
     <string name="rtmp_source_category_title">RTMP (or SRT) as source</string>
