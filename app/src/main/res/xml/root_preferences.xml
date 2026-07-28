@@ -302,6 +302,11 @@
                 app:title="@string/moblink_port"
                 app:useSimpleSummaryProvider="true" />
 
+            <Preference
+                app:key="@string/moblink_bitrate_note_key"
+                app:summary="@string/moblink_bitrate_note"
+                app:selectable="false" />
+
         </PreferenceCategory>
 
         <PreferenceCategory
