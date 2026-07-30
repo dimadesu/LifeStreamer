@@ -35,10 +35,13 @@
     </string-array>
 
     <string-array name="AudioBitrateEntryValues">
-        <item>24000</item>
         <item>64000</item>
+        <item>96000</item>
         <item>128000</item>
+        <item>160000</item>
         <item>192000</item>
+        <item>256000</item>
+        <item>320000</item>
     </string-array>
 
     <!-- Audio Source Types (MediaRecorder.AudioSource constants) -->
