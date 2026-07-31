@@ -109,8 +109,8 @@ dependencies {
     implementation("androidx.media3:media3-datasource-rtmp:1.8.0") {
         exclude(group = "io.antmedia", module = "rtmp-client")
     }
-    // Use JitPack version with 16KB page alignment fix (PR #110 merged Sep 2025)
-    implementation("com.github.mcxinyu:LibRtmp-Client-for-Android:v3.2.0.m2")
+    // Use fork with NDK r28c for proper 16KB page alignment (fixes Google Play warning)
+    implementation("com.github.dimadesu:LibRtmp-Client-for-Android:v3.2.0-16kb-ndk-r28c")
 
     testImplementation(libs.junit)
 
