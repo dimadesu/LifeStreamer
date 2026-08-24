@@ -4384,8 +4384,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         //     Log.e(TAG, "Streamer release failed", t)
         // }
 
+        // Capture streaming state before unbinding (unbind nulls serviceStreamer)
+        val serviceIsStreaming = serviceStreamer?.isStreamingFlow?.value == true
+
         unbindStreamerService()
-        releaseMediaProjection()
+
+        // Only release MediaProjection if the service is NOT actively streaming.
+        // The service may still be running in the background (started service) and
+        // needs the projection for audio capture (e.g. RTMP source).
+        if (!serviceIsStreaming) {
+            releaseMediaProjection()
+        } else {
+            Log.i(TAG, "Skipping MediaProjection release — service is still streaming")
+        }
         Log.i(TAG, "PreviewViewModel cleared")
     }
 
