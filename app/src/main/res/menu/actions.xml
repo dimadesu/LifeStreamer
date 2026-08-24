@@ -31,4 +31,9 @@
         android:orderInCategory="105"
         android:title="@string/action_faq"
         app:showAsAction="never" />
+    <item
+        android:id="@+id/action_quit"
+        android:orderInCategory="106"
+        android:title="@string/action_quit"
+        app:showAsAction="never" />
 </menu>

@@ -24,6 +24,8 @@ import android.widget.PopupMenu
 import androidx.appcompat.app.AppCompatActivity
 import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainActivityBinding
+import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionService
+import com.dimadesu.lifestreamer.services.CameraStreamerService
 import com.dimadesu.lifestreamer.ui.settings.SettingsActivity
 import com.dimadesu.lifestreamer.ui.help.FaqHelpActivity
 import com.dimadesu.lifestreamer.ui.help.KnownIssuesActivity
@@ -36,6 +38,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Notification Quit starts a new activity when none is running.
+        // Handle it here — onNewIntent is not called for a fresh launch —
+        // and skip UI/service bind so we don't race teardown.
+        if (intent?.action == CameraStreamerService.ACTION_EXIT_APP) {
+            exitApp()
+            return
+        }
+
         binding = MainActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -53,10 +64,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // Handle notification tap action to avoid re-creating activity and
         // triggering unnecessary view detach/attach which can race with camera.
         val action = intent.action
-        if (action == "com.dimadesu.lifestreamer.ACTION_OPEN_FROM_NOTIFICATION") {
+        if (action == CameraStreamerService.ACTION_EXIT_APP) {
+            exitApp()
+        } else if (action == CameraStreamerService.ACTION_OPEN_FROM_NOTIFICATION) {
             // If the PreviewFragment is already present, do nothing. If not,
             // ensure it's added without recreating the fragment stack.
             val current = supportFragmentManager.findFragmentById(R.id.container)
@@ -65,25 +79,28 @@ class MainActivity : AppCompatActivity() {
                     .replace(R.id.container, PreviewFragment())
                     .commitNow()
             }
-        } else if (action == "com.dimadesu.lifestreamer.action.EXIT_APP") {
-            // Exit requested via notification: properly stop service and finish activity
-            try {
-                // Stop service gracefully
-                val stopIntent = Intent(this, com.dimadesu.lifestreamer.services.CameraStreamerService::class.java)
-                stopService(stopIntent)
-            } catch (_: Exception) {
-                // Service might not be running, that's okay
-            }
-            
-            // Move task to back instead of abruptly finishing
-            // This gives the service time to cleanup and avoids crash detection
-            moveTaskToBack(true)
-            
-            // Schedule actual finish after a short delay to ensure service cleanup
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                finishAndRemoveTask()
-            }, 300)
         }
+    }
+
+    private fun exitApp() {
+        // Unbind first: a started+bound service ignores stopService() until
+        // every client unbinds. PreviewViewModel otherwise unbinds only in
+        // onCleared(), which runs after the activity is already finishing.
+        (supportFragmentManager.findFragmentById(R.id.container) as? PreviewFragment)
+            ?.prepareForExit()
+
+        try {
+            stopService(Intent(this, CameraStreamerService::class.java))
+        } catch (_: Exception) {
+            // Service might not be running, that's okay
+        }
+        try {
+            stopService(Intent(this, MediaProjectionService::class.java))
+        } catch (_: Exception) {
+            // Optional companion service; ignore if absent
+        }
+
+        finishAndRemoveTask()
     }
 
     private fun bindProperties() {
@@ -121,6 +138,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 R.id.action_known_issues -> {
                     goToKnownIssuesActivity()
+                    true
+                }
+                R.id.action_quit -> {
+                    exitApp()
                     true
                 }
                 else -> {

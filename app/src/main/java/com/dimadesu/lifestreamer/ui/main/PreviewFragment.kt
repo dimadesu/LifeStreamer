@@ -668,6 +668,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         previewViewModel.stopStream()
     }
 
+    /**
+     * Unbind the streamer service before [android.content.Context.stopService] so
+     * a started+bound CameraStreamerService can actually be destroyed on Quit.
+     */
+    fun prepareForExit() {
+        previewViewModel.prepareForExit()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
     }
