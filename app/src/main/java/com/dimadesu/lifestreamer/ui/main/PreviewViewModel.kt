@@ -4384,26 +4384,47 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         //     Log.e(TAG, "Streamer release failed", t)
         // }
 
-        // Always unbind from the service - since we started it independently,
-        // unbinding won't destroy it and it should continue streaming in background
+        unbindStreamerService()
+        releaseMediaProjection()
+        Log.i(TAG, "PreviewViewModel cleared")
+    }
+
+    /**
+     * Drop the service bind so a following [Context.stopService] can destroy
+     * CameraStreamerService. Safe to call more than once.
+     */
+    fun prepareForExit() {
+        Log.i(TAG, "prepareForExit: unbinding so stopService can take effect")
+        try {
+            streamerService?.markUserStoppedManually()
+        } catch (_: Throwable) {}
+        unbindStreamerService()
+        releaseMediaProjection()
+    }
+
+    private fun unbindStreamerService() {
         serviceConnection?.let { connection ->
-            application.unbindService(connection)
-            Log.i(TAG, "Unbound from CameraStreamerService - service continues running independently")
+            try {
+                application.unbindService(connection)
+                Log.i(TAG, "Unbound from CameraStreamerService")
+            } catch (e: Exception) {
+                Log.w(TAG, "unbindService failed: ${e.message}")
+            }
         }
-
-        // Don't clear service state - the service should continue running independently
-        // Only clear the ViewModel's local references
         streamerService = null
+        serviceBinder = null
+        serviceStreamer = null
         serviceConnection = null
-        // DO NOT set _serviceReady.value = false here - the service is still running!
+        streamerFlow.value = null
+        _serviceReady.value = false
+    }
 
-        // Clean up MediaProjection resources
-        streamingMediaProjection?.stop()
+    private fun releaseMediaProjection() {
+        try { streamingMediaProjection?.stop() } catch (_: Throwable) {}
         streamingMediaProjection = null
-        startupMediaProjection?.stop()
+        try { startupMediaProjection?.stop() } catch (_: Throwable) {}
         startupMediaProjection = null
         mediaProjectionHelper.release()
-        Log.i(TAG, "PreviewViewModel cleared but service continues running for background streaming")
     }
 
     /**
