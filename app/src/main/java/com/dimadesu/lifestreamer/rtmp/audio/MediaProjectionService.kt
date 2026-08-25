@@ -30,6 +30,11 @@ class MediaProjectionService : Service() {
         private const val CHANNEL_ID = "media_projection_channel"
         private const val EXTRA_RESULT_CODE = "result_code"
         private const val EXTRA_RESULT_DATA = "result_data"
+
+        /** True while the service is alive (between onCreate and onDestroy). */
+        @Volatile
+        var isRunning: Boolean = false
+            private set
     }
 
     inner class LocalBinder : Binder() {
@@ -38,6 +43,7 @@ class MediaProjectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         Log.i(TAG, "Service created")
         createNotificationChannel()
     }
@@ -73,6 +79,7 @@ class MediaProjectionService : Service() {
 
     override fun onDestroy() {
         Log.i(TAG, "Service destroyed")
+        isRunning = false
         mediaProjection?.stop()
         mediaProjection = null
         super.onDestroy()

@@ -1,7 +1,6 @@
 package com.dimadesu.lifestreamer.rtmp.audio
 
 import android.app.Activity
-import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -250,17 +249,10 @@ class MediaProjectionHelper(private val context: Context) {
     }
 
     /**
-     * Check if MediaProjectionService is currently running as a foreground service.
+     * Check if MediaProjectionService is currently running.
      */
-    @Suppress("DEPRECATION")
     private fun isServiceRunning(): Boolean {
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        for (service in activityManager.getRunningServices(Int.MAX_VALUE)) {
-            if (MediaProjectionService::class.java.name == service.service.className) {
-                return true
-            }
-        }
-        return false
+        return MediaProjectionService.isRunning
     }
 
     /**
