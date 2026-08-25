@@ -210,6 +210,52 @@ class MediaProjectionHelper(private val context: Context) {
     }
 
     /**
+     * Try to reconnect to an already-running MediaProjectionService.
+     * This is used when the ViewModel is recreated (e.g. after the user swipes away
+     * the UI from recents) but the foreground service survived.
+     *
+     * @param callback Called with the recovered MediaProjection, or null if the service
+     *                 is not running or binding fails.
+     */
+    fun tryReconnect(callback: (MediaProjection?) -> Unit) {
+        if (isBound) {
+            Log.i(TAG, "tryReconnect: already bound, returning existing projection")
+            callback(getMediaProjection())
+            return
+        }
+
+        if (!isServiceRunning()) {
+            Log.i(TAG, "tryReconnect: MediaProjectionService is not running")
+            callback(null)
+            return
+        }
+
+        Log.i(TAG, "tryReconnect: service is running, attempting to bind...")
+        onProjectionReady = callback
+        val serviceIntent = Intent(context, MediaProjectionService::class.java)
+        try {
+            val bindResult = context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+            Log.i(TAG, "tryReconnect: bindService() returned: $bindResult")
+            if (!bindResult) {
+                Log.e(TAG, "tryReconnect: bindService() returned false")
+                onProjectionReady = null
+                callback(null)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "tryReconnect: bindService() failed: ${e.message}", e)
+            onProjectionReady = null
+            callback(null)
+        }
+    }
+
+    /**
+     * Check if MediaProjectionService is currently running.
+     */
+    private fun isServiceRunning(): Boolean {
+        return MediaProjectionService.isRunning
+    }
+
+    /**
      * Clear the MediaProjection without stopping the service.
      * Use this when stopping stream to ensure we don't reuse expired tokens.
      */
@@ -218,6 +264,26 @@ class MediaProjectionHelper(private val context: Context) {
         if (isBound) {
             mediaProjectionService?.clearMediaProjection()
         }
+    }
+
+    /**
+     * Unbind from the MediaProjection service without stopping it.
+     * Use this in ViewModel.onCleared() so the foreground service survives
+     * for a new ViewModel to recover via tryReconnect().
+     */
+    fun unbind() {
+        Log.i(TAG, "unbind() called - isBound: $isBound")
+        if (isBound) {
+            try {
+                context.unbindService(serviceConnection)
+                Log.i(TAG, "Successfully unbound from service (service kept alive)")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error unbinding from service: ${e.message}", e)
+            }
+            isBound = false
+            mediaProjectionService = null
+        }
+        onProjectionReady = null
     }
 
     /**
