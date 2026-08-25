@@ -660,6 +660,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Bind to streaming service for background streaming capability
         bindToStreamerService()
 
+        // Try to recover a MediaProjection token from a still-running
+        // MediaProjectionService (e.g. after the user swiped the UI from recents
+        // but the foreground service survived).
+        mediaProjectionHelper.tryReconnect { projection ->
+            if (projection != null) {
+                Log.i(TAG, "Recovered MediaProjection from surviving service")
+                startupMediaProjection = projection
+            }
+        }
+
         // Initialize LiveData flows
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
@@ -4384,20 +4394,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         //     Log.e(TAG, "Streamer release failed", t)
         // }
 
-        // Capture streaming state before unbinding (unbind nulls serviceStreamer)
-        val serviceIsStreaming = serviceStreamer?.isStreamingFlow?.value == true
-
         unbindStreamerService()
 
-        // Only release MediaProjection if the service is NOT actively streaming.
-        // The service may still be running in the background (started service) and
-        // needs the projection for audio capture (e.g. RTMP source).
-        if (!serviceIsStreaming) {
-            releaseMediaProjection()
-        } else {
-            Log.i(TAG, "Skipping MediaProjection release — service is still streaming")
-        }
-        Log.i(TAG, "PreviewViewModel cleared")
+        // Don't release MediaProjection here — the MediaProjectionService may still
+        // be running as a foreground service, and a new ViewModel (after UI recreation)
+        // can recover the token via tryReconnect(). Release only happens in
+        // prepareForExit() when the user explicitly quits the app.
+        Log.i(TAG, "PreviewViewModel cleared (MediaProjection preserved for possible UI recreation)")
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.dimadesu.lifestreamer.rtmp.audio
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -207,6 +208,59 @@ class MediaProjectionHelper(private val context: Context) {
             Log.w(TAG, "Service not bound, cannot get MediaProjection")
             null
         }
+    }
+
+    /**
+     * Try to reconnect to an already-running MediaProjectionService.
+     * This is used when the ViewModel is recreated (e.g. after the user swipes away
+     * the UI from recents) but the foreground service survived.
+     *
+     * @param callback Called with the recovered MediaProjection, or null if the service
+     *                 is not running or binding fails.
+     */
+    fun tryReconnect(callback: (MediaProjection?) -> Unit) {
+        if (isBound) {
+            Log.i(TAG, "tryReconnect: already bound, returning existing projection")
+            callback(getMediaProjection())
+            return
+        }
+
+        if (!isServiceRunning()) {
+            Log.i(TAG, "tryReconnect: MediaProjectionService is not running")
+            callback(null)
+            return
+        }
+
+        Log.i(TAG, "tryReconnect: service is running, attempting to bind...")
+        onProjectionReady = callback
+        val serviceIntent = Intent(context, MediaProjectionService::class.java)
+        try {
+            val bindResult = context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+            Log.i(TAG, "tryReconnect: bindService() returned: $bindResult")
+            if (!bindResult) {
+                Log.e(TAG, "tryReconnect: bindService() returned false")
+                onProjectionReady = null
+                callback(null)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "tryReconnect: bindService() failed: ${e.message}", e)
+            onProjectionReady = null
+            callback(null)
+        }
+    }
+
+    /**
+     * Check if MediaProjectionService is currently running as a foreground service.
+     */
+    @Suppress("DEPRECATION")
+    private fun isServiceRunning(): Boolean {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in activityManager.getRunningServices(Int.MAX_VALUE)) {
+            if (MediaProjectionService::class.java.name == service.service.className) {
+                return true
+            }
+        }
+        return false
     }
 
     /**
