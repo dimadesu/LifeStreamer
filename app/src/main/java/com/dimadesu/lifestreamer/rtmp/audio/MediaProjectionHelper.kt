@@ -275,6 +275,26 @@ class MediaProjectionHelper(private val context: Context) {
     }
 
     /**
+     * Unbind from the MediaProjection service without stopping it.
+     * Use this in ViewModel.onCleared() so the foreground service survives
+     * for a new ViewModel to recover via tryReconnect().
+     */
+    fun unbind() {
+        Log.i(TAG, "unbind() called - isBound: $isBound")
+        if (isBound) {
+            try {
+                context.unbindService(serviceConnection)
+                Log.i(TAG, "Successfully unbound from service (service kept alive)")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error unbinding from service: ${e.message}", e)
+            }
+            isBound = false
+            mediaProjectionService = null
+        }
+        onProjectionReady = null
+    }
+
+    /**
      * Release the MediaProjection resources.
      * Call this when you're done with audio capture.
      */

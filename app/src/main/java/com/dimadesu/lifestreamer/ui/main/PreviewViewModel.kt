@@ -4396,11 +4396,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
         unbindStreamerService()
 
-        // Don't release MediaProjection here — the MediaProjectionService may still
-        // be running as a foreground service, and a new ViewModel (after UI recreation)
-        // can recover the token via tryReconnect(). Release only happens in
-        // prepareForExit() when the user explicitly quits the app.
-        Log.i(TAG, "PreviewViewModel cleared (MediaProjection preserved for possible UI recreation)")
+        // Unbind from the MediaProjection service, but don't stop it — the
+        // MediaProjectionService may still be running as a foreground service, and
+        // a new ViewModel (after UI recreation) can recover the token via tryReconnect().
+        // Full release only happens in prepareForExit() when the user explicitly quits.
+        mediaProjectionHelper.unbind()
+        Log.i(TAG, "PreviewViewModel cleared (MediaProjection service preserved for possible UI recreation)")
     }
 
     /**
