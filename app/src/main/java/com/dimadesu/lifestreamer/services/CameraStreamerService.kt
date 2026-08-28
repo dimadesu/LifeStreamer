@@ -349,16 +349,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 Log.i(TAG, "Bitrate regulator settings changed during stream - updating controller")
                                 
                                 // Remove old controller
-                                (streamer as? IVideoSingleStreamer)?.removeBitrateRegulatorController()
+                                (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = null
                                 
                                 // Re-add with new config if enabled
                                 if (config != null) {
-                                    (streamer as? IVideoSingleStreamer)?.addBitrateRegulatorController(
+                                    (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory =
                                         AdaptiveSrtBitrateRegulatorController.Factory(
                                             bitrateRegulatorConfig = config,
                                             mode = mode
                                         )
-                                    )
                                     Log.i(TAG, "Bitrate regulator updated: range=${config.videoBitrateRange.lower/1000}k-${config.videoBitrateRange.upper/1000}k, mode=$mode")
                                 } else {
                                     Log.i(TAG, "Bitrate regulator disabled")
@@ -1259,12 +1258,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (bitrateRegulatorConfig != null) {
                     try {
                         val mode = try { storageRepository.regulatorModeFlow.first() } catch (_: Exception) { com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_FAST }
-                        (currentStreamer as? IVideoSingleStreamer)?.addBitrateRegulatorController(
+                        (currentStreamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory =
                             AdaptiveSrtBitrateRegulatorController.Factory(
                                 bitrateRegulatorConfig = bitrateRegulatorConfig,
                                 mode = mode
                             )
-                        )
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to attach bitrate regulator: ${e.message}")
                     }

@@ -3,6 +3,8 @@ package com.dimadesu.lifestreamer.bitrate
 import android.util.Log
 import io.github.thibaultbee.srtdroid.core.models.Stats
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
+import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
+import io.github.thibaultbee.streampack.ext.srt.elements.endpoints.SrtEndpointMetrics
 import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 import kotlin.math.max
 import kotlin.math.min
@@ -22,10 +24,12 @@ import kotlin.math.min
  * @param onVideoTargetBitrateChange call when you have to change video bitrate
  */
 class MoblinSrtFightBitrateRegulator(
+    metricsTracker: EndpointMetricsTracker,
     bitrateRegulatorConfig: BitrateRegulatorConfig,
     private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
     onVideoTargetBitrateChange: ((Int) -> Unit)
 ) : SrtBitrateRegulator(
+    metricsTracker,
     bitrateRegulatorConfig,
     onVideoTargetBitrateChange,
     { /* No audio bitrate changes */ }
@@ -57,7 +61,7 @@ class MoblinSrtFightBitrateRegulator(
     private val actionHistory = mutableListOf<String>()
     private var lastUpdateTime = 0L
 
-    override fun update(stats: Stats, currentVideoBitrate: Int, currentAudioBitrate: Int) {
+    override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
         val currentTime = System.currentTimeMillis()
         
         // Skip if called too frequently (Moblin updates every 200ms)
@@ -71,14 +75,13 @@ class MoblinSrtFightBitrateRegulator(
             // Use the upper limit from bitrate regulator config as target, not current bitrate
             targetBitrate = bitrateRegulatorConfig.videoBitrateRange.upper.toLong()
             currentMaximumBitrate = currentVideoBitrate.toLong() // Start from current, scale up to target
-            // Log.i(TAG, "*** INITIALIZED: Target bitrate = ${targetBitrate / 1000}k (from config), Starting max = ${currentMaximumBitrate / 1000}k ***")
-            // Log.i(TAG, "*** Bitrate Range: ${bitrateRegulatorConfig.videoBitrateRange.lower / 1000}k - ${bitrateRegulatorConfig.videoBitrateRange.upper / 1000}k ***")
-            // Log.i(TAG, "*** Settings: ${if (currentSettings == moblinConfig.fastSettings) "FAST" else "SLOW"} - PIF=${currentSettings.packetsInFlight}, Factor=${currentSettings.pifDiffIncreaseFactor} ***")
         }
+
+        val metrics = metricsTracker.cumulative as? SrtEndpointMetrics ?: return
+        val stats = metrics.rawMetrics.bistatsOrNull(clear = false, instantaneous = true) ?: return
 
         // Skip if no valid data
         if (stats.msRTT <= 0) {
-            // Log.w(TAG, "Skipping update - invalid RTT: ${stats.msRTT}")
             return
         }
 
@@ -106,7 +109,7 @@ class MoblinSrtFightBitrateRegulator(
             minimumDecrease = currentSettings.rttDiffHighMinDecrease
         )
         
-        calculateCurrentBitrate(stats)
+        calculateCurrentBitrate()
 
         // Apply video bitrate change if needed
         if (previousBitrate != currentBitrate) {
@@ -264,7 +267,7 @@ class MoblinSrtFightBitrateRegulator(
     /**
      * Calculate current bitrate - matches Moblin's calculateCurrentBitrate
      */
-    private fun calculateCurrentBitrate(stats: Stats) {
+    private fun calculateCurrentBitrate() {
         val oldCurrentBitrate = currentBitrate
         val oldMaxBitrate = currentMaximumBitrate
         

@@ -1,12 +1,15 @@
 package com.dimadesu.lifestreamer.bitrate
 
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
+import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
+import io.github.thibaultbee.streampack.core.elements.metrics.WithEndpointMetrics
 import io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IConfigurableAudioEncodingPipelineOutput
 import io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IEncodingPipelineOutput
 import io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IConfigurableVideoEncodingPipelineOutput
 import io.github.thibaultbee.streampack.core.regulator.controllers.BitrateRegulatorController
-import io.github.thibaultbee.streampack.core.regulator.controllers.SimpleBitrateRegulatorController
+import io.github.thibaultbee.streampack.core.regulator.controllers.IntervalBitrateRegulatorController
 import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * A neutral BitrateRegulatorController implementation that can create either
@@ -23,7 +26,7 @@ class AdaptiveSrtBitrateRegulatorController {
         override fun newBitrateRegulatorController(
             pipelineOutput: IEncodingPipelineOutput,
             coroutineDispatcher: kotlinx.coroutines.CoroutineDispatcher
-        ): SimpleBitrateRegulatorController {
+        ): IntervalBitrateRegulatorController {
             require(pipelineOutput is IConfigurableVideoEncodingPipelineOutput) {
                 "Pipeline output must be an video encoding output"
             }
@@ -42,20 +45,23 @@ class AdaptiveSrtBitrateRegulatorController {
             val factory: SrtBitrateRegulator.Factory = when (mode) {
                 RegulatorMode.BELABOX -> object : SrtBitrateRegulator.Factory {
                     override fun newBitrateRegulator(
+                        metricsTracker: EndpointMetricsTracker,
                         bitrateRegulatorConfig: BitrateRegulatorConfig,
                         onVideoTargetBitrateChange: (Int) -> Unit,
                         onAudioTargetBitrateChange: (Int) -> Unit
                     ): SrtBitrateRegulator {
-                        return BelaboxSrtBelaRegulator(bitrateRegulatorConfig, onVideoTargetBitrateChange)
+                        return BelaboxSrtBelaRegulator(metricsTracker, bitrateRegulatorConfig, onVideoTargetBitrateChange)
                     }
                 }
                 RegulatorMode.MOBLIN_FAST, RegulatorMode.MOBLIN_SLOW -> object : SrtBitrateRegulator.Factory {
                     override fun newBitrateRegulator(
+                        metricsTracker: EndpointMetricsTracker,
                         bitrateRegulatorConfig: BitrateRegulatorConfig,
                         onVideoTargetBitrateChange: (Int) -> Unit,
                         onAudioTargetBitrateChange: (Int) -> Unit
                     ): SrtBitrateRegulator {
                         val regulator = MoblinSrtFightBitrateRegulator(
+                            metricsTracker = metricsTracker,
                             bitrateRegulatorConfig = bitrateRegulatorConfig,
                             moblinConfig = moblinConfig,
                             onVideoTargetBitrateChange = onVideoTargetBitrateChange
@@ -66,14 +72,14 @@ class AdaptiveSrtBitrateRegulatorController {
                 }
             }
 
-            return SimpleBitrateRegulatorController(
+            return IntervalBitrateRegulatorController(
                 audioEncoder,
                 videoEncoder,
-                pipelineOutput.endpoint,
+                pipelineOutput.endpoint as WithEndpointMetrics<*>,
                 factory,
                 coroutineDispatcher,
                 bitrateRegulatorConfig,
-                delayTimeInMs
+                delayTimeInMs.milliseconds
             )
         }
     }

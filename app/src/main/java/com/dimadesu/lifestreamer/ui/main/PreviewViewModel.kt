@@ -723,7 +723,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         try {
             Log.i(TAG, "Removing bitrate regulator before video source switch")
-            currentStreamer.removeBitrateRegulatorController()
+            currentStreamer.bitrateRegulatorControllerFactory = null
         } catch (e: Exception) {
             Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
         }
@@ -747,12 +747,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val selectedMode = storageRepository.regulatorModeFlow.first()
                 // Small delay to let the new encoder initialize
                 delay(200)
-                currentStreamer.addBitrateRegulatorController(
+                currentStreamer.bitrateRegulatorControllerFactory =
                     AdaptiveSrtBitrateRegulatorController.Factory(
                         bitrateRegulatorConfig = bitrateRegulatorConfig,
                         mode = selectedMode
                     )
-                )
                 Log.i(TAG, "Re-added bitrate regulator after video source switch")
             }
         } catch (e: Exception) {
@@ -879,12 +878,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
                 if (bitrateRegulatorConfig != null) {
                     val selectedMode = storageRepository.regulatorModeFlow.first()
-                    currentStreamer.addBitrateRegulatorController(
+                    currentStreamer.bitrateRegulatorControllerFactory =
                         AdaptiveSrtBitrateRegulatorController.Factory(
                             bitrateRegulatorConfig = bitrateRegulatorConfig,
                             mode = selectedMode
                         )
-                    )
                 }
             }
             
@@ -2175,7 +2173,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                     // Remove bitrate regulator
                     try {
-                        currentStreamer.removeBitrateRegulatorController()
+                        currentStreamer.bitrateRegulatorControllerFactory = null
                         Log.i(TAG, "Bitrate regulator removed")
                     } catch (e: Exception) {
                         Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
@@ -2352,7 +2350,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // Remove any bitrate regulator
                 try {
-                    currentStreamer.removeBitrateRegulatorController()
+                    currentStreamer.bitrateRegulatorControllerFactory = null
                     Log.d(TAG, "Bitrate regulator removed")
                 } catch (e: Exception) {
                     Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
