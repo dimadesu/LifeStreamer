@@ -56,7 +56,7 @@ import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
 import com.dimadesu.lifestreamer.utils.setNextCameraId
-import com.dimadesu.lifestreamer.utils.toggleBackToFront
+import com.dimadesu.lifestreamer.utils.switchBackToFront
 import com.dimadesu.lifestreamer.utils.ReconnectTimer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameras
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameraManager
@@ -2762,7 +2762,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (videoSource is ICameraSource) {
             viewModelScope.launch(defaultDispatcher) {
                 videoSourceMutex.withLock {
-                    streamer?.toggleBackToFront(application)
+                    streamer?.switchBackToFront(application)
                 }
             }
         }
