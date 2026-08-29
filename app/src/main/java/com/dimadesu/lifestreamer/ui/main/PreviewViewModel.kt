@@ -718,8 +718,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
         if (!isCurrentlyStreaming) return
         
-        val isSrtStream = storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
-        if (!isSrtStream) return
+        val sinkType = storageRepository.endpointDescriptorFlow.first().type.sinkType
+        if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
         
         try {
             Log.i(TAG, "Removing bitrate regulator before video source switch")
@@ -738,8 +738,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
         if (!isCurrentlyStreaming) return
         
-        val isSrtStream = storageRepository.endpointDescriptorFlow.first().type.sinkType == MediaSinkType.SRT
-        if (!isSrtStream) return
+        val sinkType = storageRepository.endpointDescriptorFlow.first().type.sinkType
+        if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
         
         try {
             val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
@@ -747,11 +747,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val selectedMode = storageRepository.regulatorModeFlow.first()
                 // Small delay to let the new encoder initialize
                 delay(200)
-                currentStreamer.bitrateRegulatorControllerFactory =
+                currentStreamer.bitrateRegulatorControllerFactory = if (sinkType == MediaSinkType.SRT) {
                     AdaptiveSrtBitrateRegulatorController.Factory(
                         bitrateRegulatorConfig = bitrateRegulatorConfig,
                         mode = selectedMode
                     )
+                } else {
+                    io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
+                        bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                        bitrateRegulatorConfig = bitrateRegulatorConfig
+                    )
+                }
                 Log.i(TAG, "Re-added bitrate regulator after video source switch")
             }
         } catch (e: Exception) {
@@ -895,16 +901,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             
-            // Add bitrate regulator for SRT streams
-            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+            // Add bitrate regulator for SRT and RTMP streams
+            if (descriptor.type.sinkType == MediaSinkType.SRT || descriptor.type.sinkType == MediaSinkType.RTMP) {
                 val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
                 if (bitrateRegulatorConfig != null) {
                     val selectedMode = storageRepository.regulatorModeFlow.first()
-                    currentStreamer.bitrateRegulatorControllerFactory =
+                    currentStreamer.bitrateRegulatorControllerFactory = if (descriptor.type.sinkType == MediaSinkType.SRT) {
                         AdaptiveSrtBitrateRegulatorController.Factory(
                             bitrateRegulatorConfig = bitrateRegulatorConfig,
                             mode = selectedMode
                         )
+                    } else {
+                        io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
+                            bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                            bitrateRegulatorConfig = bitrateRegulatorConfig
+                        )
+                    }
                 }
             }
             

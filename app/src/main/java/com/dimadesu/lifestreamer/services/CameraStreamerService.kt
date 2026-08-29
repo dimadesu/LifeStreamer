@@ -345,7 +345,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     if (_serviceStreamStatus.value == StreamStatus.STREAMING) {
                         try {
                             val descriptor = storageRepository.endpointDescriptorFlow.first()
-                            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+                            if (descriptor.type.sinkType == MediaSinkType.SRT || descriptor.type.sinkType == MediaSinkType.RTMP) {
                                 Log.i(TAG, "Bitrate regulator settings changed during stream - updating controller")
                                 
                                 // Remove old controller
@@ -353,11 +353,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 
                                 // Re-add with new config if enabled
                                 if (config != null) {
-                                    (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory =
+                                    val factory = if (descriptor.type.sinkType == MediaSinkType.SRT) {
                                         AdaptiveSrtBitrateRegulatorController.Factory(
                                             bitrateRegulatorConfig = config,
                                             mode = mode
                                         )
+                                    } else {
+                                        io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
+                                            bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                                            bitrateRegulatorConfig = config
+                                        )
+                                    }
+                                    (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = factory
                                     Log.i(TAG, "Bitrate regulator updated: range=${config.videoBitrateRange.lower/1000}k-${config.videoBitrateRange.upper/1000}k, mode=$mode")
                                 } else {
                                     Log.i(TAG, "Bitrate regulator disabled")
@@ -1272,8 +1279,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 return
             }
 
-            // If SRT sink, possibly attach bitrate regulator controller based on stored config
-            if (descriptor.type.sinkType == MediaSinkType.SRT) {
+            // If SRT or RTMP sink, possibly attach bitrate regulator controller based on stored config
+            if (descriptor.type.sinkType == MediaSinkType.SRT || descriptor.type.sinkType == MediaSinkType.RTMP) {
                 val bitrateRegulatorConfig = try {
                     storageRepository.bitrateRegulatorConfigFlow.first()
                 } catch (e: Exception) {
@@ -1282,11 +1289,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (bitrateRegulatorConfig != null) {
                     try {
                         val mode = try { storageRepository.regulatorModeFlow.first() } catch (_: Exception) { com.dimadesu.lifestreamer.bitrate.RegulatorMode.MOBLIN_FAST }
-                        (currentStreamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory =
+                        val factory = if (descriptor.type.sinkType == MediaSinkType.SRT) {
                             AdaptiveSrtBitrateRegulatorController.Factory(
                                 bitrateRegulatorConfig = bitrateRegulatorConfig,
                                 mode = mode
                             )
+                        } else {
+                            io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
+                                bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                                bitrateRegulatorConfig = bitrateRegulatorConfig
+                            )
+                        }
+                        (currentStreamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = factory
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to attach bitrate regulator: ${e.message}")
                     }
