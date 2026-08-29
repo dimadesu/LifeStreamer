@@ -305,7 +305,8 @@ class MoblinSrtFightBitrateRegulator(
         
         // Log.d(TAG, "PIF diff thing: ${pifDiffThing} (${currentSettings.packetsInFlight} - ${pifSpikeDiff})")
         
-        val minimumBitrate = max(50000, currentSettings.minimumBitrate)
+        val configuredMinBitrate = max(currentSettings.minimumBitrate, bitrateRegulatorConfig.videoBitrateRange.lower.toLong())
+        val minimumBitrate = max(50000L, configuredMinBitrate)
         if (currentMaximumBitrate < minimumBitrate) {
             currentMaximumBitrate = minimumBitrate
             // Log.d(TAG, "Min bitrate applied: ${minimumBitrate / 1000}k")
@@ -318,14 +319,14 @@ class MoblinSrtFightBitrateRegulator(
         
         // Log.d(TAG, "Calculated bitrate: ${currentBitrate / 1000}k (${currentMaximumBitrate / 1000}k * ${pifDiffThing} / ${currentSettings.packetsInFlight})")
         
-        if (currentBitrate < currentSettings.minimumBitrate) {
-            currentBitrate = currentSettings.minimumBitrate
-            // Log.d(TAG, "Applied minimum: ${currentSettings.minimumBitrate / 1000}k")
+        if (currentBitrate < configuredMinBitrate) {
+            currentBitrate = configuredMinBitrate
+            // Log.d(TAG, "Applied minimum: ${configuredMinBitrate / 1000}k")
         }
         
         // PIF running away - do a quick lower of bitrate temporarily
         if ((fastPif - smoothPif).toInt() > currentSettings.packetsInFlight * 2) {
-            currentBitrate = currentSettings.minimumBitrate
+            currentBitrate = configuredMinBitrate
             // Log.w(TAG, "PIF running away - emergency minimum!")
         }
 
@@ -334,10 +335,7 @@ class MoblinSrtFightBitrateRegulator(
         // Apply bounds from configuration
         currentBitrate = max(
             min(currentBitrate, bitrateRegulatorConfig.videoBitrateRange.upper.toLong()),
-            max(
-                currentSettings.minimumBitrate,
-                bitrateRegulatorConfig.videoBitrateRange.lower.toLong()
-            )
+            configuredMinBitrate
         )
     }
 
