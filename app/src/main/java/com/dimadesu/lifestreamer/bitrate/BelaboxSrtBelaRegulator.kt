@@ -3,6 +3,8 @@ package com.dimadesu.lifestreamer.bitrate
 import android.util.Log
 import io.github.thibaultbee.srtdroid.core.models.Stats
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
+import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
+import io.github.thibaultbee.streampack.ext.srt.elements.endpoints.SrtEndpointMetrics
 import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 import kotlin.math.max
 import kotlin.math.min
@@ -12,9 +14,10 @@ import kotlin.math.min
  * This is a faithful translation of the control logic and timers.
  */
 class BelaboxSrtBelaRegulator(
+    metricsTracker: EndpointMetricsTracker,
     bitrateRegulatorConfig: BitrateRegulatorConfig,
     onVideoTargetBitrateChange: ((Int) -> Unit)
-) : SrtBitrateRegulator(bitrateRegulatorConfig, onVideoTargetBitrateChange, { /* no audio */ }) {
+) : SrtBitrateRegulator(metricsTracker, bitrateRegulatorConfig, onVideoTargetBitrateChange, { /* no audio */ }) {
 
     companion object {
         private const val TAG = "BelaboxSrtBela"
@@ -199,7 +202,9 @@ class BelaboxSrtBelaRegulator(
         }
     }
 
-    override fun update(stats: Stats, currentVideoBitrate: Int, currentAudioBitrate: Int) {
+    override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
+        val metrics = metricsTracker.cumulative as? SrtEndpointMetrics ?: return
+        val stats = metrics.rawMetrics.bistatsOrNull(clear = false, instantaneous = true) ?: return
         updateBitrate(stats)
     }
 }

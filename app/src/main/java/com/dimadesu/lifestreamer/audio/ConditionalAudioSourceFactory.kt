@@ -29,7 +29,7 @@ class ConditionalAudioSourceFactory : IAudioSourceInternal.Factory {
         
         // Explicitly pass emptySet() to disable effects (MicrophoneSourceFactory enables AEC+NS by default)
         return MicrophoneSourceFactory(
-            audioSourceType = audioSourceType,
+            audioSource = audioSourceType,
             effects = emptySet()
         ).create(context)
     }

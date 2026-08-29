@@ -24,10 +24,12 @@ import androidx.annotation.RequiresPermission
 import androidx.datastore.preferences.preferencesDataStore
 import com.dimadesu.lifestreamer.ApplicationConstants.userPrefName
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor
-import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.videoUriMediaDescriptor
+import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.mediaStoreMediaDescriptor
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.backCameras
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameraManager
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.cameras
+import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.defaultCameraId
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.frontCameras
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isBackCamera
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
@@ -35,40 +37,32 @@ import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 
 @RequiresPermission(Manifest.permission.CAMERA)
 suspend fun IWithVideoSource.setNextCameraId(context: Context) {
-    val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-    val cameras = cameraManager.cameraIdList.toList()
-    val videoSource = videoInput?.sourceFlow?.value
+    val cameras = context.cameraManager.cameras
+    val videoSource = videoInput.sourceFlow.value
 
     val newCameraId = if (videoSource is ICameraSource) {
         val currentCameraIndex = cameras.indexOf(videoSource.cameraId)
-        (currentCameraIndex + 1) % cameras.size
+        val newCameraIndex = (currentCameraIndex + 1) % cameras.size
+        cameras[newCameraIndex]
     } else {
-        0
+        context.defaultCameraId
     }
 
-    setCameraId(cameras[newCameraId])
+    setCameraId(newCameraId)
 }
 
 @RequiresPermission(Manifest.permission.CAMERA)
-suspend fun IWithVideoSource.toggleBackToFront(context: Context) {
-    val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-    val videoSource = videoInput?.sourceFlow?.value
+suspend fun IWithVideoSource.switchBackToFront(context: Context) {
+    val cameraManager = context.cameraManager
+    val videoSource = videoInput.sourceFlow.value
     val cameras = if (videoSource is ICameraSource) {
-        val characteristics = cameraManager.getCameraCharacteristics(videoSource.cameraId)
-        val facing = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)
-        if (facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) {
-            cameraManager.cameraIdList.filter {
-                cameraManager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
-            }
+        if (cameraManager.isBackCamera(videoSource.cameraId)) {
+            cameraManager.frontCameras
         } else {
-            cameraManager.cameraIdList.filter {
-                cameraManager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
-            }
+            cameraManager.backCameras
         }
     } else {
-        cameraManager.cameraIdList.filter {
-            cameraManager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
-        }
+        cameraManager.backCameras
     }
 
     if (cameras.isNotEmpty()) {
@@ -93,7 +87,7 @@ fun Context.createVideoContentUri(name: String): UriMediaDescriptor {
             name
         )
     }
-    return videoUriMediaDescriptor(this, videoDetails)
+    return mediaStoreMediaDescriptor(this, videoDetails)
 }
 
 fun String.appendIfNotEndsWith(suffix: String): String {
@@ -106,3 +100,11 @@ fun String.appendIfNotEndsWith(suffix: String): String {
 
 val Range<*>.isEmpty: Boolean
     get() = upper == lower
+
+fun Long.formatBitrate(): String {
+    return when {
+        this >= 1_000_000 -> String.format(java.util.Locale.US, "%.2f Mbps", this / 1_000_000.0)
+        this >= 1_000 -> String.format(java.util.Locale.US, "%.2f kbps", this / 1_000.0)
+        else -> "$this bps"
+    }
+}
