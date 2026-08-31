@@ -74,7 +74,7 @@ class MoblinSrtFightBitrateRegulator(
         if (targetBitrate == 0L) {
             // Use the upper limit from bitrate regulator config as target, not current bitrate
             targetBitrate = bitrateRegulatorConfig.videoBitrateRange.upper.toLong()
-            currentMaximumBitrate = currentVideoBitrate.toLong() // Start from current, scale up to target
+            currentMaximumBitrate = ADAPTIVBITRATE_START // Start from 1 Mbps, scale up to target
         }
 
         val metrics = metricsTracker.cumulative as? SrtEndpointMetrics ?: return
