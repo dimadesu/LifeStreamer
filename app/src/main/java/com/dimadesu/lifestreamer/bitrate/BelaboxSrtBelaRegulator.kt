@@ -45,7 +45,10 @@ class BelaboxSrtBelaRegulator(
         var minimumBitrate: Long = 250_000L
     )
 
-    private var settings = Settings()
+    private var settings = Settings().apply {
+        // The UI slider overrides the default BelaBox minimum bitrate
+        minimumBitrate = bitrateRegulatorConfig.videoBitrateRange.lower.toLong()
+    }
     private var targetBitrate: Long = bitrateRegulatorConfig.videoBitrateRange.upper.toLong()
 
     // State
@@ -61,6 +64,10 @@ class BelaboxSrtBelaRegulator(
     private var nextBitrateIncrTimeNs: Long = System.nanoTime()
     private var nextBitrateDecrTimeNs: Long = System.nanoTime()
     private var curBitrate: Long = ADAPTIVE_BITRATE_START
+
+    // Transport bitrate: EMA over byte-sent deltas, matching iOS's streamTransportBitrate()
+    private var transportBitrateBps: Long = 0L
+    private var previousByteSentTotal: Long = -1L
 
     private val defaultSrtLatencyMs: Int = 3000
 
@@ -123,14 +130,27 @@ class BelaboxSrtBelaRegulator(
         }
     }
 
-    private fun updateThroughput(mbpsSendRate: Double?) {
-        if (mbpsSendRate == null) return
-        throughput *= 0.97
-        throughput += (mbpsSendRate * 1_000_000.0 / 1024.0) * 0.03
-    }
 
     private fun logAdaptiveAction(actionTaken: String) {
         Log.i(TAG, actionTaken)
+    }
+
+    /**
+     * EMA over deltas of cumulative bytes-sent counter, matching iOS's
+     * updateSrtTransportBitrate() and the SrtFight port's approach.
+     */
+    private fun updateTransportBitrate(byteSentTotal: Long) {
+        if (previousByteSentTotal >= 0) {
+            val deltaBytes = max(0L, byteSentTotal - previousByteSentTotal)
+            // transportBitrateBps is in bps
+            transportBitrateBps = (transportBitrateBps * 0.7 + (8.0 * deltaBytes) * 0.3).toLong()
+            
+            // Feed it into the throughput EMA (expected in Kbps by the algorithm)
+            val transportKbps = transportBitrateBps / 1000.0
+            throughput *= 0.97
+            throughput += transportKbps * 0.03
+        }
+        previousByteSentTotal = byteSentTotal
     }
 
     private fun updateBitrate(stats: Stats) {
@@ -146,7 +166,7 @@ class BelaboxSrtBelaRegulator(
         val deltaRtt = updateAverageRttDelta(rtt)
         updateRttMin(rtt)
         updateRttJitter(deltaRtt)
-        updateThroughput(stats.mbpsSendRate)
+        updateTransportBitrate(stats.byteSentTotal)
 
         // srtdroid Stats doesn't expose every optional field the Swift version used.
         // Use a sensible default SRT latency when not available.
@@ -180,10 +200,9 @@ class BelaboxSrtBelaRegulator(
             nextBitrateIncrTimeNs = nowNs + BITRATE_INCR_INTERVAL_MS * 1_000_000L
         }
 
-        // Cap against transport estimate if available from mbpsBandwidth
-        val transportBitsPerSecond = (stats.mbpsBandwidth * 1_000_000.0).toLong()
-        if (transportBitsPerSecond > 0L) {
-            val maximumBitrate = max(transportBitsPerSecond + ADAPTIVE_BITRATE_TRANSPORT_MINIMUM, (17 * transportBitsPerSecond) / 10)
+        // Cap against transport estimate (EMA over byte-sent deltas, matching iOS)
+        if (transportBitrateBps > 0L) {
+            val maximumBitrate = max(transportBitrateBps + ADAPTIVE_BITRATE_TRANSPORT_MINIMUM, (17 * transportBitrateBps) / 10)
             if (bitrate > maximumBitrate) {
                 bitrate = maximumBitrate
             }

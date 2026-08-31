@@ -20,7 +20,6 @@ class AdaptiveSrtBitrateRegulatorController {
     class Factory(
         private val bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
         private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
-        private val delayTimeInMs: Long = 200, // Moblin updates every 200ms
         private val mode: RegulatorMode = RegulatorMode.MOBLIN_FAST
     ) : BitrateRegulatorController.Factory() {
         override fun newBitrateRegulatorController(
@@ -70,6 +69,14 @@ class AdaptiveSrtBitrateRegulatorController {
                         return regulator
                     }
                 }
+            }
+
+            // iOS calls BelaBox on every ~20ms tick (internal timers gate decisions),
+            // while SrtFight is gated to every 200ms. Match those intervals so the
+            // EMA filters (0.99 decay etc.) behave as designed.
+            val delayTimeInMs = when (mode) {
+                RegulatorMode.BELABOX -> 20L
+                RegulatorMode.MOBLIN_FAST, RegulatorMode.MOBLIN_SLOW -> 200L
             }
 
             return IntervalBitrateRegulatorController(
