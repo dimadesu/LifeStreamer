@@ -38,6 +38,9 @@ class MoblinSrtFightBitrateRegulator(
     companion object {
         private const val TAG = "MoblinSrtFightBitrateRegulator"
         private const val ADAPTIVBITRATE_START = 1_000_000L // 1 Mbps starting bitrate
+
+        // Matches Moblin's adaptiveBitrateTransportMinimum (= adaptiveBitrateStart).
+        private const val TRANSPORT_BITRATE_MINIMUM = ADAPTIVBITRATE_START
     }
 
     // Current bitrate state - matches Moblin's approach
@@ -53,6 +56,12 @@ class MoblinSrtFightBitrateRegulator(
     // PIF tracking - core of SrtFight algorithm
     private var smoothPif: Double = 0.0
     private var fastPif: Double = 0.0
+
+    // Real send rate, used to cap the max bitrate (Moblin's limitByTransportBitrate).
+    // Ported from Moblin's updateSrtTransportBitrate: EMA over deltas of the cumulative bytes-sent
+    // counter, not SRT's own mbpsSendRate stat (which Moblin's algorithm never actually reads).
+    private var transportBitrateBps: Long = 0L
+    private var previousByteSentTotal: Long = -1L
 
     // Current settings (fast vs slow)
     private var currentSettings = moblinConfig.fastSettings
@@ -87,6 +96,7 @@ class MoblinSrtFightBitrateRegulator(
 
         val rttMs = stats.msRTT.toDouble()
         val packetsInFlight = stats.pktFlightSize.toDouble()
+        updateTransportBitrate(stats.byteSentTotal)
         
         // Log.d(TAG, "=== SRT UPDATE ===")
         // Log.d(TAG, "RTT: ${stats.msRTT}ms, PIF: ${stats.pktFlightSize}, Send rate: ${stats.mbpsSendRate}Mbps")
@@ -122,6 +132,18 @@ class MoblinSrtFightBitrateRegulator(
         }
         
         // Log.d(TAG, "=== END UPDATE ===")
+    }
+
+    /**
+     * Ported from Moblin's updateSrtTransportBitrate: EMA over deltas of the cumulative bytes-sent
+     * counter, giving the real recent send rate independently of what the encoder is configured for.
+     */
+    private fun updateTransportBitrate(byteSentTotal: Long) {
+        if (previousByteSentTotal >= 0) {
+            val deltaBytes = max(0L, byteSentTotal - previousByteSentTotal)
+            transportBitrateBps = (transportBitrateBps * 0.7 + (8.0 * deltaBytes) * 0.3).toLong()
+        }
+        previousByteSentTotal = byteSentTotal
     }
 
     /**
@@ -304,6 +326,15 @@ class MoblinSrtFightBitrateRegulator(
         val pifDiffThing = currentSettings.packetsInFlight - pifSpikeDiff
         
         // Log.d(TAG, "PIF diff thing: ${pifDiffThing} (${currentSettings.packetsInFlight} - ${pifSpikeDiff})")
+        
+        // Don't let the max bitrate run away from what SRT can actually send right now.
+        if (transportBitrateBps > 0) {
+            val maxAllowedByTransport = max(
+                transportBitrateBps + TRANSPORT_BITRATE_MINIMUM,
+                (17 * transportBitrateBps) / 10
+            )
+            currentMaximumBitrate = min(currentMaximumBitrate, maxAllowedByTransport)
+        }
         
         val configuredMinBitrate = max(currentSettings.minimumBitrate, bitrateRegulatorConfig.videoBitrateRange.lower.toLong())
         val minimumBitrate = max(50000L, configuredMinBitrate)
