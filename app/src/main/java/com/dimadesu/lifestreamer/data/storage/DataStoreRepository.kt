@@ -330,19 +330,48 @@ class DataStoreRepository(
 
     val bitrateRegulatorConfigFlow: Flow<BitrateRegulatorConfig?> =
         dataStore.data.map { preferences ->
+            val endpointTypeId =
+                preferences[stringPreferencesKey(context.getString(R.string.endpoint_type_key))]?.toInt()
+                    ?: EndpointType.SRT.id
+            val endpointType = EndpointType.fromId(endpointTypeId)
+
             val isBitrateRegulatorEnable =
-                preferences[booleanPreferencesKey(context.getString(R.string.srt_server_enable_bitrate_regulation_key))]
-                    ?: true
+                preferences[booleanPreferencesKey(
+                    context.getString(
+                        when (endpointType) {
+                            EndpointType.SRT, EndpointType.SRTLA -> R.string.srt_server_enable_bitrate_regulation_key
+                            EndpointType.RTMP -> R.string.rtmp_server_enable_bitrate_regulation_key
+                            else -> return@map null
+                        }
+                    )
+                )] ?: (endpointType == EndpointType.SRT || endpointType == EndpointType.SRTLA)
+                
             if (!isBitrateRegulatorEnable) {
                 return@map null
             }
 
             val videoMinBitrate =
-                preferences[intPreferencesKey(context.getString(R.string.srt_server_video_min_bitrate_key))]?.toInt()
+                preferences[intPreferencesKey(
+                    context.getString(
+                        when (endpointType) {
+                            EndpointType.SRT, EndpointType.SRTLA -> R.string.srt_server_video_min_bitrate_key
+                            EndpointType.RTMP -> R.string.rtmp_server_video_min_bitrate_key
+                            else -> return@map null
+                        }
+                    )
+                )]?.toInt()
                     ?.times(1000)
                     ?: 300000
             val videoMaxBitrate =
-                preferences[intPreferencesKey(context.getString(R.string.srt_server_video_target_bitrate_key))]?.toInt()
+                preferences[intPreferencesKey(
+                    context.getString(
+                        when (endpointType) {
+                            EndpointType.SRT, EndpointType.SRTLA -> R.string.srt_server_video_target_bitrate_key
+                            EndpointType.RTMP -> R.string.rtmp_server_video_target_bitrate_key
+                            else -> return@map null
+                        }
+                    )
+                )]?.toInt()
                     ?.times(1000)
                     ?: 10000000
             BitrateRegulatorConfig(
