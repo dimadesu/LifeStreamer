@@ -60,7 +60,7 @@ class BelaboxSrtBelaRegulator(
     private var throughput: Double = 0.0
     private var nextBitrateIncrTimeNs: Long = System.nanoTime()
     private var nextBitrateDecrTimeNs: Long = System.nanoTime()
-    private var curBitrate: Long = 0L
+    private var curBitrate: Long = ADAPTIVE_BITRATE_START
 
     private val defaultSrtLatencyMs: Int = 3000
 
@@ -134,12 +134,8 @@ class BelaboxSrtBelaRegulator(
     }
 
     private fun updateBitrate(stats: Stats) {
-    val rttMs = stats.msRTT
-    if (rttMs <= 0) return
-
-        if (curBitrate == 0L) {
-            curBitrate = ADAPTIVE_BITRATE_START
-        }
+        val rttMs = stats.msRTT
+        if (rttMs <= 0) return
 
         val sendBufferSize = stats.pktFlightSize.toDouble()
         updateSendBufferSizeAverage(sendBufferSize)

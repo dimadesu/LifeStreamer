@@ -870,6 +870,28 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Run on IO dispatcher to prevent blocking UI thread during RTMP connectStream()
             withContext(kotlinx.coroutines.Dispatchers.IO) {
                 currentStreamer.startStream()
+                
+                // Reset video config bitrate to clear any modified bitrate from previous stream's regulator
+                // We do this directly on the encoder AFTER startStream() so the codec is in a valid state
+                // to receive parameter updates, avoiding StreamPack skipping identical configurations.
+                val regulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                if (regulatorConfig != null) {
+                    try {
+                        (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate = regulatorConfig.videoBitrateRange.upper
+                        Log.i(TAG, "startServiceStreaming: Restored initial video config bitrate to regulator max target directly on encoder")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "startServiceStreaming: Failed to restore video config: ${e.message}")
+                    }
+                } else {
+                    storageRepository.videoConfigFlow.first()?.let { config ->
+                        try {
+                            (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate = config.startBitrate
+                            Log.i(TAG, "startServiceStreaming: Restored initial video config bitrate directly on encoder")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "startServiceStreaming: Failed to restore video config: ${e.message}")
+                        }
+                    }
+                }
             }
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             
