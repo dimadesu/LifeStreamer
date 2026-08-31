@@ -25,6 +25,13 @@ import kotlin.math.min
  * rather than single noisy polls, while still catching fresh spikes early via a smaller "lazy"
  * decrease.
  *
+ * Tuning notes (v2 - aggressive):
+ * - EMA upward smoothing 0.90/0.10 (was 0.97/0.03): converges in ~5 polls vs ~33
+ * - Decrease threshold 0.35 (was 0.6): triggers before kernel send buffer fully saturates
+ * - Decrease percentages doubled: 30% sustained, 15% lazy (was 15% / 5%)
+ * - Emergency floor: fastFillRatio > 0.8 → drop to minimum bitrate immediately
+ * - Consecutive-decrease escalation: back-to-back decreases multiply the cut
+ *
  * Deviation from Moblin: the transport-bitrate cap here ([transportBitrateBps]) is an adapted
  * analogy, not a literal port. Moblin's RTMP path feeds it from `rtmpStream.info.bitrateStats`, a
  * HaishinKit-internal tracker (smoothed with its own `speedChangeRate: 30`) that has no equivalent
@@ -46,13 +53,17 @@ class RtmpSendDurationBitrateRegulator(
 
         private const val MIN_PERCENTAGE_DECREASE = 20 // %, on queue overflow (hard congestion)
         private const val MAX_PERCENTAGE_DECREASE = 85 // %, on queue overflow (hard congestion)
-        private const val FILL_RATIO_DECREASE_PERCENTAGE = 15 // %, on sustained write saturation
-        private const val FILL_RATIO_LAZY_DECREASE_PERCENTAGE = 5 // %, on a fresh spike not yet reflected in smoothFillRatio
+        private const val FILL_RATIO_DECREASE_PERCENTAGE = 30 // %, on sustained write saturation (was 15)
+        private const val FILL_RATIO_LAZY_DECREASE_PERCENTAGE = 15 // %, on a fresh spike (was 5)
 
         // Fraction of wall-clock time spent blocked in socket writes, smoothed (see calcFillRatios).
-        private const val FILL_RATIO_DECREASE_THRESHOLD = 0.6
-        private const val FILL_RATIO_INCREASE_THRESHOLD = 0.15
-        private const val FILL_RATIO_LAZY_DECREASE_DIFF_THRESHOLD = 0.3
+        private const val FILL_RATIO_DECREASE_THRESHOLD = 0.35 // trigger earlier, before kernel buffer saturates (was 0.6)
+        private const val FILL_RATIO_INCREASE_THRESHOLD = 0.10 // require more stability before increasing (was 0.15)
+        private const val FILL_RATIO_LAZY_DECREASE_DIFF_THRESHOLD = 0.15 // catch spikes earlier (was 0.3)
+        private const val FILL_RATIO_EMERGENCY_THRESHOLD = 0.80 // fastFillRatio above this → emergency drop to minimum
+
+        // Back-to-back decreases get multiplied by this factor each consecutive poll.
+        private const val CONSECUTIVE_DECREASE_ESCALATION = 1.5
 
         // Matches Moblin's adaptiveBitrateTransportMinimum (= adaptiveBitrateStart).
         private const val TRANSPORT_BITRATE_MINIMUM = 1_000_000L
@@ -71,6 +82,9 @@ class RtmpSendDurationBitrateRegulator(
     // real time so a fresh spike can be caught early via the lazy-decrease branch below.
     private var smoothFillRatio: Double = 0.0
     private var fastFillRatio: Double = 0.0
+
+    // Tracks consecutive decrease polls for escalation.
+    private var consecutiveDecreases: Int = 0
 
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
         val metrics = metricsTracker.cumulative as? RtmpEndpointMetrics ?: return
@@ -98,6 +112,11 @@ class RtmpSendDurationBitrateRegulator(
         val instantThroughputBps = (deltaBytesSent * 8_000_000_000L / elapsedNs).coerceAtLeast(0)
         transportBitrateBps = (transportBitrateBps * 0.7 + instantThroughputBps * 0.3).toLong()
 
+        // Escalation multiplier: consecutive decreases get progressively harder.
+        val escalation = if (consecutiveDecreases > 1) {
+            Math.pow(CONSECUTIVE_DECREASE_ESCALATION, (consecutiveDecreases - 1).toDouble())
+        } else 1.0
+
         when {
             deltaDropped > 0 -> {
                 // The internal FLV tag queue actually overflowed: react fast and hard.
@@ -107,32 +126,46 @@ class RtmpSendDurationBitrateRegulator(
                     currentVideoBitrate * percentageReduction / 100,
                     MIN_DECREASE_STEP
                 )
+                consecutiveDecreases++
                 Log.i(TAG, "Queue overflow: dropped=$deltaDropped, reducing by $percentageReduction% to $newBitrate")
                 onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
             }
 
+            fastFillRatio >= FILL_RATIO_EMERGENCY_THRESHOLD -> {
+                // Socket is almost fully blocked: emergency drop to minimum bitrate.
+                val minBitrate = bitrateRegulatorConfig.videoBitrateRange.lower
+                consecutiveDecreases++
+                Log.i(TAG, "EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, dropping to min=$minBitrate")
+                onVideoTargetBitrateChange(minBitrate)
+            }
+
             smoothFillRatio >= FILL_RATIO_DECREASE_THRESHOLD -> {
-                // Socket writes are blocked most of the time on average: sustained congestion without any drop yet.
+                // Socket writes are blocked most of the time on average: sustained congestion.
+                val scaledPercentage = (FILL_RATIO_DECREASE_PERCENTAGE * escalation).toInt().coerceAtMost(80)
                 val newBitrate = currentVideoBitrate - max(
-                    currentVideoBitrate * FILL_RATIO_DECREASE_PERCENTAGE / 100,
+                    currentVideoBitrate * scaledPercentage / 100,
                     MIN_DECREASE_STEP
                 )
-                Log.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, reducing to $newBitrate")
+                consecutiveDecreases++
+                Log.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
                 onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
             }
 
             fastFillRatio - smoothFillRatio >= FILL_RATIO_LAZY_DECREASE_DIFF_THRESHOLD -> {
-                // Fresh spike the smoothed average hasn't caught up with yet: react early but gently.
+                // Fresh spike the smoothed average hasn't caught up with yet.
+                val scaledPercentage = (FILL_RATIO_LAZY_DECREASE_PERCENTAGE * escalation).toInt().coerceAtMost(50)
                 val newBitrate = currentVideoBitrate - max(
-                    currentVideoBitrate * FILL_RATIO_LAZY_DECREASE_PERCENTAGE / 100,
+                    currentVideoBitrate * scaledPercentage / 100,
                     MIN_DECREASE_STEP
                 )
-                Log.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, reducing to $newBitrate")
+                consecutiveDecreases++
+                Log.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
                 onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
             }
 
             smoothFillRatio <= FILL_RATIO_INCREASE_THRESHOLD &&
                 currentVideoBitrate < bitrateRegulatorConfig.videoBitrateRange.upper -> {
+                consecutiveDecreases = 0 // Reset escalation on increase
                 val newBitrate = min(
                     currentVideoBitrate + MAX_INCREASE_STEP,
                     bitrateRegulatorConfig.videoBitrateRange.upper
@@ -142,6 +175,7 @@ class RtmpSendDurationBitrateRegulator(
 
             else -> {
                 // Middle zone: hold steady to avoid oscillating the encoder bitrate.
+                consecutiveDecreases = 0 // Reset escalation when stable
             }
         }
     }
@@ -153,7 +187,8 @@ class RtmpSendDurationBitrateRegulator(
      */
     private fun calcFillRatios(instantFillRatio: Double) {
         if (instantFillRatio > smoothFillRatio) {
-            smoothFillRatio = smoothFillRatio * 0.97 + instantFillRatio * 0.03
+            // Faster upward convergence: ~5 polls to 63% vs ~33 before (was 0.97/0.03)
+            smoothFillRatio = smoothFillRatio * 0.90 + instantFillRatio * 0.10
         } else {
             smoothFillRatio = smoothFillRatio * 0.9 + instantFillRatio * 0.1
         }
