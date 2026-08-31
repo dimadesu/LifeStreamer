@@ -1230,10 +1230,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             try {
                 // We're ready to start streaming
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
+                
                 // Protect startStream() from cancellation to prevent camera configuration errors
                 // withContext(NonCancellable) {
                     currentStreamer.startStream()
                 // }
+                
+                // Reset video config bitrate to clear any modified bitrate from previous stream's regulator
+                // We do this directly on the encoder AFTER startStream() so the codec is in a valid state
+                // to receive parameter updates, avoiding StreamPack skipping identical configurations.
+                val regulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
+                if (regulatorConfig != null) {
+                    try {
+                        (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate = regulatorConfig.videoBitrateRange.upper
+                        Log.i(TAG, "startStreamFromConfiguredEndpoint: Restored initial video config bitrate to regulator max target directly on encoder")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "startStreamFromConfiguredEndpoint: Failed to restore video config: ${e.message}")
+                    }
+                } else {
+                    storageRepository.videoConfigFlow.first()?.let { config ->
+                        try {
+                            (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate = config.startBitrate
+                            Log.i(TAG, "startStreamFromConfiguredEndpoint: Restored initial video config bitrate directly on encoder")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "startStreamFromConfiguredEndpoint: Failed to restore video config: ${e.message}")
+                        }
+                    }
+                }
+                
                 // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
                 // derive it from isStreamingFlow.value to ensure accuracy
                 Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
