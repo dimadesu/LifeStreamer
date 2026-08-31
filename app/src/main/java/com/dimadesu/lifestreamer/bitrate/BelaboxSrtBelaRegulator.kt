@@ -68,6 +68,7 @@ class BelaboxSrtBelaRegulator(
     // Transport bitrate: EMA over byte-sent deltas, matching iOS's streamTransportBitrate()
     private var transportBitrateBps: Long = 0L
     private var previousByteSentTotal: Long = -1L
+    private var previousTransportUpdateTimeNs: Long = -1L
 
     private val defaultSrtLatencyMs: Int = 3000
 
@@ -140,17 +141,27 @@ class BelaboxSrtBelaRegulator(
      * updateSrtTransportBitrate() and the SrtFight port's approach.
      */
     private fun updateTransportBitrate(byteSentTotal: Long) {
-        if (previousByteSentTotal >= 0) {
+        val nowNs = System.nanoTime()
+        if (previousByteSentTotal >= 0 && previousTransportUpdateTimeNs > 0) {
             val deltaBytes = max(0L, byteSentTotal - previousByteSentTotal)
-            // transportBitrateBps is in bps
-            transportBitrateBps = (transportBitrateBps * 0.7 + (8.0 * deltaBytes) * 0.3).toLong()
-            
-            // Feed it into the throughput EMA (expected in Kbps by the algorithm)
-            val transportKbps = transportBitrateBps / 1000.0
-            throughput *= 0.97
-            throughput += transportKbps * 0.03
+            val deltaMs = (nowNs - previousTransportUpdateTimeNs) / 1_000_000.0
+            if (deltaMs > 0.0) {
+                val deltaBitsPerSecond = (8.0 * deltaBytes) * (1000.0 / deltaMs)
+                // In iOS Moblin, updateSrtTransportBitrate() is called exactly once per second
+                // (in handle1sTimer) with EMA weights of 0.7 / 0.3.
+                // Since this runs at a variable interval (e.g., every 20ms), we
+                // mathematically scale the 1-second retention factor (0.7) to match the elapsed time.
+                val retention = Math.pow(0.7, deltaMs / 1000.0)
+                transportBitrateBps = (transportBitrateBps * retention + deltaBitsPerSecond * (1.0 - retention)).toLong()
+                
+                // Feed it into the throughput EMA (expected in Kbps by the algorithm)
+                val transportKbps = transportBitrateBps / 1000.0
+                throughput *= 0.97
+                throughput += transportKbps * 0.03
+            }
         }
         previousByteSentTotal = byteSentTotal
+        previousTransportUpdateTimeNs = nowNs
     }
 
     private fun updateBitrate(stats: Stats) {
