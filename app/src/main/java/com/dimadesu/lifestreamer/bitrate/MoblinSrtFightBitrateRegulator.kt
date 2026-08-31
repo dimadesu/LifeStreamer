@@ -374,12 +374,6 @@ class MoblinSrtFightBitrateRegulator(
         }
 
         // Log.d(TAG, "Final bitrate: ${oldCurrentBitrate / 1000}k -> ${currentBitrate / 1000}k")
-        
-        // Apply bounds from configuration
-        currentBitrate = max(
-            min(currentBitrate, bitrateRegulatorConfig.videoBitrateRange.upper.toLong()),
-            configuredMinBitrate
-        )
     }
 
     /**
