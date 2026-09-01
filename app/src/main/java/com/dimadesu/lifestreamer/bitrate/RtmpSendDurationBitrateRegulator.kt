@@ -68,8 +68,9 @@ class RtmpSendDurationBitrateRegulator(
         // Back-to-back decreases get multiplied by this factor each consecutive poll.
         private const val CONSECUTIVE_DECREASE_ESCALATION = 1.5
 
-        // Matches Moblin's adaptiveBitrateTransportMinimum (= adaptiveBitrateStart).
-        private const val TRANSPORT_BITRATE_MINIMUM = 1_000_000L
+        // Allows a flat overshoot buffer when throughput is extremely low (< 143 kbps).
+        // Reduced from Moblin's 1_000_000L (which works for SRT's large buffers but fatal for RTMP).
+        private const val TRANSPORT_BITRATE_MINIMUM = 100_000L
     }
 
     private var lastRawMetrics: RtmpMetrics? = null
