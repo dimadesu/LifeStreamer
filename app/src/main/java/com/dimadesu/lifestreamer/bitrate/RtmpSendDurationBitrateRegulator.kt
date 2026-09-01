@@ -187,10 +187,11 @@ class RtmpSendDurationBitrateRegulator(
      */
     private fun calcFillRatios(instantFillRatio: Double) {
         if (instantFillRatio > smoothFillRatio) {
-            // Faster upward convergence: ~5 polls to 63% vs ~33 before (was 0.97/0.03)
+            // Slow rise: ~5 polls to 63%, prevents single noisy polls from triggering decreases
             smoothFillRatio = smoothFillRatio * 0.90 + instantFillRatio * 0.10
         } else {
-            smoothFillRatio = smoothFillRatio * 0.9 + instantFillRatio * 0.1
+            // Fast fall: ~2 polls to 63%, so bitrate can recover quickly once congestion clears
+            smoothFillRatio = smoothFillRatio * 0.70 + instantFillRatio * 0.30
         }
         fastFillRatio = fastFillRatio * 0.67 + instantFillRatio * 0.33
     }
