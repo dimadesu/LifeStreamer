@@ -49,7 +49,9 @@ class RtmpSendDurationBitrateRegulator(
         private const val TAG = "RtmpSendDurationReg"
 
         private const val MIN_DECREASE_STEP = 100_000 // b/s
-        private const val MAX_INCREASE_STEP = 100_000 // b/s
+        private const val MIN_INCREASE_STEP = 100_000 // b/s
+        private const val MAX_INCREASE_STEP = 500_000 // b/s
+        private const val INCREASE_PERCENTAGE = 5 // %, scales recovery speed with current bitrate
 
         private const val MIN_PERCENTAGE_DECREASE = 20 // %, on queue overflow (hard congestion)
         private const val MAX_PERCENTAGE_DECREASE = 85 // %, on queue overflow (hard congestion)
@@ -166,8 +168,10 @@ class RtmpSendDurationBitrateRegulator(
             smoothFillRatio <= FILL_RATIO_INCREASE_THRESHOLD &&
                 currentVideoBitrate < bitrateRegulatorConfig.videoBitrateRange.upper -> {
                 consecutiveDecreases = 0 // Reset escalation on increase
+                val increaseStep = (currentVideoBitrate * INCREASE_PERCENTAGE / 100)
+                    .coerceIn(MIN_INCREASE_STEP, MAX_INCREASE_STEP)
                 val newBitrate = min(
-                    currentVideoBitrate + MAX_INCREASE_STEP,
+                    currentVideoBitrate + increaseStep,
                     bitrateRegulatorConfig.videoBitrateRange.upper
                 )
                 onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
