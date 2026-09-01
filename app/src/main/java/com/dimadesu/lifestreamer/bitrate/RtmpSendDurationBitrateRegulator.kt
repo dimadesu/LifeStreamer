@@ -52,6 +52,7 @@ class RtmpSendDurationBitrateRegulator(
         private const val MIN_INCREASE_STEP = 100_000 // b/s
         private const val MAX_INCREASE_STEP = 500_000 // b/s
         private const val INCREASE_PERCENTAGE = 5 // %, scales recovery speed with current bitrate
+        private const val INCREASE_COOLDOWN_NS = 1_000_000_000L // 1 second cooldown after increase
 
         private const val MIN_PERCENTAGE_DECREASE = 20 // %, on queue overflow (hard congestion)
         private const val MAX_PERCENTAGE_DECREASE = 85 // %, on queue overflow (hard congestion)
@@ -87,6 +88,9 @@ class RtmpSendDurationBitrateRegulator(
 
     // Tracks consecutive decrease polls for escalation.
     private var consecutiveDecreases: Int = 0
+
+    // Cooldown tracker to prevent sawtooth oscillation
+    private var nextIncreaseAllowedNs: Long = 0L
 
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
         val metrics = metricsTracker.cumulative as? RtmpEndpointMetrics ?: return
@@ -166,7 +170,8 @@ class RtmpSendDurationBitrateRegulator(
             }
 
             smoothFillRatio <= FILL_RATIO_INCREASE_THRESHOLD &&
-                currentVideoBitrate < bitrateRegulatorConfig.videoBitrateRange.upper -> {
+                currentVideoBitrate < bitrateRegulatorConfig.videoBitrateRange.upper &&
+                nowNs >= nextIncreaseAllowedNs -> {
                 consecutiveDecreases = 0 // Reset escalation on increase
                 val increaseStep = (currentVideoBitrate * INCREASE_PERCENTAGE / 100)
                     .coerceIn(MIN_INCREASE_STEP, MAX_INCREASE_STEP)
@@ -174,6 +179,7 @@ class RtmpSendDurationBitrateRegulator(
                     currentVideoBitrate + increaseStep,
                     bitrateRegulatorConfig.videoBitrateRange.upper
                 )
+                nextIncreaseAllowedNs = nowNs + INCREASE_COOLDOWN_NS
                 onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
             }
 
