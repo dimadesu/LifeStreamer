@@ -27,6 +27,7 @@ import kotlin.math.min
  *
  * Tuning notes (v2 - aggressive):
  * - EMA upward smoothing 0.90/0.10 (was 0.97/0.03): converges in ~10 polls vs ~33
+ * - EMA downward smoothing 0.70/0.30 (was 0.90/0.10): converges in ~3 polls vs ~10
  * - Decrease threshold 0.35 (was 0.6): triggers before kernel send buffer fully saturates
  * - Decrease percentages doubled: 30% sustained, 15% lazy (was 15% / 5%)
  * - Emergency floor: fastFillRatio >= 0.8 → drop to minimum bitrate immediately
