@@ -749,6 +749,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val selectedMode = storageRepository.regulatorModeFlow.first()
                 // Small delay to let the new encoder initialize
                 delay(200)
+                // Reset encoder to the safe starting bitrate before attaching a fresh regulator
+                // instance, so its first tick ramps up from 1 Mbps instead of cliff-dropping down
+                // from whatever bitrate was active before the source switch/reconnect.
+                streamConfigurationHelper.applySafeInitialBitrate(
+                    currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer,
+                    TAG
+                )
                 currentStreamer.bitrateRegulatorControllerFactory = if (sinkType == MediaSinkType.SRT) {
                     AdaptiveSrtBitrateRegulatorController.Factory(
                         bitrateRegulatorConfig = bitrateRegulatorConfig,

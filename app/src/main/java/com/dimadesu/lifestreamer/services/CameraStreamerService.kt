@@ -355,6 +355,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 
                                 // Re-add with new config if enabled
                                 if (config != null) {
+                                    // Reset encoder to the safe starting bitrate before attaching a
+                                    // fresh regulator instance, so its first tick ramps up from 1 Mbps
+                                    // instead of cliff-dropping down from whatever bitrate was active.
+                                    streamConfigurationHelper.applySafeInitialBitrate(
+                                        streamer as? IVideoSingleStreamer,
+                                        TAG
+                                    )
                                     val factory = if (descriptor.type.sinkType == MediaSinkType.SRT) {
                                         AdaptiveSrtBitrateRegulatorController.Factory(
                                             bitrateRegulatorConfig = config,
