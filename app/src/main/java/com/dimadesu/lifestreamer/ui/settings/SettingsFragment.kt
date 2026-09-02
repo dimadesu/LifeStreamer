@@ -196,6 +196,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<ListPreference>(R.string.srt_server_moblin_regulator_mode_key) ?: error("srt_server_moblin_regulator_mode_key not found")
     }
 
+    private val rtmpRegulatorModePreference: ListPreference by lazy {
+        findPreferenceSafe<ListPreference>(R.string.rtmp_regulator_mode_key) ?: error("rtmp_regulator_mode_key not found")
+    }
+
     private val rtmpSourceBufferForPlaybackMsPreference: SeekBarPreference by lazy {
         findPreferenceSafe<SeekBarPreference>(R.string.rtmp_source_buffer_for_playback_ms_key) ?: error("rtmp_source_buffer_for_playback_ms_key not found")
     }
@@ -688,6 +692,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         rtmpServerEnableBitrateRegulationPreference.isVisible = isRtmpInitial
         rtmpServerTargetVideoBitratePreference.isVisible = rtmpServerEnableBitrateRegulationPreference.isChecked && isRtmpInitial
         rtmpServerMinVideoBitratePreference.isVisible = rtmpServerEnableBitrateRegulationPreference.isChecked && isRtmpInitial
+        rtmpRegulatorModePreference.isVisible = rtmpServerEnableBitrateRegulationPreference.isChecked && isRtmpInitial
 
         serverEnableBitrateRegulationPreference.setOnPreferenceChangeListener { _, newValue ->
             val isEnabled = newValue as Boolean
@@ -732,6 +737,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             val isRtmp = endpoint.hasRtmpCapabilities
             rtmpServerTargetVideoBitratePreference.isVisible = isEnabled && isRtmp
             rtmpServerMinVideoBitratePreference.isVisible = isEnabled && isRtmp
+            rtmpRegulatorModePreference.isVisible = isEnabled && isRtmp
             true
         }
 
@@ -784,6 +790,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         rtmpServerEnableBitrateRegulationPreference.isVisible = isRtmp
         rtmpServerTargetVideoBitratePreference.isVisible = isRtmp && rtmpServerEnableBitrateRegulationPreference.isChecked
         rtmpServerMinVideoBitratePreference.isVisible = isRtmp && rtmpServerEnableBitrateRegulationPreference.isChecked
+        rtmpRegulatorModePreference.isVisible = isRtmp && rtmpServerEnableBitrateRegulationPreference.isChecked
 
         // Update supported values with a new info
         streamerInfo = StreamerInfoFactory(requireContext(), endpointType).build()

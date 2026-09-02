@@ -22,6 +22,16 @@
         <item>@string/srt_server_moblin_regulator_mode_value_slow</item>
     </string-array>
 
+    <string-array name="rtmp_regulator_mode_entries">
+        <item>@string/rtmp_regulator_mode_send_duration</item>
+        <item>@string/rtmp_regulator_mode_sp_simple</item>
+    </string-array>
+
+    <string-array name="rtmp_regulator_mode_values">
+        <item>@string/rtmp_regulator_mode_value_send_duration</item>
+        <item>@string/rtmp_regulator_mode_value_sp_simple</item>
+    </string-array>
+
     <string-array name="AudioChannelConfigEntries">
         <item>Mono</item>
         <item>Stereo</item>

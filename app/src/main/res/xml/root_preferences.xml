@@ -349,6 +349,14 @@
                 app:key="@string/rtmp_server_enable_bitrate_regulation_key"
                 app:title="@string/rtmp_server_enable_bitrate_regulation" />
 
+            <ListPreference
+                app:defaultValue="@string/rtmp_regulator_mode_value_send_duration"
+                app:key="@string/rtmp_regulator_mode_key"
+                app:title="@string/rtmp_regulator_mode"
+                app:entries='@array/rtmp_regulator_mode_entries'
+                app:entryValues='@array/rtmp_regulator_mode_values'
+                app:useSimpleSummaryProvider="true" />
+
             <SeekBarPreference
                 android:max="10000"
                 app:defaultValue="5000"
