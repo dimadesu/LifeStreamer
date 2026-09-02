@@ -84,7 +84,6 @@ import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoRotation
-import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.srtla.SrtlaManager
 import com.serenegiant.utils.UVCUtils.getApplication
@@ -744,22 +743,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
         
         try {
-            val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-            if (bitrateRegulatorConfig != null) {
-                val selectedMode = storageRepository.regulatorModeFlow.first()
+            if (storageRepository.bitrateRegulatorConfigFlow.first() != null) {
                 // Small delay to let the new encoder initialize
                 delay(200)
-                currentStreamer.bitrateRegulatorControllerFactory = if (sinkType == MediaSinkType.SRT) {
-                    AdaptiveSrtBitrateRegulatorController.Factory(
-                        bitrateRegulatorConfig = bitrateRegulatorConfig,
-                        mode = selectedMode
-                    )
-                } else {
-                    io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
-                        bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
-                        bitrateRegulatorConfig = bitrateRegulatorConfig
-                    )
-                }
+                streamConfigurationHelper.attachBitrateRegulator(
+                    currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer,
+                    sinkType,
+                    TAG
+                )
                 Log.i(TAG, "Re-added bitrate regulator after video source switch")
             }
         } catch (e: Exception) {
@@ -890,23 +881,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "startServiceStreaming: Stream started successfully")
             
             // Add bitrate regulator for SRT and RTMP streams
-            if (descriptor.type.sinkType == MediaSinkType.SRT || descriptor.type.sinkType == MediaSinkType.RTMP) {
-                val bitrateRegulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                if (bitrateRegulatorConfig != null) {
-                    val selectedMode = storageRepository.regulatorModeFlow.first()
-                    currentStreamer.bitrateRegulatorControllerFactory = if (descriptor.type.sinkType == MediaSinkType.SRT) {
-                        AdaptiveSrtBitrateRegulatorController.Factory(
-                            bitrateRegulatorConfig = bitrateRegulatorConfig,
-                            mode = selectedMode
-                        )
-                    } else {
-                        io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
-                            bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
-                            bitrateRegulatorConfig = bitrateRegulatorConfig
-                        )
-                    }
-                }
-            }
+            streamConfigurationHelper.attachBitrateRegulator(
+                currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer,
+                descriptor.type.sinkType,
+                TAG
+            )
             
             true
         } catch (e: TimeoutCancellationException) {
