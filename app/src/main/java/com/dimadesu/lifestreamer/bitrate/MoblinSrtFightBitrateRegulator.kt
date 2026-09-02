@@ -60,9 +60,9 @@ class MoblinSrtFightBitrateRegulator(
     // Real send rate, used to cap the max bitrate (Moblin's limitByTransportBitrate).
     // Ported from Moblin's updateSrtTransportBitrate: EMA over deltas of the cumulative bytes-sent
     // counter, not SRT's own mbpsSendRate stat (which Moblin's algorithm never actually reads).
-    private var transportBitrateBps: Long = 0L
-    private var previousByteSentTotal: Long = -1L
-    private var previousTransportUpdateTimeNs: Long = -1L
+    private val transportBitrateEstimator = TransportBitrateEstimator()
+    private val transportBitrateBps: Long
+        get() = transportBitrateEstimator.bitrateBps
 
     // Current settings (fast vs slow)
     private var currentSettings = moblinConfig.fastSettings
@@ -140,22 +140,7 @@ class MoblinSrtFightBitrateRegulator(
      * counter, giving the real recent send rate independently of what the encoder is configured for.
      */
     private fun updateTransportBitrate(byteSentTotal: Long) {
-        val nowNs = System.nanoTime()
-        if (previousByteSentTotal >= 0 && previousTransportUpdateTimeNs > 0) {
-            val deltaBytes = max(0L, byteSentTotal - previousByteSentTotal)
-            val deltaMs = (nowNs - previousTransportUpdateTimeNs) / 1_000_000.0
-            if (deltaMs > 0.0) {
-                val deltaBitsPerSecond = (8.0 * deltaBytes) * (1000.0 / deltaMs)
-                // In iOS Moblin, updateSrtTransportBitrate() is called exactly once per second
-                // (in handle1sTimer) with EMA weights of 0.7 / 0.3.
-                // Since this runs at a variable interval (e.g., every 200ms), we
-                // mathematically scale the 1-second retention factor (0.7) to match the elapsed time.
-                val retention = Math.pow(0.7, deltaMs / 1000.0)
-                transportBitrateBps = (transportBitrateBps * retention + deltaBitsPerSecond * (1.0 - retention)).toLong()
-            }
-        }
-        previousByteSentTotal = byteSentTotal
-        previousTransportUpdateTimeNs = nowNs
+        transportBitrateEstimator.update(byteSentTotal)
     }
 
     /**
