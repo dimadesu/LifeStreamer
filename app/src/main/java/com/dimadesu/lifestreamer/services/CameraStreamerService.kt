@@ -35,6 +35,7 @@ import com.dimadesu.lifestreamer.ui.main.MainActivity
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.bitrate.AdaptiveSrtBitrateRegulatorController
 import com.dimadesu.lifestreamer.utils.dataStore
+import com.dimadesu.lifestreamer.utils.StreamConfigurationHelper
 import com.dimadesu.lifestreamer.models.StreamStatus
 import com.dimadesu.lifestreamer.srtla.SrtlaManager
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
@@ -99,6 +100,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private val _serviceReady = MutableStateFlow(false)
     // DataStore repository for reading configured endpoint and regulator settings
     private val storageRepository by lazy { DataStoreRepository(this, this.dataStore) }
+    private val streamConfigurationHelper by lazy { StreamConfigurationHelper(storageRepository) }
     
     // Current device rotation
     private var currentRotation: Int = Surface.ROTATION_0
@@ -1246,24 +1248,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // Reset video config bitrate to clear any modified bitrate from previous stream's regulator
                 // We do this directly on the encoder AFTER startStream() so the codec is in a valid state
                 // to receive parameter updates, avoiding StreamPack skipping identical configurations.
-                val regulatorConfig = storageRepository.bitrateRegulatorConfigFlow.first()
-                if (regulatorConfig != null) {
-                    try {
-                        (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate = regulatorConfig.videoBitrateRange.upper
-                        Log.i(TAG, "startStreamFromConfiguredEndpoint: Restored initial video config bitrate to regulator max target directly on encoder")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "startStreamFromConfiguredEndpoint: Failed to restore video config: ${e.message}")
-                    }
-                } else {
-                    storageRepository.videoConfigFlow.first()?.let { config ->
-                        try {
-                            (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder?.bitrate = config.startBitrate
-                            Log.i(TAG, "startStreamFromConfiguredEndpoint: Restored initial video config bitrate directly on encoder")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "startStreamFromConfiguredEndpoint: Failed to restore video config: ${e.message}")
-                        }
-                    }
-                }
+                streamConfigurationHelper.applySafeInitialBitrate(
+                    currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer,
+                    TAG
+                )
                 
                 // Don't set STREAMING immediately - let getEffectiveServiceStatus() 
                 // derive it from isStreamingFlow.value to ensure accuracy
