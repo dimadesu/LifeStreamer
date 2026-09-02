@@ -338,11 +338,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         serviceScope.launch {
             combine(
                 storageRepository.bitrateRegulatorConfigFlow,
-                storageRepository.regulatorModeFlow
-            ) { config, mode -> config to mode }
+                storageRepository.regulatorModeFlow,
+                storageRepository.rtmpRegulatorModeFlow
+            ) { config, mode, rtmpMode -> Triple(config, mode, rtmpMode) }
                 .distinctUntilChanged()
                 .drop(1) // Skip initial emission to avoid replacing on startup
-                .collect { (config, mode) ->
+                .collect { (config, mode, rtmpMode) ->
                     // Only update if currently streaming with SRT endpoint
                     if (_serviceStreamStatus.value == StreamStatus.STREAMING) {
                         try {
@@ -362,12 +363,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                         )
                                     } else {
                                         io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
-                                            bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                                            bitrateRegulatorFactory = when (rtmpMode) {
+                                                com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SEND_DURATION -> com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory()
+                                                com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SP_SIMPLE -> io.github.thibaultbee.streampack.core.regulator.SimpleBitrateRegulator.Factory()
+                                            },
                                             bitrateRegulatorConfig = config
                                         )
                                     }
                                     (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = factory
-                                    Log.i(TAG, "Bitrate regulator updated: range=${config.videoBitrateRange.lower/1000}k-${config.videoBitrateRange.upper/1000}k, mode=$mode")
+                                    Log.i(TAG, "Bitrate regulator updated: range=${config.videoBitrateRange.lower/1000}k-${config.videoBitrateRange.upper/1000}k, mode=$mode, rtmpMode=$rtmpMode")
                                 } else {
                                     Log.i(TAG, "Bitrate regulator disabled")
                                 }
@@ -1283,8 +1287,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                                 mode = mode
                             )
                         } else {
+                            val rtmpMode = try { storageRepository.rtmpRegulatorModeFlow.first() } catch (_: Exception) { com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SEND_DURATION }
                             io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
-                                bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                                bitrateRegulatorFactory = when (rtmpMode) {
+                                    com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SEND_DURATION -> com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory()
+                                    com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SP_SIMPLE -> io.github.thibaultbee.streampack.core.regulator.SimpleBitrateRegulator.Factory()
+                                },
                                 bitrateRegulatorConfig = bitrateRegulatorConfig
                             )
                         }

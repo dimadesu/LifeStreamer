@@ -755,8 +755,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         mode = selectedMode
                     )
                 } else {
+                    val rtmpMode = storageRepository.rtmpRegulatorModeFlow.first()
                     io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
-                        bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                        bitrateRegulatorFactory = when (rtmpMode) {
+                            com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SEND_DURATION -> com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory()
+                            com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SP_SIMPLE -> io.github.thibaultbee.streampack.core.regulator.SimpleBitrateRegulator.Factory()
+                        },
                         bitrateRegulatorConfig = bitrateRegulatorConfig
                     )
                 }
@@ -900,8 +904,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             mode = selectedMode
                         )
                     } else {
+                        val rtmpMode = storageRepository.rtmpRegulatorModeFlow.first()
                         io.github.thibaultbee.streampack.core.regulator.controllers.intervalBitrateRegulatorControllerFactory(
-                            bitrateRegulatorFactory = com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory(),
+                            bitrateRegulatorFactory = when (rtmpMode) {
+                                com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SEND_DURATION -> com.dimadesu.lifestreamer.bitrate.RtmpSendDurationBitrateRegulator.Factory()
+                                com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SP_SIMPLE -> io.github.thibaultbee.streampack.core.regulator.SimpleBitrateRegulator.Factory()
+                            },
                             bitrateRegulatorConfig = bitrateRegulatorConfig
                         )
                     }

@@ -392,6 +392,18 @@ class DataStoreRepository(
         }
     }.distinctUntilChanged()
 
+    /**
+     * RTMP regulator mode flow. Stored as string preference values: send_duration, sp_simple.
+     */
+    val rtmpRegulatorModeFlow: Flow<com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode> = dataStore.data.map { preferences ->
+        val stored = preferences[stringPreferencesKey(context.getString(R.string.rtmp_regulator_mode_key))]
+            ?: context.getString(R.string.rtmp_regulator_mode_value_send_duration)
+        when (stored) {
+            context.getString(R.string.rtmp_regulator_mode_value_sp_simple) -> com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SP_SIMPLE
+            else -> com.dimadesu.lifestreamer.bitrate.RtmpRegulatorMode.SEND_DURATION
+        }
+    }.distinctUntilChanged()
+
     val streamOrientationFlow: Flow<com.dimadesu.lifestreamer.models.StreamOrientation> = dataStore.data.map { preferences ->
         val stored = preferences[stringPreferencesKey(context.getString(R.string.stream_orientation_key))]
             ?: context.getString(R.string.stream_orientation_value_auto)

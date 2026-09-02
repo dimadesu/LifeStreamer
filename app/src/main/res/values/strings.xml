@@ -188,6 +188,14 @@
     <string name="rtmp_server_video_min_bitrate_key">rtmp_server_video_min_bitrate_key</string>
     <string name="rtmp_server_video_min_bitrate">Video minimum bitrate (kb/s)</string>
 
+    <!-- RTMP regulator mode -->
+    <string name="rtmp_regulator_mode_key">rtmp_regulator_mode_key</string>
+    <string name="rtmp_regulator_mode">Bitrate algorithm</string>
+    <string name="rtmp_regulator_mode_send_duration">Send duration (LS custom)</string>
+    <string name="rtmp_regulator_mode_sp_simple">SP Simple (packets lost)</string>
+    <string name="rtmp_regulator_mode_value_send_duration">send_duration</string>
+    <string name="rtmp_regulator_mode_value_sp_simple">sp_simple</string>
+
     <!-- Moblin regulator mode -->
     <string name="srt_server_moblin_regulator_mode_key">srt_server_moblin_regulator_mode_key</string>
     <string name="srt_server_moblin_regulator_mode">Bitrate algorithm</string>
