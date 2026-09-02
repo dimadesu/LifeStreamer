@@ -26,10 +26,10 @@ import kotlin.math.min
  * decrease.
  *
  * Tuning notes (v2 - aggressive):
- * - EMA upward smoothing 0.90/0.10 (was 0.97/0.03): converges in ~5 polls vs ~33
+ * - EMA upward smoothing 0.90/0.10 (was 0.97/0.03): converges in ~10 polls vs ~33
  * - Decrease threshold 0.35 (was 0.6): triggers before kernel send buffer fully saturates
  * - Decrease percentages doubled: 30% sustained, 15% lazy (was 15% / 5%)
- * - Emergency floor: fastFillRatio > 0.8 → drop to minimum bitrate immediately
+ * - Emergency floor: fastFillRatio >= 0.8 → drop to minimum bitrate immediately
  * - Consecutive-decrease escalation: back-to-back decreases multiply the cut
  *
  * Deviation from Moblin: the transport-bitrate cap here (using [TransportBitrateEstimator]) is an adapted
@@ -203,10 +203,10 @@ class RtmpSendDurationBitrateRegulator(
      */
     private fun calcFillRatios(instantFillRatio: Double) {
         if (instantFillRatio > smoothFillRatio) {
-            // Slow rise: ~5 polls to 63%, prevents single noisy polls from triggering decreases
+            // Slow rise: ~10 polls to 63%, prevents single noisy polls from triggering decreases
             smoothFillRatio = smoothFillRatio * 0.90 + instantFillRatio * 0.10
         } else {
-            // Fast fall: ~2 polls to 63%, so bitrate can recover quickly once congestion clears
+            // Fast fall: ~3 polls to 63%, so bitrate can recover quickly once congestion clears
             smoothFillRatio = smoothFillRatio * 0.70 + instantFillRatio * 0.30
         }
         fastFillRatio = fastFillRatio * 0.67 + instantFillRatio * 0.33
