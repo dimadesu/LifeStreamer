@@ -32,12 +32,17 @@ import kotlin.math.min
  * - Emergency floor: fastFillRatio > 0.8 → drop to minimum bitrate immediately
  * - Consecutive-decrease escalation: back-to-back decreases multiply the cut
  *
- * Deviation from Moblin: the transport-bitrate cap here ([transportBitrateBps]) is an adapted
+ * Deviation from Moblin: the transport-bitrate cap here (using [TransportBitrateEstimator]) is an adapted
  * analogy, not a literal port. Moblin's RTMP path feeds it from `rtmpStream.info.bitrateStats`, a
  * HaishinKit-internal tracker (smoothed with its own `speedChangeRate: 30`) that has no equivalent
- * in our RTMP stack, so we instead reuse Moblin's *SRT* smoothing recipe (0.7/0.3 EMA over raw byte
+ * in our RTMP stack, so we instead reuse Moblin's *SRT* smoothing recipe (time-scaled EMA over raw byte
  * deltas) applied to [RtmpMetrics.totalBytesSent]. The SRT regulator ([MoblinSrtFightBitrateRegulator])
  * does replicate Moblin's real mechanism exactly.
+ *
+ * [TransportBitrateEstimator] scales its 0.7/0.3 retention by actual elapsed time rather than assuming
+ * a fixed 1s tick, which matters here because [IntervalBitrateRegulatorController] polls every 500ms,
+ * not 1s - without the time scaling the EMA would decay per-second at 0.7^2 = 0.49 instead of the
+ * intended 0.7, making the estimate needlessly noisy/reactive.
  */
 class RtmpSendDurationBitrateRegulator(
     metricsTracker: EndpointMetricsTracker,
@@ -78,7 +83,9 @@ class RtmpSendDurationBitrateRegulator(
 
     // Smoothed real socket throughput, used to cap the target bitrate (Moblin's limitByTransportBitrate).
     // Adapted analogy, not a literal port - see class doc.
-    private var transportBitrateBps: Long = 0L
+    private val transportBitrateEstimator = TransportBitrateEstimator()
+    private val transportBitrateBps: Long
+        get() = transportBitrateEstimator.bitrateBps
 
     // Dual-rate smoothing of fillRatio (Moblin's calcPifs applied to write saturation instead of PIF):
     // smoothFillRatio rises slowly but falls quickly, so a single noisy poll can't trigger a decrease
@@ -115,9 +122,7 @@ class RtmpSendDurationBitrateRegulator(
         val instantFillRatio = (deltaSendDurationNs.toDouble() / elapsedNs.toDouble()).coerceIn(0.0, 1.0)
         calcFillRatios(instantFillRatio)
 
-        val deltaBytesSent = raw.totalBytesSent - previousRaw.totalBytesSent
-        val instantThroughputBps = (deltaBytesSent * 8_000_000_000L / elapsedNs).coerceAtLeast(0)
-        transportBitrateBps = (transportBitrateBps * 0.7 + instantThroughputBps * 0.3).toLong()
+        transportBitrateEstimator.update(raw.totalBytesSent)
 
         // Escalation multiplier: consecutive decreases get progressively harder.
         val escalation = if (consecutiveDecreases > 1) {
