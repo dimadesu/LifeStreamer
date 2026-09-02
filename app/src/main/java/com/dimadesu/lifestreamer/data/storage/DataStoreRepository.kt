@@ -133,7 +133,25 @@ class DataStoreRepository(
             fps = fps,
             cameraFps = cameraFps,
             profile = profile,
-            level = level
+            level = level,
+            customize = {
+                try {
+                    // Check if the default encoder for this format actually supports CBR to prevent crashes
+                    val codecList = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
+                    val codecName = codecList.findEncoderForFormat(this)
+                    if (codecName != null) {
+                        val codecInfo = codecList.codecInfos.find { it.name == codecName }
+                        val encoderCaps = codecInfo?.getCapabilitiesForType(mimeType)?.encoderCapabilities
+                        if (encoderCaps?.isBitrateModeSupported(android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true) {
+                            setInteger(android.media.MediaFormat.KEY_BITRATE_MODE, android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                        } else {
+                            android.util.Log.w("VideoConfig", "CBR not supported by $codecName, falling back to default")
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("VideoConfig", "Failed to check CBR support: ${e.message}")
+                }
+            }
         )
     }.distinctUntilChanged()
 
