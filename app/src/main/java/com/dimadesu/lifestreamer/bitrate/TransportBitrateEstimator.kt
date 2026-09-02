@@ -6,6 +6,10 @@ import kotlin.math.max
  * Estimates the transport bitrate based on cumulative bytes sent over time.
  * Uses an Exponential Moving Average (EMA) to smooth out fluctuations, matching
  * Moblin's iOS implementation.
+ *
+ * The retention factor is time-scaled (see [update]) so callers that poll faster or slower than
+ * Moblin's 1s cadence still get the same per-second decay of 0.7, instead of an unintentionally
+ * stronger/weaker smoothing effect tied to their actual polling interval.
  */
 class TransportBitrateEstimator {
     private var previousByteSentTotal: Long = -1L
