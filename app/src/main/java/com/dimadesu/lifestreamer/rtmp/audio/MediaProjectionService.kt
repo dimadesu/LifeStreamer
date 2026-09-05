@@ -12,6 +12,12 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import android.animation.ValueAnimator
+import android.graphics.PixelFormat
+import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.dimadesu.lifestreamer.R
 
@@ -23,6 +29,11 @@ class MediaProjectionService : Service() {
 
     private var mediaProjection: MediaProjection? = null
     private val binder = LocalBinder()
+
+    // Overlay variables to force constant frame rate
+    private var overlayView: View? = null
+    private var windowManager: WindowManager? = null
+    private var animator: ValueAnimator? = null
 
     companion object {
         private const val TAG = "MediaProjectionService"
@@ -80,6 +91,7 @@ class MediaProjectionService : Service() {
     override fun onDestroy() {
         Log.i(TAG, "Service destroyed")
         isRunning = false
+        stopKeepAliveOverlay()
         mediaProjection?.stop()
         mediaProjection = null
         super.onDestroy()
@@ -108,6 +120,8 @@ class MediaProjectionService : Service() {
 
             mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
             Log.i(TAG, "MediaProjection created successfully in foreground service")
+            
+            startKeepAliveOverlay()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create MediaProjection in service: ${e.message}", e)
         }
@@ -148,7 +162,76 @@ class MediaProjectionService : Service() {
      */
     fun clearMediaProjection() {
         Log.i(TAG, "Clearing MediaProjection from service")
+        stopKeepAliveOverlay()
         mediaProjection?.stop()
         mediaProjection = null
+    }
+
+    private fun startKeepAliveOverlay() {
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Cannot start keep-alive overlay: SYSTEM_ALERT_WINDOW permission missing")
+            return
+        }
+
+        try {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            
+            overlayView = View(this).apply {
+                alpha = 0f
+            }
+
+            val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+
+            val params = WindowManager.LayoutParams(
+                1, 1, // width, height
+                layoutFlag,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSPARENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+                y = 0
+            }
+
+            windowManager?.addView(overlayView, params)
+
+            // Animate alpha slightly to force continuous invalidation and screen redraws
+            animator = ValueAnimator.ofFloat(0f, 0.01f).apply {
+                duration = 500
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                addUpdateListener {
+                    overlayView?.alpha = it.animatedValue as Float
+                    overlayView?.invalidate()
+                }
+                start()
+            }
+            Log.i(TAG, "Keep-alive overlay started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start keep-alive overlay", e)
+        }
+    }
+
+    private fun stopKeepAliveOverlay() {
+        try {
+            animator?.cancel()
+            animator = null
+            
+            overlayView?.let { view ->
+                windowManager?.removeView(view)
+            }
+            overlayView = null
+            windowManager = null
+            Log.i(TAG, "Keep-alive overlay stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop keep-alive overlay", e)
+        }
     }
 }
