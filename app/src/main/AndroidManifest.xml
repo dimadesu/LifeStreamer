@@ -23,6 +23,7 @@
 
     <uses-feature android:name="android.hardware.usb.host" android:required="false" tools:replace="android:required" />
 
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />

@@ -186,6 +186,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleUvcSource()
         }
 
+        binding.toggleScreenButton.setOnClickListener {
+            previewViewModel.toggleScreenSource(mediaProjectionLauncher)
+        }
+
         binding.uvcTestButton.setOnClickListener {
             val intent = android.content.Intent(requireContext(), com.dimadesu.lifestreamer.uvc.UvcTestActivity::class.java)
             startActivity(intent)
@@ -1277,6 +1281,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.switchSourceButton.visibility =
             if (activeIndex != null && activeIndex != 1) View.GONE
             else if (previewViewModel.isUvcSource.value == true) View.GONE
+            else if (previewViewModel.isScreenSource.value == true) View.GONE
             else View.VISIBLE
 
         // Dynamic buttons (index 2, 3, ...)
