@@ -186,6 +186,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             previewViewModel.toggleUvcSource()
         }
 
+        binding.toggleScreenButton.setOnClickListener {
+            previewViewModel.toggleScreenSource(mediaProjectionLauncher)
+        }
+
         binding.uvcTestButton.setOnClickListener {
             val intent = android.content.Intent(requireContext(), com.dimadesu.lifestreamer.uvc.UvcTestActivity::class.java)
             startActivity(intent)

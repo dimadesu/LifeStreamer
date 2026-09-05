@@ -201,7 +201,7 @@
                     android:layout_height="wrap_content"
                     android:text="RTMP SRC"
                     android:backgroundTint='@{viewmodel.isRtmpSource ? @color/active_button_green : @color/button_gray}'
-                    app:goneUnless="@{!viewmodel.isUvcSource &amp;&amp; (viewmodel.activeRtmpIndex == null || viewmodel.activeRtmpIndex == 1)}" />
+                    app:goneUnless="@{!viewmodel.isUvcSource &amp;&amp; !viewmodel.isScreenSource &amp;&amp; (viewmodel.activeRtmpIndex == null || viewmodel.activeRtmpIndex == 1)}" />
 
                 <!-- Container for dynamically added RTMP source buttons (RTMP SRC 2, 3, ...) -->
                 <LinearLayout
@@ -209,7 +209,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    app:goneUnless="@{!viewmodel.isUvcSource}" />
+                    app:goneUnless="@{!viewmodel.isUvcSource &amp;&amp; !viewmodel.isScreenSource}" />
 
                 <Button
                     android:id="@+id/rtmpSrvrButton"
@@ -217,7 +217,7 @@
                     android:layout_height="wrap_content"
                     android:text="RTMP SRVR"
                     android:backgroundTint="@color/button_gray"
-                    app:goneUnless="@{!viewmodel.isUvcSource}" />
+                    app:goneUnless="@{!viewmodel.isUvcSource &amp;&amp; !viewmodel.isScreenSource}" />
 
                 <Button
                     android:id="@+id/toggleUvcButton"
@@ -226,7 +226,7 @@
                     android:text="USB SRC"
                     android:minWidth="50dp"
                     android:backgroundTint='@{viewmodel.isUvcSource ? @color/active_button_green : @color/button_gray}'
-                    app:goneUnless="@{!viewmodel.isRtmpSource}" />
+                    app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isScreenSource}" />
 
                 <Button
                     android:id="@+id/uvcTestButton"
@@ -234,6 +234,15 @@
                     android:layout_height="wrap_content"
                     android:text="USB SRC ⚙️"
                     android:backgroundTint="@color/button_gray"
+                    app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource &amp;&amp; !viewmodel.isScreenSource}" />
+
+                <Button
+                    android:id="@+id/toggleScreenButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SCREEN"
+                    android:minWidth="50dp"
+                    android:backgroundTint='@{viewmodel.isScreenSource ? @color/active_button_green : @color/button_gray}'
                     app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource}" />
 
                 <Button

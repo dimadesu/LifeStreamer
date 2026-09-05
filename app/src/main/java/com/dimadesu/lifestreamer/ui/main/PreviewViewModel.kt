@@ -338,6 +338,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private val _activeRtmpIndex = MutableLiveData<Int?>(null)
     private val _userToggledUvc = MutableLiveData<Boolean>(false)
+    private val _isScreenSource = MutableLiveData<Boolean>(false)
 
     /**
      * Camera settings.
@@ -375,6 +376,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     fun requiresMediaProjection(): Boolean {
         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+        val isScreenSourceActive = _isScreenSource.value == true
+        if (isScreenSourceActive) return true
+        
         // UVC bitmap fallback does NOT need MediaProjection — it uses mic audio just like camera.
         // Only RTMP (live or its bitmap fallback) needs MediaProjection for audio.
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
@@ -3349,6 +3353,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Mark that user toggled RTMP ON with this index
                     _activeRtmpIndex.postValue(rtmpIndex)
                     _userToggledUvc.postValue(false)
+                    _isScreenSource.postValue(false)
 
                     // Suppress passthrough observer updates during source switch
                     // to prevent monitor toggle from resetting to OFF
@@ -3636,6 +3641,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Mark that user toggled UVC OFF (back to camera)
                         _userToggledUvc.postValue(false)
+                        _isScreenSource.postValue(false)
                         
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
@@ -3761,6 +3767,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                             try {
                                                 // Mark that user toggled UVC ON
                                                 _userToggledUvc.postValue(true)
+                                                _isScreenSource.postValue(false)
                                                 _activeRtmpIndex.postValue(null)
                                                 
                                                 // Remove bitrate regulator if streaming with SRT
@@ -3894,6 +3901,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
                         _userToggledUvc.postValue(true)
+                        _isScreenSource.postValue(false)
                         _activeRtmpIndex.postValue(null)
                         
                         // Remove bitrate regulator if streaming with SRT
@@ -3968,6 +3976,99 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     val isUvcSource: LiveData<Boolean> = _userToggledUvc
 
+    val isScreenSource: LiveData<Boolean> = _isScreenSource
+
+    fun toggleScreenSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null) {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            _streamerErrorLiveData.postValue("Service not available")
+            return
+        }
+
+        val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
+
+        viewModelScope.launch {
+            if (_isScreenSource.value != true) {
+                // Switching to Screen Source
+                Log.i(TAG, "Switching to Screen source")
+
+                _isScreenSource.postValue(true)
+                _activeRtmpIndex.postValue(null)
+                _userToggledUvc.postValue(false)
+
+                showZoomSlider.value = false
+                showExposureSlider.value = false
+                showLensDistanceSlider.value = false
+
+                val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+                        && startupMediaProjection == null
+                        && streamingMediaProjection == null
+                        && mediaProjectionHelper.getMediaProjection() == null
+
+                if (needProjection) {
+                    if (mediaProjectionLauncher != null) {
+                        Log.i(TAG, "Requesting MediaProjection for Screen Recording")
+                        mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                            viewModelScope.launch {
+                                if (projection == null) {
+                                    _isScreenSource.postValue(false)
+                                    _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
+                                    return@launch
+                                }
+                                startupMediaProjection = projection
+                                if (isCurrentlyStreaming) streamingMediaProjection = projection
+
+                                switchToMediaProjectionVideoSource(currentStreamer, projection)
+                            }
+                        }
+                    } else {
+                        _streamerErrorLiveData.postValue("MediaProjection permission required")
+                    }
+                } else {
+                    val projection = streamingMediaProjection ?: startupMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                    if (projection != null) {
+                        switchToMediaProjectionVideoSource(currentStreamer, projection)
+                    } else {
+                        _streamerErrorLiveData.postValue("Failed to get MediaProjection")
+                    }
+                }
+            } else {
+                // Switching off Screen Source
+                Log.i(TAG, "Switching off Screen source")
+                _isScreenSource.postValue(false)
+                
+                if (streamingMediaProjection == null && startupMediaProjection == null) {
+                    mediaProjectionHelper.release()
+                }
+
+                kotlinx.coroutines.delay(300)
+                removeBitrateRegulatorIfNeeded()
+                
+                val cameraId = lastUsedCameraId
+                if (cameraId != null) {
+                    currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
+                } else {
+                    currentStreamer.setVideoSource(CameraSourceFactory(application))
+                }
+                
+                setAudioSourceBasedOnVideoSource()
+                readdBitrateRegulatorIfNeeded()
+            }
+        }
+    }
+    
+    private suspend fun switchToMediaProjectionVideoSource(currentStreamer: SingleStreamer, projection: MediaProjection) {
+        removeBitrateRegulatorIfNeeded()
+        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        if (videoSource is ICameraSource) {
+            lastUsedCameraId = videoSource.cameraId
+        }
+        
+        currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection))
+        setAudioSourceBasedOnVideoSource()
+        readdBitrateRegulatorIfNeeded()
+    }
+
     /**
      * Expose user toggle state for RTMP button.
      * True when any RTMP source is active.
@@ -4029,14 +4130,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         var rtmpOn = _activeRtmpIndex.value != null
         var uvcOn = _userToggledUvc.value ?: false
+        var screenOn = _isScreenSource.value ?: false
         
         addSource(_activeRtmpIndex) { 
             rtmpOn = it != null
-            value = !rtmpOn && !uvcOn
+            value = !rtmpOn && !uvcOn && !screenOn
         }
         addSource(_userToggledUvc) { 
             uvcOn = it ?: false
-            value = !rtmpOn && !uvcOn
+            value = !rtmpOn && !uvcOn && !screenOn
+        }
+        addSource(_isScreenSource) {
+            screenOn = it ?: false
+            value = !rtmpOn && !uvcOn && !screenOn
         }
     }
 
