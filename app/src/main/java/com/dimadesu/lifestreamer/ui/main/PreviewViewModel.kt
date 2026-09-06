@@ -1935,6 +1935,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 viewModelScope.launch {
                     try {
+                        // Recreate SCREEN surfaces after a first-time grant too.
+                        // Preview may have been created before this token existed, or
+                        // orientation may have changed while the permission dialog was up.
+                        if (_isScreenSource.value == true) {
+                            serviceStreamer?.let {
+                                switchToMediaProjectionVideoSource(it, mediaProjection)
+                            }
+                        }
+
                         // Set appropriate audio source based on current video source
                         setAudioSourceBasedOnVideoSource()
 
