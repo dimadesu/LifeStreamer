@@ -338,6 +338,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private val _activeRtmpIndex = MutableLiveData<Int?>(null)
     private val _userToggledUvc = MutableLiveData<Boolean>(false)
+    private val _isScreenSource = MutableLiveData<Boolean>(false)
 
     /**
      * Camera settings.
@@ -375,6 +376,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     fun requiresMediaProjection(): Boolean {
         val currentVideoSource = serviceStreamer?.videoInput?.sourceFlow?.value
+        val isScreenSourceActive = _isScreenSource.value == true
+        if (isScreenSourceActive) return true
+        
         // UVC bitmap fallback does NOT need MediaProjection — it uses mic audio just like camera.
         // Only RTMP (live or its bitmap fallback) needs MediaProjection for audio.
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
@@ -1892,8 +1896,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "startStreamWithMediaProjection: reusing existing MediaProjection token")
             streamingMediaProjection = existingProjection
             startupMediaProjection = existingProjection
+            
             viewModelScope.launch {
                 try {
+                    // Only recreate MediaProjection video surfaces for SCREEN.
+                    // RTMP/SYS AUDIO also reuse this token; blindly re-applying here
+                    // would replace the current video source with screen capture.
+                    if (_isScreenSource.value == true) {
+                        serviceStreamer?.let {
+                            switchToMediaProjectionVideoSource(it, existingProjection)
+                        }
+                    }
+
                     setAudioSourceBasedOnVideoSource()
                     setupAudioLevelMonitoring()
                     service?.setStreamStatus(StreamStatus.CONNECTING)
@@ -1921,6 +1935,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 viewModelScope.launch {
                     try {
+                        // Recreate SCREEN surfaces after a first-time grant too.
+                        // Preview may have been created before this token existed, or
+                        // orientation may have changed while the permission dialog was up.
+                        if (_isScreenSource.value == true) {
+                            serviceStreamer?.let {
+                                switchToMediaProjectionVideoSource(it, mediaProjection)
+                            }
+                        }
+
                         // Set appropriate audio source based on current video source
                         setAudioSourceBasedOnVideoSource()
 
@@ -2160,9 +2183,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Keep the MediaProjection token alive after stream stops — it is transferred to
                     // startupMediaProjection so SYS AUDIO and future streams can reuse it without
                     // requiring a new permission dialog.
-                    startupMediaProjection = streamingMediaProjection
-                    streamingMediaProjection = null
-                    Log.i(TAG, "MediaProjection transferred to startupMediaProjection after stream stop")
+                    if (streamingMediaProjection != null) {
+                        startupMediaProjection = streamingMediaProjection
+                        streamingMediaProjection = null
+                        Log.i(TAG, "MediaProjection transferred to startupMediaProjection after stream stop")
+                    } else {
+                        Log.i(TAG, "No streamingMediaProjection to transfer; keeping existing startupMediaProjection")
+                    }
 
                     // Stop streaming via helper method
                     try {
@@ -3346,32 +3373,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 currentActiveIndex != rtmpIndex -> {
                     Log.i(TAG, "Switching to RTMP source $rtmpIndex: $rtmpUrl (streaming: $isCurrentlyStreaming)")
                     
-                    // Mark that user toggled RTMP ON with this index
-                    _activeRtmpIndex.postValue(rtmpIndex)
-                    _userToggledUvc.postValue(false)
-
-                    // Suppress passthrough observer updates during source switch
-                    // to prevent monitor toggle from resetting to OFF
-                    suppressPassthroughObserver = true
-                    
-                    // Stop mic passthrough when switching to RTMP (RTMP uses ExoPlayer for audio monitoring)
-                    // Keep monitor toggle state - it will control ExoPlayer volume instead
-                    if (_isMonitorAudioOn.value == true) {
-                        service?.stopAudioPassthrough()
-                        Log.i(TAG, "Stopped mic passthrough when switching to RTMP (will use ExoPlayer volume instead)")
-                    }
-                    
-                    // Remember current camera ID before switching away
-                    if (videoSource is ICameraSource) {
-                        lastUsedCameraId = videoSource.cameraId
-                        Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
-                    }
-
-                    // Hide camera-specific sliders when switching away from camera
-                    showZoomSlider.value = false
-                    showExposureSlider.value = false
-                    showLensDistanceSlider.value = false
-
                     // Always require MediaProjection when switching to RTMP, regardless of streaming
                     // state. If startup MP was already acquired, reuse it without prompting.
                     val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
@@ -3379,58 +3380,34 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             && streamingMediaProjection == null
                             && mediaProjectionHelper.getMediaProjection() == null
 
-                    if (needProjection) {
-                        if (mediaProjectionLauncher != null) {
-                            Log.i(TAG, "Requesting MediaProjection permission for RTMP source switch")
-                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
-                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
-                                viewModelScope.launch {
-                                    if (projection == null) {
-                                        // Permission denied - turn off RTMP toggle (BT toggle stays visible)
-                                        _activeRtmpIndex.postValue(null)
-                                        _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
-                                        return@launch
-                                    }
-                                    // Store as startup MP (not streaming MP — stream hasn't started yet)
-                                    startupMediaProjection = projection
-                                    if (isCurrentlyStreaming) streamingMediaProjection = projection
+                    val doRtmpSwitch: suspend () -> Unit = {
+                        // Mark that user toggled RTMP ON with this index
+                        _activeRtmpIndex.postValue(rtmpIndex)
+                        _userToggledUvc.postValue(false)
+                        _isScreenSource.postValue(false)
 
-                                    // Permission granted - now hide BT toggle (RTMP uses MediaProjection audio)
-                                    _showBluetoothToggle.postValue(false)
-
-                                    // Now that we have projection, perform the RTMP source switch
-                                    // Cancel any existing retry job first
-                                    rtmpRetryJob?.cancel()
-                                    rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-                                        application = application,
-                                        currentStreamer = currentStreamer,
-                                        testBitmap = testBitmap,
-                                        videoSourceUrl = rtmpUrl,
-                                        storageRepository = storageRepository,
-                                        mediaProjectionHelper = mediaProjectionHelper,
-                                        streamingMediaProjection = streamingMediaProjection,
-                                        postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-                                        postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                                        onRtmpConnected = { player -> 
-                                            monitorRtmpConnection(player)
-                                            viewModelScope.launch {
-                                                readdBitrateRegulatorIfNeeded()
-                                            }
-                                        }
-                                    )
-                                    // MediaProjectionService.startForeground() (ID 1001) overwrote
-                                    // CameraStreamerService notification — restore it.
-                                    try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
-                                }
-                            }
-                            // Return early; the actual switch will happen in the projection callback
-                            return@launch
-                        } else {
-                            Log.w(TAG, "MediaProjection required but no launcher available to request it")
-                            _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
-                            return@launch
+                        // Suppress passthrough observer updates during source switch
+                        // to prevent monitor toggle from resetting to OFF
+                        suppressPassthroughObserver = true
+                        
+                        // Stop mic passthrough when switching to RTMP (RTMP uses ExoPlayer for audio monitoring)
+                        // Keep monitor toggle state - it will control ExoPlayer volume instead
+                        if (_isMonitorAudioOn.value == true) {
+                            service?.stopAudioPassthrough()
+                            Log.i(TAG, "Stopped mic passthrough when switching to RTMP (will use ExoPlayer volume instead)")
                         }
-                    } else {
+                        
+                        // Remember current camera ID before switching away
+                        if (videoSource is ICameraSource) {
+                            lastUsedCameraId = videoSource.cameraId
+                            Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
+                        }
+
+                        // Hide camera-specific sliders when switching away from camera
+                        showZoomSlider.value = false
+                        showExposureSlider.value = false
+                        showLensDistanceSlider.value = false
+
                         // Hide BT toggle - RTMP uses MediaProjection audio, not microphone
                         _showBluetoothToggle.postValue(false)
 
@@ -3459,6 +3436,35 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // MediaProjectionService (ID 1001) may have overwritten the
                         // CameraStreamerService notification — restore it.
                         try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
+                    }
+
+                    if (needProjection) {
+                        if (mediaProjectionLauncher != null) {
+                            Log.i(TAG, "Requesting MediaProjection permission for RTMP source switch")
+                            mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                                Log.i(TAG, "MediaProjection callback received during RTMP switch: ${projection != null}")
+                                viewModelScope.launch {
+                                    if (projection == null) {
+                                        // Permission denied - don't toggle UI on
+                                        _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
+                                        return@launch
+                                    }
+                                    // Store as startup MP (not streaming MP — stream hasn't started yet)
+                                    startupMediaProjection = projection
+                                    if (isCurrentlyStreaming) streamingMediaProjection = projection
+                                    
+                                    doRtmpSwitch()
+                                }
+                            }
+                            // Return early; the actual switch will happen in the projection callback
+                            return@launch
+                        } else {
+                            Log.w(TAG, "MediaProjection required but no launcher available to request it")
+                            _streamerErrorLiveData.postValue("MediaProjection permission required to use RTMP audio")
+                            return@launch
+                        }
+                    } else {
+                        doRtmpSwitch()
                     }
                 }
                 // If this exact RTMP index is active, switch back to camera
@@ -3636,6 +3642,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Mark that user toggled UVC OFF (back to camera)
                         _userToggledUvc.postValue(false)
+                        _isScreenSource.postValue(false)
                         
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
@@ -3761,6 +3768,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                             try {
                                                 // Mark that user toggled UVC ON
                                                 _userToggledUvc.postValue(true)
+                                                _isScreenSource.postValue(false)
                                                 _activeRtmpIndex.postValue(null)
                                                 
                                                 // Remove bitrate regulator if streaming with SRT
@@ -3894,6 +3902,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Mark that user toggled UVC ON (only after confirming device is available AND we have permission)
                         _userToggledUvc.postValue(true)
+                        _isScreenSource.postValue(false)
                         _activeRtmpIndex.postValue(null)
                         
                         // Remove bitrate regulator if streaming with SRT
@@ -3968,6 +3977,110 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     val isUvcSource: LiveData<Boolean> = _userToggledUvc
 
+    val isScreenSource: LiveData<Boolean> = _isScreenSource
+
+    fun toggleScreenSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null) {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            _streamerErrorLiveData.postValue("Service not available")
+            return
+        }
+
+        val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
+
+        viewModelScope.launch {
+            if (_isScreenSource.value != true) {
+                // Switching to Screen Source
+                Log.i(TAG, "Switching to Screen source")
+
+                val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+                        && startupMediaProjection == null
+                        && streamingMediaProjection == null
+                        && mediaProjectionHelper.getMediaProjection() == null
+
+                val doScreenSwitch: suspend (MediaProjection?) -> Unit = { proj ->
+                    _isScreenSource.postValue(true)
+                    _activeRtmpIndex.postValue(null)
+                    _userToggledUvc.postValue(false)
+                    showZoomSlider.value = false
+                    showExposureSlider.value = false
+                    showLensDistanceSlider.value = false
+                    
+                    if (proj != null) {
+                        switchToMediaProjectionVideoSource(currentStreamer, proj)
+                    } else {
+                        _streamerErrorLiveData.postValue("Failed to get MediaProjection")
+                    }
+                }
+
+                if (needProjection) {
+                    if (mediaProjectionLauncher != null) {
+                        Log.i(TAG, "Requesting MediaProjection for Screen Recording")
+                        mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+                            viewModelScope.launch {
+                                if (projection == null) {
+                                    _streamerErrorLiveData.postValue("MediaProjection permission denied - staying on camera source")
+                                    return@launch
+                                }
+                                startupMediaProjection = projection
+                                if (isCurrentlyStreaming) streamingMediaProjection = projection
+
+                                doScreenSwitch(projection)
+                            }
+                        }
+                    } else {
+                        _streamerErrorLiveData.postValue("MediaProjection permission required")
+                    }
+                } else {
+                    val projection = streamingMediaProjection ?: startupMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                    doScreenSwitch(projection)
+                }
+            } else {
+                // Switching off Screen Source
+                Log.i(TAG, "Switching off Screen source")
+                _isScreenSource.postValue(false)
+
+                if (streamingMediaProjection == null && startupMediaProjection == null) {
+                    mediaProjectionHelper.release()
+                }
+
+                kotlinx.coroutines.delay(300)
+                removeBitrateRegulatorIfNeeded()
+                
+                val cameraId = lastUsedCameraId
+                if (cameraId != null) {
+                    currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
+                    Log.i(TAG, "Switched back to camera video (restored camera: $cameraId)")
+                } else {
+                    currentStreamer.setVideoSource(CameraSourceFactory(application))
+                    Log.i(TAG, "Switched to camera video (default camera)")
+                }
+                
+                readdBitrateRegulatorIfNeeded()
+            }
+        }
+    }
+    
+    private suspend fun switchToMediaProjectionVideoSource(currentStreamer: SingleStreamer, projection: MediaProjection) {
+        removeBitrateRegulatorIfNeeded()
+        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        if (videoSource is ICameraSource) {
+            lastUsedCameraId = videoSource.cameraId
+        }
+        
+        val useCfr = true // Or whatever config you want
+        if (useCfr) {
+            val fps = videoConfigLiveData.value?.fps ?: 30
+            Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to CFR MediaProjection source with fps=$fps")
+            currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection, fps))
+        } else {
+            Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to default MediaProjection source")
+            currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection))
+        }
+        
+        readdBitrateRegulatorIfNeeded()
+    }
+
     /**
      * Expose user toggle state for RTMP button.
      * True when any RTMP source is active.
@@ -4029,14 +4142,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         var rtmpOn = _activeRtmpIndex.value != null
         var uvcOn = _userToggledUvc.value ?: false
+        var screenOn = _isScreenSource.value ?: false
         
         addSource(_activeRtmpIndex) { 
             rtmpOn = it != null
-            value = !rtmpOn && !uvcOn
+            value = !rtmpOn && !uvcOn && !screenOn
         }
         addSource(_userToggledUvc) { 
             uvcOn = it ?: false
-            value = !rtmpOn && !uvcOn
+            value = !rtmpOn && !uvcOn && !screenOn
+        }
+        addSource(_isScreenSource) {
+            screenOn = it ?: false
+            value = !rtmpOn && !uvcOn && !screenOn
         }
     }
 
