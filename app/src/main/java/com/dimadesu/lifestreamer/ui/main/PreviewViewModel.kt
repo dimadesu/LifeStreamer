@@ -4039,7 +4039,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Switching off Screen Source
                 Log.i(TAG, "Switching off Screen source")
                 _isScreenSource.postValue(false)
-                
+
                 if (streamingMediaProjection == null && startupMediaProjection == null) {
                     mediaProjectionHelper.release()
                 }
@@ -4050,11 +4050,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 val cameraId = lastUsedCameraId
                 if (cameraId != null) {
                     currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
+                    Log.i(TAG, "Switched back to camera video (restored camera: $cameraId)")
                 } else {
                     currentStreamer.setVideoSource(CameraSourceFactory(application))
+                    Log.i(TAG, "Switched to camera video (default camera)")
                 }
                 
-                setAudioSourceBasedOnVideoSource()
                 readdBitrateRegulatorIfNeeded()
             }
         }
@@ -4077,7 +4078,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection))
         }
         
-        setAudioSourceBasedOnVideoSource()
         readdBitrateRegulatorIfNeeded()
     }
 
