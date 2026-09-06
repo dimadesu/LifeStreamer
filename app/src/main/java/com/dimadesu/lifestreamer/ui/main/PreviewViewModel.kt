@@ -1899,10 +1899,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             viewModelScope.launch {
                 try {
-                    // Re-apply the video source to ensure StreamPack recreates its internal surfaces
-                    // with the EXACT current screen orientation (Landscape/Portrait)
-                    serviceStreamer?.let {
-                        switchToMediaProjectionVideoSource(it, existingProjection)
+                    // Only recreate MediaProjection video surfaces for SCREEN.
+                    // RTMP/SYS AUDIO also reuse this token; blindly re-applying here
+                    // would replace the current video source with screen capture.
+                    if (_isScreenSource.value == true) {
+                        serviceStreamer?.let {
+                            switchToMediaProjectionVideoSource(it, existingProjection)
+                        }
                     }
 
                     setAudioSourceBasedOnVideoSource()
