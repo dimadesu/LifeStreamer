@@ -4052,7 +4052,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (useCfr) {
             val fps = videoConfigLiveData.value?.fps ?: 30
             Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to CFR MediaProjection source with fps=$fps")
-            currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.CfrMediaProjectionVideoSourceFactory(projection, fps))
+            currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection, fps))
         } else {
             Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to default MediaProjection source")
             currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection))
