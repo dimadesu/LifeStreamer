@@ -1896,8 +1896,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "startStreamWithMediaProjection: reusing existing MediaProjection token")
             streamingMediaProjection = existingProjection
             startupMediaProjection = existingProjection
+            
             viewModelScope.launch {
                 try {
+                    // Re-apply the video source to ensure StreamPack recreates its internal surfaces
+                    // with the EXACT current screen orientation (Landscape/Portrait)
+                    serviceStreamer?.let {
+                        switchToMediaProjectionVideoSource(it, existingProjection)
+                    }
+
                     setAudioSourceBasedOnVideoSource()
                     setupAudioLevelMonitoring()
                     service?.setStreamStatus(StreamStatus.CONNECTING)
