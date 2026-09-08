@@ -52,6 +52,7 @@ import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.uvc.UvcVideoSource
 import com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory
 import com.dimadesu.lifestreamer.utils.ObservableViewModel
 import com.dimadesu.lifestreamer.utils.dataStore
 import com.dimadesu.lifestreamer.utils.isEmpty
@@ -1892,7 +1893,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             ?: streamingMediaProjection
             ?: mediaProjectionHelper.getMediaProjection()
 
-        if (existingProjection != null) {
+        // Android invalidates a MediaProjection token for createVirtualDisplay once its virtual
+        // display has been stopped. Reusing an exhausted token here would crash, so fall through
+        // to requesting a fresh one instead when screen video capture is active.
+        val needsFreshProjectionForVideo = _isScreenSource.value == true &&
+                existingProjection != null &&
+                MediaProjectionVideoSourceFactory.isProjectionExhaustedForVideo(existingProjection)
+
+        if (existingProjection != null && !needsFreshProjectionForVideo) {
             Log.i(TAG, "startStreamWithMediaProjection: reusing existing MediaProjection token")
             streamingMediaProjection = existingProjection
             startupMediaProjection = existingProjection
@@ -3993,10 +4001,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 // Switching to Screen Source
                 Log.i(TAG, "Switching to Screen source")
 
+                val cachedProjection = streamingMediaProjection ?: startupMediaProjection ?: mediaProjectionHelper.getMediaProjection()
+                // A cached token that already had its virtual display stopped can't be reused for
+                // createVirtualDisplay — Android throws a SecurityException. Request a fresh one instead.
                 val needProjection = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
-                        && startupMediaProjection == null
-                        && streamingMediaProjection == null
-                        && mediaProjectionHelper.getMediaProjection() == null
+                        && (cachedProjection == null || MediaProjectionVideoSourceFactory.isProjectionExhaustedForVideo(cachedProjection))
 
                 val doScreenSwitch: suspend (MediaProjection?) -> Unit = { proj ->
                     _isScreenSource.postValue(true)
@@ -4032,8 +4041,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _streamerErrorLiveData.postValue("MediaProjection permission required")
                     }
                 } else {
-                    val projection = streamingMediaProjection ?: startupMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-                    doScreenSwitch(projection)
+                    doScreenSwitch(cachedProjection)
                 }
             } else {
                 // Switching off Screen Source
@@ -4072,10 +4080,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (useCfr) {
             val fps = videoConfigLiveData.value?.fps ?: 30
             Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to CFR MediaProjection source with fps=$fps")
-            currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection, fps))
+            currentStreamer.setVideoSource(MediaProjectionVideoSourceFactory(projection, fps))
         } else {
             Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to default MediaProjection source")
-            currentStreamer.setVideoSource(io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory(projection))
+            currentStreamer.setVideoSource(MediaProjectionVideoSourceFactory(projection))
         }
         
         readdBitrateRegulatorIfNeeded()
