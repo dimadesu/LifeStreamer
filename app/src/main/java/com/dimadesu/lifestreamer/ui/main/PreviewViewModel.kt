@@ -4020,6 +4020,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     } else {
                         _streamerErrorLiveData.postValue("Failed to get MediaProjection")
                     }
+                    // MediaProjectionService (ID 1001) may have overwritten the
+                    // CameraStreamerService notification — restore it.
+                    try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
                 }
 
                 if (needProjection) {
