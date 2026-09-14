@@ -27,7 +27,7 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 ### Video
 
 - Android device cameras.
-- Android device screen capture.
+- Android device screen capture. [Watch screen sharing demo.](https://www.youtube.com/watch?v=jTrFwXJfr5c)
 - RTMP video. [Watch RTMP source demo.](https://www.youtube.com/watch?v=_zlWsQYxrE4)
 - SRT video.
 - USB video (UVC). [Watch USB source demo.](https://www.youtube.com/watch?v=RlPWbekqPx4)
