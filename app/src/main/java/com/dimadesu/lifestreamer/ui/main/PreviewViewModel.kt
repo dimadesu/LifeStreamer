@@ -4020,6 +4020,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     } else {
                         _streamerErrorLiveData.postValue("Failed to get MediaProjection")
                     }
+                    // If a fresh token was requested above (needProjection == true), requestProjection()
+                    // may have called release() on the previous MediaProjection to start a clean service,
+                    // stopping it outright. Any audio source still built on that old token (e.g. AUDIO OUT
+                    // / SYS AUDIO) would otherwise keep silently reading from a dead projection. Re-run
+                    // audio source selection so it picks up the current (possibly new) token.
+                    setAudioSourceBasedOnVideoSource()
                     // MediaProjectionService (ID 1001) may have overwritten the
                     // CameraStreamerService notification — restore it.
                     try { serviceBinder?.refreshNotification() } catch (_: Throwable) {}
