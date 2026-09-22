@@ -49,6 +49,12 @@
   .handle { position: absolute; right: 0; bottom: 0; width: 28px; height: 28px;
             background: var(--accent); border-radius: 4px 0 0 0; }
 
+  /* The `hidden` attribute hides through the browser's own [hidden]{display:none}, which loses
+     to any author rule that sets display -- and both #gate and #main set one. Without this the
+     gate stays on screen after a correct PIN (it is fixed, inset 0, z-index 10, so it covers
+     everything) and the page looks like the button did nothing. */
+  [hidden] { display: none !important; }
+
   #gate { position: fixed; inset: 0; background: var(--bg); display: flex; z-index: 10;
           flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; }
   #pin { font-size: 28px; letter-spacing: .4em; text-align: center; width: 200px; padding: 10px;
