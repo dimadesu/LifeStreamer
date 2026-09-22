@@ -35,9 +35,12 @@ object RemoteDto {
         val canvasWidth: Int,
         val canvasHeight: Int,
         val presets: List<PresetDto>,
+        /** Which preset the layout currently matches, or null after a manual drag. */
+        val activePresetId: String?,
         val layers: List<LayerDto>,
         val cameras: List<CameraDto>,
-        val thermal: ThermalDto?
+        val thermal: ThermalDto?,
+        val power: PowerDto
     )
 
     @Keep
@@ -59,7 +62,29 @@ object RemoteDto {
     )
 
     @Keep
-    data class ZoomDto(val min: Float, val max: Float, val ratio: Float)
+    data class ZoomDto(
+        val min: Float,
+        val max: Float,
+        val ratio: Float,
+        /**
+         * The camera this range belongs to, so the page can rebuild a slider whose bounds came
+         * from a camera that is no longer behind the layer.
+         */
+        val cameraId: String?
+    )
+
+    /**
+     * What is actually applied to the preview right now, so the page can show it instead of
+     * offering four buttons that give no hint of the current state.
+     */
+    @Keep
+    data class PowerDto(
+        val previewEnabled: Boolean,
+        val previewShortEdge: Int?,
+        val previewFpsCap: Int?,
+        /** "operator" or "thermal": who put the preview in this state. */
+        val appliedBy: String
+    )
 
     @Keep
     data class CameraDto(

@@ -4082,6 +4082,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (enabled) {
             serviceBinder?.thermalPolicy()?.onManualOverride()
         }
+        reportPreviewState(byThermal = false)
+    }
+
+    /**
+     * Tells the service what the preview is doing, so the remote page can show what is applied.
+     *
+     * The service is the authority because it outlives this ViewModel, and the remote control is
+     * used precisely when the UI is gone.
+     */
+    private fun reportPreviewState(byThermal: Boolean) {
+        serviceBinder?.getService()?.notePreviewState(
+            enabled = _isPreviewEnabled.value != false,
+            shortEdge = _previewShortEdge.value,
+            fpsCap = previewMaxFps,
+            byThermal = byThermal
+        )
     }
 
     // region ThermalActuator
@@ -4094,15 +4110,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _isPreviewEnabled.postValue(enabled)
             Log.i(TAG, "Preview ${if (enabled) "enabled" else "disabled"}")
         }
+        reportPreviewState(byThermal = true)
     }
 
     override fun setPreviewFpsCap(maxFps: Int?) {
         previewMaxFps = maxFps
         activeComposite()?.previewMaxFps = maxFps
+        reportPreviewState(byThermal = true)
     }
 
     override fun setPreviewShortEdge(shortEdge: Int?) {
         _previewShortEdge.postValue(shortEdge)
+        reportPreviewState(byThermal = true)
     }
 
     override fun setAuxiliaryUiEnabled(enabled: Boolean) {
@@ -4754,7 +4773,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         layoutObserverJob = viewModelScope.launch {
             composite.layoutFlow.collect { publishCompositionLayers(it) }
         }
+
+        // A camera swap keeps the same VideoLayer so the rectangle survives, which means the
+        // layout compares equal and layoutFlow above never fires. The app's own camera buttons
+        // worked around that by republishing by hand, but a swap made from the remote page had
+        // nothing to do it -- so the bar kept the previous camera's name until something else
+        // moved. This closes that gap for both paths at once.
+        layersInvalidatedJob?.cancel()
+        layersInvalidatedJob = viewModelScope.launch {
+            compositionController?.layersInvalidated?.collect {
+                publishCompositionLayers(compositionController?.layout ?: return@collect)
+            }
+        }
     }
+
+    private var layersInvalidatedJob: Job? = null
 
     /**
      * Republishes what the bar and the editor show.

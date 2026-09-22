@@ -112,6 +112,13 @@ object RemoteControlManager {
         _stateFlow.value = false
     }
 
+    /**
+     * Pushes the current state to every connected page, skipping the send when nothing changed.
+     */
+    fun broadcastState() {
+        server?.broadcastState()
+    }
+
     fun broadcastMessage(text: String) {
         server?.broadcastMessage(text)
     }

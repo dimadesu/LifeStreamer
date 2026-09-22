@@ -19,6 +19,7 @@ import android.content.Context
 import android.util.Log
 import com.dimadesu.lifestreamer.composition.CompositionController
 import com.google.gson.Gson
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.matchingPreset
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import java.io.BufferedOutputStream
 import java.io.BufferedReader
@@ -29,7 +30,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.net.URLDecoder
-import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -58,6 +59,7 @@ class RemoteControlServer(
         fun isMuted(): Boolean
         fun setMuted(muted: Boolean)
         fun thermal(): RemoteDto.ThermalDto?
+        fun power(): RemoteDto.PowerDto
         fun setPreviewEnabled(enabled: Boolean)
         fun setPreviewShortEdge(shortEdge: Int?)
         fun setPreviewFpsCap(maxFps: Int?)
@@ -74,13 +76,58 @@ class RemoteControlServer(
     private val requestPool = Executors.newFixedThreadPool(REQUEST_THREADS)
 
     /**
-     * SSE connections hold a thread for their whole life, so they get their own pool. Sharing
-     * one would let a few stalled browsers starve command handling.
+     * An open event stream used to hold a thread each, which starved command handling with only
+     * six request threads. Now a stream costs no thread at all: state is pushed when it changes
+     * and a single heartbeat thread keeps every connection warm.
      */
-    private val eventPool = Executors.newCachedThreadPool()
-    private val eventClients = Collections.synchronizedList(mutableListOf<BufferedOutputStream>())
+    private val eventClients = CopyOnWriteArrayList<EventClient>()
+    private var heartbeatThread: Thread? = null
+
+    /**
+     * Every outbound push goes through here.
+     *
+     * The pushes are triggered by flow collectors in the service, which run on the main thread,
+     * and writing to a socket there throws NetworkOnMainThreadException. That was being swallowed
+     * by the runCatching around the write, so the page was simply dropped on the first push.
+     * One thread also keeps pushes in order.
+     */
+    private val pushExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "RemoteControlPush").apply { isDaemon = true }
+    }
 
     private val revision = AtomicLong(0)
+
+    /**
+     * The last state we sent, minus its revision, so an unchanged state is not re-sent. The page
+     * rebuilds parts of its DOM on every state, which would fight a drag or a focused control.
+     */
+    @Volatile
+    private var lastStateFingerprint: String? = null
+
+    /**
+     * One connected page. Owns its socket, and serialises its own writes: the heartbeat thread,
+     * a state push and a message broadcast can all reach the same stream, and a BufferedOutputStream
+     * interleaved by two threads corrupts the SSE framing so the browser's JSON.parse throws.
+     */
+    private class EventClient(private val socket: Socket, private val output: BufferedOutputStream) {
+        private val writeLock = Any()
+
+        fun writeRaw(text: String) {
+            synchronized(writeLock) {
+                output.write(text.toByteArray())
+                output.flush()
+            }
+        }
+
+        fun send(event: String, data: String) = writeRaw("event: $event\ndata: $data\n\n")
+
+        fun ping() = writeRaw(":ping\n\n")
+
+        fun close() {
+            runCatching { output.close() }
+            runCatching { socket.close() }
+        }
+    }
 
     private val pageBytes: ByteArray by lazy {
         // Assets are stored compressed, so available() is not a length: read it all.
@@ -112,6 +159,16 @@ class RemoteControlServer(
                 Log.e(TAG, "Remote control could not start on port $port: ${t.message}", t)
             }
         }, "RemoteControlAccept").also { it.start() }
+
+        heartbeatThread = Thread({
+            while (isRunning.get()) {
+                runCatching { Thread.sleep(PING_INTERVAL_MS) }.onFailure { return@Thread }
+                // A comment keeps NAT open and is how a browser that went away is noticed.
+                eventClients.forEach { client ->
+                    runCatching { client.ping() }.onFailure { dropClient(client, "ping failed", it) }
+                }
+            }
+        }, "RemoteControlHeartbeat").also { it.isDaemon = true; it.start() }
     }
 
     fun stop() {
@@ -123,16 +180,16 @@ class RemoteControlServer(
         runCatching { serverSocket?.close() }
         serverSocket = null
 
-        synchronized(eventClients) {
-            eventClients.forEach { runCatching { it.close() } }
-            eventClients.clear()
-        }
+        eventClients.forEach { runCatching { it.close() } }
+        eventClients.clear()
+        lastStateFingerprint = null
 
         auth.revokeAll()
+        heartbeatThread?.interrupt()
+        heartbeatThread = null
+        pushExecutor.shutdownNow()
         requestPool.shutdownNow()
-        eventPool.shutdownNow()
         runCatching { requestPool.awaitTermination(1, TimeUnit.SECONDS) }
-        runCatching { eventPool.awaitTermination(1, TimeUnit.SECONDS) }
         acceptThread = null
     }
 
@@ -142,6 +199,11 @@ class RemoteControlServer(
         socket.soTimeout = SOCKET_TIMEOUT_MS
         val address = socket.inetAddress?.hostAddress ?: "unknown"
 
+        // An event stream outlives this method, so the socket must not be closed on the way out.
+        // Without this the stream was closed microseconds after being opened, the browser saw a
+        // connection accepted and dropped with no HTTP response at all, and reconnected forever.
+        var handedOff = false
+
         try {
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
             val output = BufferedOutputStream(socket.getOutputStream())
@@ -149,9 +211,13 @@ class RemoteControlServer(
             // Keep-alive: a browser reuses the connection for every command.
             while (isRunning.get() && !socket.isClosed) {
                 val request = readRequest(reader) ?: break
-                val keepOpen = route(request, address, output)
-                if (!keepOpen) {
-                    break
+                when (route(request, address, socket, output)) {
+                    RouteResult.REUSE -> Unit
+                    RouteResult.CLOSE -> break
+                    RouteResult.HANDED_OFF -> {
+                        handedOff = true
+                        break
+                    }
                 }
             }
         } catch (_: IOException) {
@@ -159,9 +225,13 @@ class RemoteControlServer(
         } catch (t: Throwable) {
             Log.w(TAG, "Connection from $address failed: ${t.message}")
         } finally {
-            runCatching { socket.close() }
+            if (!handedOff) {
+                runCatching { socket.close() }
+            }
         }
     }
+
+    private enum class RouteResult { REUSE, CLOSE, HANDED_OFF }
 
     private class Request(
         val method: String,
@@ -221,23 +291,25 @@ class RemoteControlServer(
         return Request(method, path, query, headers, body)
     }
 
-    /**
-     * @return whether the connection may be reused. SSE hands the socket off and returns false.
-     */
-    private fun route(request: Request, address: String, output: BufferedOutputStream): Boolean {
+    private fun route(
+        request: Request,
+        address: String,
+        socket: Socket,
+        output: BufferedOutputStream
+    ): RouteResult {
         if (request.path == "/" || request.path == "/index.html") {
             respond(output, 200, "text/html; charset=utf-8", pageBytes, "Cache-Control: no-store")
-            return true
+            return RouteResult.REUSE
         }
 
         if (request.path == "/favicon.ico") {
             respond(output, 204, "text/plain", ByteArray(0))
-            return true
+            return RouteResult.REUSE
         }
 
         if (request.path == "/api/auth") {
             handleAuth(request, address, output)
-            return true
+            return RouteResult.REUSE
         }
 
         // Everything below needs a token. EventSource cannot set headers, so the stream endpoint
@@ -250,15 +322,19 @@ class RemoteControlServer(
 
         if (!auth.isTokenValid(token)) {
             respondJson(output, 401, RemoteDto.ErrorResponse("unauthorized"))
-            return true
+            return RouteResult.REUSE
         }
 
         if (request.path == "/api/events") {
-            startEventStream(output)
-            return false
+            return if (startEventStream(socket, output, address)) {
+                RouteResult.HANDED_OFF
+            } else {
+                RouteResult.CLOSE
+            }
         }
 
-        return handleCommand(request, output)
+        handleCommand(request, output)
+        return RouteResult.REUSE
     }
 
     private fun handleAuth(request: Request, address: String, output: BufferedOutputStream) {
@@ -286,17 +362,21 @@ class RemoteControlServer(
         )
     }
 
-    private fun handleCommand(request: Request, output: BufferedOutputStream): Boolean {
+    private fun handleCommand(request: Request, output: BufferedOutputStream) {
         when (request.path) {
-            "/api/state" -> {
-                respondJson(output, 200, buildState())
-                return true
-            }
+            "/api/state" -> respondJson(output, 200, buildState())
 
             "/api/layout/preset" -> {
-                val body = parse<RemoteDto.PresetRequest>(request.body)
-                body?.presetId?.let { controller.applyPreset(it) }
-                respondJson(output, 200, RemoteDto.OkResponse(true))
+                val id = parse<RemoteDto.PresetRequest>(request.body)?.presetId
+                val known = id != null && controller.presets.any { it.id == id }
+                if (known) {
+                    controller.applyPreset(id!!)
+                    respondJson(output, 200, RemoteDto.OkResponse(true))
+                } else {
+                    // Answering ok to a command that did nothing is how a field-name mismatch or a
+                    // stale page goes unnoticed.
+                    respondJson(output, 400, RemoteDto.OkResponse(false, "Unknown preset: $id"))
+                }
             }
 
             "/api/layout/swap" -> {
@@ -330,8 +410,10 @@ class RemoteControlServer(
                 val body = parse<RemoteDto.LayerVisibleRequest>(request.body)
                 if (body?.layerId != null && body.visible != null) {
                     controller.setLayerVisible(body.layerId, body.visible)
+                    respondJson(output, 200, RemoteDto.OkResponse(true))
+                } else {
+                    respondJson(output, 400, RemoteDto.OkResponse(false, "Missing layer or visible"))
                 }
-                respondJson(output, 200, RemoteDto.OkResponse(true))
             }
 
             "/api/layer/primary" -> {
@@ -365,13 +447,22 @@ class RemoteControlServer(
                 when {
                     body?.ratio != null -> controller.setZoom(body.layerId, body.ratio)
                     body?.factor != null -> controller.nudgeZoom(body.layerId, body.factor)
+                    else -> {
+                        respondJson(output, 400, RemoteDto.OkResponse(false, "Missing ratio or factor"))
+                        return
+                    }
                 }
                 respondJson(output, 200, RemoteDto.OkResponse(true))
             }
 
             "/api/mute" -> {
-                parse<RemoteDto.MuteRequest>(request.body)?.muted?.let { hooks.setMuted(it) }
-                respondJson(output, 200, RemoteDto.OkResponse(true))
+                val wanted = parse<RemoteDto.MuteRequest>(request.body)?.muted
+                if (wanted == null) {
+                    respondJson(output, 400, RemoteDto.OkResponse(false, "Missing muted"))
+                } else {
+                    hooks.setMuted(wanted)
+                    respondJson(output, 200, RemoteDto.OkResponse(true))
+                }
             }
 
             "/api/preview" -> {
@@ -399,8 +490,9 @@ class RemoteControlServer(
 
             else -> respondJson(output, 404, RemoteDto.ErrorResponse("not_found"))
         }
-        return true
     }
+
+    private fun round2(value: Float): Float = Math.round(value * 100f) / 100f
 
     private inline fun <reified T> parse(body: String): T? =
         runCatching { gson.fromJson(body, T::class.java) }.getOrNull()
@@ -414,9 +506,14 @@ class RemoteControlServer(
         val layout = composite?.layoutFlow?.value
         val camerasInUse = controller.cameraIdsInUse()
 
+        // Zoom comes from a cache and a refresh is kicked off out of band. Reading it inline used
+        // to mean a suspending camera call per layer inside runBlocking on this very thread, so a
+        // single stalled read froze every connected page on a stale snapshot.
+        controller.refreshZoomAsync()
+
         val layers = layout?.layers?.sortedBy { it.z }?.map { layer ->
             val cameraId = (composite.childSource(layer.id) as? ICameraSource)?.cameraId
-            val zoom = kotlinx.coroutines.runBlocking { controller.zoomState(layer.id) }
+            val zoom = controller.cachedZoomState(layer.id)
             RemoteDto.LayerDto(
                 id = layer.id,
                 label = controller.layerLabel(layer.id),
@@ -428,7 +525,13 @@ class RemoteControlServer(
                 visible = layer.visible,
                 primary = layer.id == layout.primaryLayer?.id,
                 cameraId = cameraId,
-                zoom = zoom?.let { RemoteDto.ZoomDto(it.min, it.max, it.ratio) }
+                // Same reason as the thermal headroom: an unrounded ratio jitters and would make
+                // every snapshot compare different.
+                zoom = zoom?.let {
+                    RemoteDto.ZoomDto(
+                        round2(it.min), round2(it.max), round2(it.ratio), cameraId
+                    )
+                }
             )
         } ?: emptyList()
 
@@ -440,6 +543,7 @@ class RemoteControlServer(
             canvasWidth = composite?.canvasSize?.width ?: 0,
             canvasHeight = composite?.canvasSize?.height ?: 0,
             presets = controller.presets.map { RemoteDto.PresetDto(it.id, it.name) },
+            activePresetId = layout?.matchingPreset(controller.presets)?.id,
             layers = layers,
             cameras = controller.cameras.value.map { camera ->
                 RemoteDto.CameraDto(
@@ -453,43 +557,99 @@ class RemoteControlServer(
                         ?.takeIf { camerasInUse.contains(camera.id) }
                 )
             },
-            thermal = hooks.thermal()
+            thermal = hooks.thermal(),
+            power = hooks.power()
         )
     }
 
-    private fun startEventStream(output: BufferedOutputStream) {
-        eventPool.execute {
-            try {
-                if (eventClients.size >= MAX_EVENT_CLIENTS) {
-                    respondJson(output, 503, RemoteDto.ErrorResponse("too_many_clients"))
-                    return@execute
-                }
+    /**
+     * Opens an event stream on this socket and takes ownership of it.
+     *
+     * The headers are written on the caller's thread, synchronously. The previous version handed
+     * the socket to a worker pool and returned, and the caller's `finally` then closed the socket
+     * before the worker had written a single byte -- so the browser saw a connection accepted and
+     * dropped with no response, and reconnected every three seconds forever.
+     *
+     * @return true when the stream is open and the socket now belongs to [eventClients].
+     */
+    private fun startEventStream(
+        socket: Socket,
+        output: BufferedOutputStream,
+        address: String
+    ): Boolean {
+        // A non-200 answer puts EventSource into CLOSED for good: it never retries. So the oldest
+        // stream is dropped to make room instead of refusing the new one.
+        while (eventClients.size >= MAX_EVENT_CLIENTS) {
+            val oldest = eventClients.firstOrNull() ?: break
+            dropClient(oldest, "making room for a new client")
+        }
 
-                output.write(
-                    ("HTTP/1.1 200 OK\r\n" +
-                            "Content-Type: text/event-stream\r\n" +
-                            "Cache-Control: no-store\r\n" +
-                            "Connection: keep-alive\r\n\r\n" +
-                            "retry: 3000\n\n").toByteArray()
-                )
-                output.flush()
-                eventClients.add(output)
+        val client = EventClient(socket, output)
+        return try {
+            client.writeRaw(
+                "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: text/event-stream\r\n" +
+                        "Cache-Control: no-store\r\n" +
+                        "X-Accel-Buffering: no\r\n" +
+                        "Connection: keep-alive\r\n\r\n" +
+                        "retry: 3000\n\n"
+            )
+            // Nothing is read from this socket again, and a read timeout must not apply to a
+            // connection that is meant to stay open indefinitely.
+            runCatching { socket.soTimeout = 0 }
+            eventClients.add(client)
+            client.send("state", gson.toJson(buildState()))
+            Log.i(TAG, "Event stream opened for $address (${eventClients.size} client(s))")
+            true
+        } catch (t: Throwable) {
+            // Never silent again: swallowing this is what hid the bug above.
+            Log.w(TAG, "Event stream for $address failed to open: ${t.message}", t)
+            eventClients.remove(client)
+            client.close()
+            false
+        }
+    }
 
-                sendEvent(output, "state", gson.toJson(buildState()))
+    private fun dropClient(client: EventClient, why: String, cause: Throwable? = null) {
+        if (eventClients.remove(client)) {
+            Log.i(TAG, "Event stream closed ($why), ${eventClients.size} client(s) left", cause)
+        }
+        client.close()
+    }
 
-                while (isRunning.get()) {
-                    Thread.sleep(PING_INTERVAL_MS)
-                    // A comment keeps NAT open and detects a browser that went away.
-                    output.write(":ping\n\n".toByteArray())
-                    output.flush()
-                    sendEvent(output, "state", gson.toJson(buildState()))
-                }
-            } catch (_: Throwable) {
-                // The browser went away.
-            } finally {
-                eventClients.remove(output)
-                runCatching { output.close() }
-            }
+    /**
+     * Pushes the state to every page, but only when it actually differs from the last one sent.
+     *
+     * State used to go out on a two second timer inside each stream, which meant every remote
+     * action sat up to two seconds with no feedback and the page could not tell "applied" from
+     * "ignored". Now the service pushes on change and this stays quiet otherwise -- the page
+     * rebuilds parts of its DOM on each state, which would fight a drag or a focused control.
+     */
+    fun broadcastState(force: Boolean = false) {
+        if (eventClients.isEmpty()) {
+            lastStateFingerprint = null
+            return
+        }
+        runCatching { pushExecutor.execute { pushState(force) } }
+    }
+
+    private fun pushState(force: Boolean) {
+        if (eventClients.isEmpty()) {
+            lastStateFingerprint = null
+            return
+        }
+
+        val candidate = buildState()
+        val fingerprint = gson.toJson(candidate.copy(revision = 0))
+        if (!force && fingerprint == lastStateFingerprint) {
+            return
+        }
+        lastStateFingerprint = fingerprint
+
+        val payload = gson.toJson(candidate.copy(revision = revision.incrementAndGet()))
+        eventClients.forEach { client ->
+            runCatching { client.send("state", payload) }
+                .onFailure { dropClient(client, "state push failed", it) }
         }
     }
 
@@ -498,19 +658,20 @@ class RemoteControlServer(
      * than looking like a tap that did nothing.
      */
     fun broadcastMessage(text: String) {
+        if (eventClients.isEmpty()) {
+            return
+        }
         val payload = gson.toJson(RemoteDto.MessageDto(text))
-        synchronized(eventClients) {
-            eventClients.toList().forEach { client ->
-                runCatching { sendEvent(client, "message", payload) }
-                    .onFailure { eventClients.remove(client) }
+        runCatching {
+            pushExecutor.execute {
+                eventClients.forEach { client ->
+                    runCatching { client.send("message", payload) }
+                        .onFailure { dropClient(client, "message push failed", it) }
+                }
             }
         }
     }
 
-    private fun sendEvent(output: BufferedOutputStream, event: String, data: String) {
-        output.write("event: $event\ndata: $data\n\n".toByteArray())
-        output.flush()
-    }
 
     // endregion
 
@@ -557,9 +718,21 @@ class RemoteControlServer(
     companion object {
         private const val TAG = "RemoteControlServer"
 
-        private const val REQUEST_THREADS = 6
+        private const val REQUEST_THREADS = 12
+
         private const val MAX_EVENT_CLIENTS = 4
-        private const val SOCKET_TIMEOUT_MS = 30_000
-        private const val PING_INTERVAL_MS = 2_000L
+
+        /**
+         * How long an idle keep-alive connection may hold a request thread.
+         *
+         * A browser opens up to six connections per host and each one parks a thread in readLine
+         * until this expires, so at thirty seconds a single tab could hold the whole pool and
+         * later commands sat in the queue unanswered -- which looked like commands being lost.
+         * Event streams set their own timeout to zero once handed off.
+         */
+        private const val SOCKET_TIMEOUT_MS = 5_000
+
+        /** Keepalive only; state is pushed when it changes, not on this tick. */
+        private const val PING_INTERVAL_MS = 15_000L
     }
 }

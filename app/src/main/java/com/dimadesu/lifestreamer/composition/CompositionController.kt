@@ -84,8 +84,28 @@ class CompositionController(
      */
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
+    private val _layersInvalidated = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+
+    /**
+     * Fires when something a layer *shows* changed without the layout itself changing.
+     *
+     * Swapping a camera deliberately reuses the same VideoLayer so the rectangle survives, which
+     * means the new layout compares equal and the StateFlow never emits. Labels and zoom are
+     * derived from the live source, so without this signal both the on-device bar and the remote
+     * page keep the previous camera's name indefinitely.
+     */
+    val layersInvalidated: SharedFlow<Unit> = _layersInvalidated.asSharedFlow()
+
     private val _cameras = MutableStateFlow<List<CameraInfo>>(emptyList())
     val cameras: StateFlow<List<CameraInfo>> = _cameras.asStateFlow()
+
+    /**
+     * Last known zoom per layer. Reading zoom from the camera is a suspending call that takes a
+     * mutex and can queue behind a pending setZoomRatio; doing it inline while serialising state
+     * froze the whole snapshot. State now reads this cache and asks for a refresh out of band.
+     */
+    @Volatile
+    private var zoomCache: Map<String, ZoomState> = emptyMap()
 
     val presets: List<LayoutPreset> get() = CompositionPresets.ALL
 
@@ -235,6 +255,12 @@ class CompositionController(
             )
             _messages.tryEmit("${displayName(cameraId)} -> ${positionName(layerId)}")
             Log.i(TAG, "Layer $layerId now uses camera $cameraId")
+            // The layout is unchanged by design (the rectangle survives a camera swap), so the
+            // layoutFlow will not emit. Everything derived from the live source -- the label on
+            // the bar, the chip on the page, the zoom range -- needs this to be told.
+            zoomCache = zoomCache - layerId
+            _layersInvalidated.tryEmit(Unit)
+            refreshZoomAsync()
         }
     }
 
@@ -260,8 +286,13 @@ class CompositionController(
     }
 
     suspend fun zoomState(layerId: String?): ZoomState? {
-        val settings = cameraSettingsForLayer(layerId) ?: return null
+        val settings = cameraSettingsForLayer(layerId)
+        if (settings == null) {
+            Log.d(TAG, "No camera settings for layer $layerId")
+            return null
+        }
         if (!settings.isActiveFlow.value) {
+            Log.d(TAG, "Camera for layer $layerId is not active yet")
             return null
         }
         return runCatching {
@@ -269,8 +300,41 @@ class CompositionController(
             // The lower bound can be below 1.0 where an ultra-wide is part of the logical camera,
             // so a slider must use it rather than assuming 1.
             ZoomState(range.lower, range.upper, settings.zoom.getZoomRatio())
-        }.getOrNull()
+        }.onFailure { Log.w(TAG, "Could not read zoom for layer $layerId: ${it.message}") }
+            .getOrNull()
     }
+
+    /**
+     * The last zoom read for [layerId], without suspending. Null until the first refresh lands.
+     */
+    fun cachedZoomState(layerId: String): ZoomState? = zoomCache[layerId]
+
+    /**
+     * Re-reads zoom for every layer off the caller's thread and signals if anything moved.
+     *
+     * Deliberately fire-and-forget: a state snapshot uses whatever the cache holds and the
+     * refresh triggers another push once it converges, instead of blocking the serialisation.
+     */
+    fun refreshZoomAsync() {
+        scope.launch {
+            val ids = composite?.layoutFlow?.value?.layers?.map { it.id } ?: return@launch
+            val next = mutableMapOf<String, ZoomState>()
+            ids.forEach { id -> zoomState(id)?.let { next[id] = it } }
+            if (next != zoomCache) {
+                zoomCache = next
+                _layersInvalidated.tryEmit(Unit)
+            }
+        }
+    }
+
+    /**
+     * The layer a zoom command applies to: the one asked for, or the primary when none is given.
+     *
+     * The remote page always names a layer, and an explicit name used to be accepted and then
+     * silently dropped, so zooming the inset did nothing while reporting success.
+     */
+    private fun zoomTargetId(layerId: String?): String? =
+        layerId ?: composite?.layoutFlow?.value?.primaryLayer?.id
 
     /**
      * Zoom is a control input, not a request/response: it is dispatched and the authoritative
@@ -278,23 +342,30 @@ class CompositionController(
      */
     fun setZoom(layerId: String?, ratio: Float) {
         scope.launch {
-            val settings = cameraSettingsForLayer(layerId) ?: return@launch
+            val id = zoomTargetId(layerId)
+            val settings = cameraSettingsForLayer(id) ?: return@launch
             if (!settings.isActiveFlow.value) {
                 return@launch
             }
             runCatching { settings.zoom.setZoomRatio(ratio) }
                 .onFailure { Log.w(TAG, "Could not set zoom: ${it.message}") }
+            refreshZoomAsync()
         }
     }
 
     fun nudgeZoom(layerId: String?, factor: Float) {
         scope.launch {
-            val settings = cameraSettingsForLayer(layerId) ?: return@launch
+            val id = zoomTargetId(layerId)
+            val settings = cameraSettingsForLayer(id) ?: return@launch
             if (!settings.isActiveFlow.value) {
                 return@launch
             }
-            runCatching { settings.zoom.setZoomRatio(settings.zoom.getZoomRatio() * factor) }
-                .onFailure { Log.w(TAG, "Could not nudge zoom: ${it.message}") }
+            runCatching {
+                val range = settings.zoom.availableRatioRange
+                val wanted = settings.zoom.getZoomRatio() * factor
+                settings.zoom.setZoomRatio(wanted.coerceIn(range.lower, range.upper))
+            }.onFailure { Log.w(TAG, "Could not nudge zoom: ${it.message}") }
+            refreshZoomAsync()
         }
     }
 

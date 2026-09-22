@@ -101,10 +101,18 @@
     <div class="row">
       <button data-preview="off">Preview off</button>
       <button data-preview="on">Preview on</button>
-      <button data-res="360">Preview 360p</button>
-      <button data-fps="10">Preview 10 fps</button>
     </div>
-    <div class="muted" style="margin-top:6px">
+    <div class="row" style="margin-top:6px">
+      <button data-res="0">Full size</button>
+      <button data-res="540">540p</button>
+      <button data-res="360">360p</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button data-fps="0">Full rate</button>
+      <button data-fps="15">15 fps</button>
+      <button data-fps="10">10 fps</button>
+    </div>
+    <div class="muted" style="margin-top:6px" id="powerNote">
       None of these change what you stream.
     </div>
   </div>
@@ -123,6 +131,9 @@ var events = null;
 var dragging = null;
 var pendingRect = null;
 var rectInFlight = false;
+var zoomHeld = false;
+var pendingZoom = null;
+var zoomInFlight = false;
 
 function api(path, body, method) {
   var verb = method || "POST";
@@ -138,6 +149,14 @@ function api(path, body, method) {
   return fetch(path, init).then(function (r) {
     if (r.status === 401) { signOut(); throw new Error("unauthorized"); }
     return r.status === 204 ? null : r.json().catch(function () { return null; });
+  }).then(function (body) {
+    // The server used to answer ok to everything, so a refused or misunderstood command was
+    // indistinguishable from a working one. Now a refusal says so.
+    if (body && body.ok === false && body.error) showStatus(body.error, "#7a3a3a");
+    return body;
+  }).catch(function (e) {
+    if (e && e.message !== "unauthorized") showStatus("Phone did not answer", "#7a3a3a");
+    throw e;
   });
 }
 
@@ -213,10 +232,11 @@ function render(s) {
   }
 
   renderThermal(s.thermal);
-  renderPresets(s.presets);
+  renderPresets(s.presets, s.activePresetId);
   renderStage(s.layers);
   renderLayers(s.layers, s.cameras);
   renderZoom(s.layers);
+  renderPower(s.power);
 
   var mute = document.getElementById("mute");
   mute.textContent = s.muted ? "Unmute" : "Mute";
@@ -246,15 +266,40 @@ function renderThermal(t) {
   box.innerHTML = html;
 }
 
-function renderPresets(presets) {
+function renderPresets(presets, activeId) {
   var box = document.getElementById("presets");
   box.innerHTML = "";
   (presets || []).forEach(function (p) {
     var b = document.createElement("button");
     b.textContent = p.name;
+    // The phone reports which arrangement the layout currently matches, so the operator can see
+    // where they are instead of guessing from seven identical buttons.
+    if (p.id === activeId) b.className = "on";
     b.onclick = function () { api("/api/layout/preset", { presetId: p.id }); };
     box.appendChild(b);
   });
+}
+
+function renderPower(power) {
+  if (!power) return;
+  document.querySelectorAll("[data-preview]").forEach(function (b) {
+    var on = (b.dataset.preview === "on") === (power.previewEnabled !== false);
+    b.className = on ? "on" : "";
+  });
+  document.querySelectorAll("[data-res]").forEach(function (b) {
+    var want = parseInt(b.dataset.res, 10) || null;
+    b.className = (power.previewShortEdge || null) === want ? "on" : "";
+  });
+  document.querySelectorAll("[data-fps]").forEach(function (b) {
+    var want = parseInt(b.dataset.fps, 10) || null;
+    b.className = (power.previewFpsCap || null) === want ? "on" : "";
+  });
+  var note = document.getElementById("powerNote");
+  if (note) {
+    note.textContent = power.appliedBy === "thermal"
+      ? "The phone set this because it is hot. Changing it here overrules that for 5 minutes."
+      : "None of these change what you stream.";
+  }
 }
 
 function renderStage(layers) {
@@ -357,44 +402,122 @@ function renderLayers(layers, cameras) {
 
 function renderZoom(layers) {
   var box = document.getElementById("zoomBox");
-  var layer = (layers || []).filter(function (l) { return l.id === selected && l.zoom; })[0];
-  if (!layer) {
-    box.innerHTML = '<div class="muted">Select a camera layer</div>';
+  var zoomable = (layers || []).filter(function (l) { return l.zoom; });
+
+  if (!zoomable.length) {
+    box.innerHTML = '<div class="muted">No camera layer to zoom</div>';
+    box.dataset.for = "";
     return;
   }
-  if (box.dataset.for === layer.id && box.querySelector("input")) {
-    return;  // leave the slider alone while it is being dragged
+
+  // The zoom used to follow the invisible "selected" layer, so with nothing selected the panel
+  // said "Select a camera layer" and there was no way from here to say which layer it meant.
+  var layer = zoomable.filter(function (l) { return l.id === selected; })[0] || zoomable[0];
+  var slider = box.querySelector("input");
+  var signature = layer.id + "|" + (layer.zoom.cameraId || "") + "|" + layer.zoom.min + "|" + layer.zoom.max;
+
+  // Rebuild when the layer or its camera changed. The old guard skipped every rebuild once a
+  // slider existed, so the handle never moved and the range stayed on the previous camera's.
+  if (box.dataset.for !== signature) {
+    box.dataset.for = signature;
+    box.innerHTML = "";
+
+    var picker = document.createElement("div");
+    picker.className = "row";
+    zoomable.forEach(function (l) {
+      var t = document.createElement("button");
+      t.textContent = l.label;
+      if (l.id === layer.id) t.className = "on";
+      t.onclick = function () { selected = l.id; render(state); };
+      picker.appendChild(t);
+    });
+    box.appendChild(picker);
+
+    var row = document.createElement("div");
+    row.className = "row";
+    row.style.alignItems = "center";
+    row.style.marginTop = "6px";
+
+    var minus = document.createElement("button");
+    minus.textContent = "−";
+    minus.onclick = function () { nudge(layer.id, 1 / 1.25); };
+
+    slider = document.createElement("input");
+    slider.type = "range";
+    // The minimum can be below 1 where an ultra-wide is part of the logical camera, so it comes
+    // from the device rather than being assumed.
+    slider.min = layer.zoom.min;
+    slider.max = layer.zoom.max;
+    slider.step = 0.01;
+    slider.style.flex = "1";
+    // While a finger is on the slider the incoming value must not fight it.
+    slider.addEventListener("pointerdown", function () { zoomHeld = true; });
+    slider.addEventListener("pointerup", function () { zoomHeld = false; });
+    slider.addEventListener("pointercancel", function () { zoomHeld = false; });
+    slider.oninput = function () {
+      setZoomLabel(parseFloat(slider.value));
+      sendZoom(layer.id, parseFloat(slider.value));
+    };
+
+    var plus = document.createElement("button");
+    plus.textContent = "+";
+    plus.onclick = function () { nudge(layer.id, 1.25); };
+
+    var label = document.createElement("div");
+    label.id = "zoomValue";
+    label.className = "muted";
+    label.style.minWidth = "48px";
+    label.style.textAlign = "right";
+
+    row.appendChild(minus);
+    row.appendChild(slider);
+    row.appendChild(plus);
+    row.appendChild(label);
+    box.appendChild(row);
   }
-  box.dataset.for = layer.id;
-  box.innerHTML = "";
 
-  var row = document.createElement("div");
-  row.className = "row";
-  row.style.alignItems = "center";
+  // Follow the phone unless the operator is holding the slider.
+  if (slider && !zoomHeld) {
+    slider.value = layer.zoom.ratio;
+    setZoomLabel(layer.zoom.ratio);
+  }
+}
 
-  var minus = document.createElement("button");
-  minus.textContent = "−";
-  minus.onclick = function () { api("/api/zoom", { layerId: layer.id, factor: 1 / 1.1 }); };
+function setZoomLabel(value) {
+  var el = document.getElementById("zoomValue");
+  if (el) el.textContent = (Math.round(value * 100) / 100) + "x";
+}
 
-  var slider = document.createElement("input");
-  slider.type = "range";
-  // The minimum can be below 1 where an ultra-wide is part of the logical camera, so it comes
-  // from the device rather than being assumed.
-  slider.min = layer.zoom.min;
-  slider.max = layer.zoom.max;
-  slider.step = 0.01;
-  slider.value = layer.zoom.ratio;
-  slider.style.flex = "1";
-  slider.oninput = function () { api("/api/zoom", { layerId: layer.id, ratio: parseFloat(slider.value) }); };
+/**
+ * A step the operator can actually see. The old 10% step was barely visible, and the page gave
+ * no feedback at all, so the buttons looked dead even when they worked.
+ */
+function nudge(layerId, factor) {
+  var l = layerById(layerId);
+  if (l && l.zoom) {
+    var next = Math.min(Math.max(l.zoom.ratio * factor, l.zoom.min), l.zoom.max);
+    l.zoom.ratio = next;
+    setZoomLabel(next);
+    var slider = document.querySelector("#zoomBox input");
+    if (slider) slider.value = next;
+  }
+  api("/api/zoom", { layerId: layerId, factor: factor });
+}
 
-  var plus = document.createElement("button");
-  plus.textContent = "+";
-  plus.onclick = function () { api("/api/zoom", { layerId: layer.id, factor: 1.1 }); };
-
-  row.appendChild(minus);
-  row.appendChild(slider);
-  row.appendChild(plus);
-  box.appendChild(row);
+/**
+ * Coalesced like the drag rectangles: one request in flight, the newest value wins. Firing one
+ * POST per slider movement queued dozens of them, and a later one could land before an earlier.
+ */
+function sendZoom(layerId, ratio) {
+  pendingZoom = { layerId: layerId, ratio: ratio };
+  if (zoomInFlight) return;
+  zoomInFlight = true;
+  var payload = pendingZoom;
+  pendingZoom = null;
+  api("/api/zoom", payload).catch(function () {}).then(function () {
+    zoomInFlight = false;
+    if (pendingZoom) sendZoom(pendingZoom.layerId, pendingZoom.ratio);
+  });
 }
 
 // ---- gestures on the schematic ----
@@ -440,7 +563,11 @@ document.getElementById("stage").addEventListener("pointerdown", function (e) {
     origin: { left: l.left, top: l.top, right: l.right, bottom: l.bottom },
     layer: Object.assign({}, l)
   };
-  e.target.setPointerCapture(e.pointerId);
+  // Capture on the stage, not on the box under the finger: every pointermove re-renders and
+  // removes that box from the DOM, which drops the capture. The pointerup then landed wherever
+  // the finger happened to be -- outside the stage if the drag went to an edge -- so endDrag
+  // never ran, the layer stayed frozen at the drag position and ignored every later preset.
+  document.getElementById("stage").setPointerCapture(e.pointerId);
 });
 
 document.getElementById("stage").addEventListener("pointermove", function (e) {
@@ -476,19 +603,36 @@ function endDrag() {
   var id = dragging.id;
   dragging = null;
   api("/api/layer/commit", { layerId: id });
+  // The schematic was held at the dragged position; let the phone's answer take over again.
+  if (state) renderStage(state.layers);
 }
 document.getElementById("stage").addEventListener("pointerup", endDrag);
 document.getElementById("stage").addEventListener("pointercancel", endDrag);
+// Belt and braces: a pointer released outside the stage, or a window that lost focus mid-drag,
+// must not leave a layer stuck.
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", endDrag);
+window.addEventListener("blur", endDrag);
 
 // ---- other controls ----
 
 document.getElementById("swap").onclick = function () { api("/api/layout/swap"); };
 document.getElementById("mute").onclick = function () {
-  api("/api/mute", { muted: !(state && state.muted) });
+  // Absolute, from the state we are actually showing, and applied locally at once. Inverting a
+  // cached value meant that while the state was stale every tap sent "mute" again, so once muted
+  // there was no way back.
+  var button = document.getElementById("mute");
+  var next = !(state && state.muted);
+  if (state) state.muted = next;
+  button.textContent = next ? "Unmute" : "Mute";
+  button.className = next ? "on" : "";
+  api("/api/mute", { muted: next });
 };
 document.querySelectorAll("[data-preview]").forEach(function (b) {
   b.onclick = function () { api("/api/preview", { enabled: b.dataset.preview === "on" }); };
 });
+// Zero means "back to normal": the server already treated <= 0 as no cap, but the page had no
+// button that sent it, so 360p and 10 fps were one-way doors.
 document.querySelectorAll("[data-res]").forEach(function (b) {
   b.onclick = function () { api("/api/preview/resolution", { shortEdge: parseInt(b.dataset.res, 10) }); };
 });

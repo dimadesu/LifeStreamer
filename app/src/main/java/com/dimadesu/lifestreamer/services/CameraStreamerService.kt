@@ -44,6 +44,7 @@ import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.composite.ICompositeVideoSource
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 import kotlinx.coroutines.*
@@ -54,6 +55,7 @@ import io.github.thibaultbee.streampack.core.streamers.orientation.IRotationProv
 import io.github.thibaultbee.streampack.core.streamers.orientation.SensorRotationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import com.dimadesu.lifestreamer.audio.BluetoothAudioSource
@@ -510,7 +512,44 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         serviceScope.launch {
             compositionController.messages.collect { RemoteControlManager.broadcastMessage(it) }
         }
+
+        // State is pushed when it changes. It used to be polled every two seconds from inside
+        // each event stream, so every remote action sat up to two seconds with no feedback and
+        // the page could not tell an applied command from an ignored one.
+        serviceScope.launch {
+            compositionController.layersInvalidated.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            isMutedFlow.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            thermalMonitor.stateFlow.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            thermalPolicy.appliedActionsFlow.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            runCatching { streamer.isStreamingFlow }.getOrNull()
+                ?.collect { RemoteControlManager.broadcastState() }
+        }
+        // The composition itself can be replaced (COMPOSE on/off), so follow the source and then
+        // its layout rather than binding once to a layout that may not exist yet.
+        serviceScope.launch {
+            videoInputSourceFlow()?.collectLatest { source ->
+                RemoteControlManager.broadcastState()
+                (source as? ICompositeVideoSource)?.layoutFlow?.collect {
+                    RemoteControlManager.broadcastState()
+                }
+            }
+        }
     }
+
+    /**
+     * The flow of the active video source, or null when this streamer does not expose one.
+     */
+    private fun videoInputSourceFlow(): kotlinx.coroutines.flow.Flow<Any?>? = runCatching {
+        (streamer as? IWithVideoSource)?.videoInput?.sourceFlow
+    }.getOrNull()
 
     /**
      * What the remote control server needs that is not the composition.
@@ -518,6 +557,34 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * The preview actions go through the thermal actuator, which is the UI. When it is not there
      * the preview is already off, which is what the remote operator was asking for anyway.
      */
+    /**
+     * What is applied to the preview right now.
+     *
+     * These three used to live only in PreviewViewModel, so with the Activity gone -- which is
+     * exactly when the remote control matters -- there was nothing to report and the page's power
+     * buttons could not show what was in effect.
+     */
+    @Volatile
+    private var previewEnabledState: Boolean = true
+
+    @Volatile
+    private var previewShortEdgeState: Int? = null
+
+    @Volatile
+    private var previewFpsCapState: Int? = null
+
+    @Volatile
+    private var previewAppliedByThermal: Boolean = false
+
+    /** Called by the actuator so the service stays the authority even when the UI drives it. */
+    fun notePreviewState(enabled: Boolean, shortEdge: Int?, fpsCap: Int?, byThermal: Boolean) {
+        previewEnabledState = enabled
+        previewShortEdgeState = shortEdge
+        previewFpsCapState = fpsCap
+        previewAppliedByThermal = byThermal
+        RemoteControlManager.broadcastState()
+    }
+
     private val remoteControlHooks = object : RemoteControlServer.Hooks {
         override fun isStreaming(): Boolean =
             runCatching { streamer.isStreamingFlow.value }.getOrDefault(false)
@@ -528,11 +595,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             this@CameraStreamerService.setMuted(muted)
         }
 
+        override fun power(): RemoteDto.PowerDto = RemoteDto.PowerDto(
+            previewEnabled = previewEnabledState,
+            previewShortEdge = previewShortEdgeState,
+            previewFpsCap = previewFpsCapState,
+            appliedBy = if (previewAppliedByThermal) "thermal" else "operator"
+        )
+
         override fun thermal(): RemoteDto.ThermalDto {
             val state = thermalMonitor.stateFlow.value
             return RemoteDto.ThermalDto(
                 level = state.level.name,
-                headroom = state.headroom.takeIf { !it.isNaN() },
+                // Rounded because the raw reading drifts in the sixth decimal continuously, and
+                // an unrounded value makes every state look different, so the page would rebuild
+                // its DOM every few seconds and fight whatever the operator is dragging.
+                headroom = state.headroom.takeIf { !it.isNaN() }?.let { Math.round(it * 100f) / 100f },
                 powerSaveMode = state.isPowerSaveMode,
                 supported = state.isSupported,
                 appliedActions = thermalPolicy.appliedActionsFlow.value
@@ -552,6 +629,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             if (enabled) {
                 thermalPolicy.onManualOverride()
             }
+            notePreviewState(enabled, previewShortEdgeState, previewFpsCapState, byThermal = false)
         }
 
         override fun setPreviewShortEdge(shortEdge: Int?) {
@@ -559,6 +637,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             if (shortEdge == null) {
                 thermalPolicy.onManualOverride()
             }
+            notePreviewState(previewEnabledState, shortEdge, previewFpsCapState, byThermal = false)
         }
 
         override fun setPreviewFpsCap(maxFps: Int?) {
@@ -568,6 +647,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             if (maxFps == null) {
                 thermalPolicy.onManualOverride()
             }
+            notePreviewState(previewEnabledState, previewShortEdgeState, maxFps, byThermal = false)
         }
 
         override fun onLockdown() {
