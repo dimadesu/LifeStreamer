@@ -1,5 +1,6 @@
 package com.dimadesu.lifestreamer.bitrate
 
+import io.github.thibaultbee.streampack.ext.srt.configuration.mediadescriptor.SrtMtu
 import android.util.Log
 import io.github.thibaultbee.srtdroid.core.models.Stats
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
@@ -16,7 +17,16 @@ import kotlin.math.min
 class BelaboxSrtBelaRegulator(
     metricsTracker: EndpointMetricsTracker,
     bitrateRegulatorConfig: BitrateRegulatorConfig,
-    onVideoTargetBitrateChange: ((Int) -> Unit)
+    onVideoTargetBitrateChange: ((Int) -> Unit),
+    /**
+     * The SRT payload size actually in use.
+     *
+     * Used to turn a bandwidth-delay product in bytes into a count of packets. It is a unit
+     * conversion, not a tuning constant: leave it at 1316 while the real payload is smaller and
+     * the send-buffer threshold is overestimated, so the fast-decrease branch fires later than
+     * intended.
+     */
+    private val srtPayloadSize: Int = SrtMtu.DEFAULT_PAYLOAD_SIZE
 ) : SrtBitrateRegulator(metricsTracker, bitrateRegulatorConfig, onVideoTargetBitrateChange, { /* no audio */ }) {
 
     companion object {
@@ -86,7 +96,7 @@ class BelaboxSrtBelaRegulator(
     fun getCurrentMaximumBitrateInKbps(): Long = curBitrate / 1000
 
     private fun rttToSendBufferSize(rtt: Double, throughput: Double): Double {
-        return (throughput / 8.0) * rtt / 1316.0
+        return (throughput / 8.0) * rtt / srtPayloadSize.toDouble()
     }
 
     private fun updateSendBufferSizeAverage(sendBufferSize: Double) {

@@ -1,5 +1,6 @@
 package com.dimadesu.lifestreamer.data.storage
 
+import io.github.thibaultbee.streampack.ext.srt.configuration.mediadescriptor.SrtMtu
 import android.content.Context
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -190,12 +191,22 @@ class DataStoreRepository(
                 val latency =
                     preferences[stringPreferencesKey(context.getString(R.string.srt_server_latency_key))]?.toIntOrNull()
                         ?: context.getString(R.string.default_srt_server_latency).toInt()
+                // The takeIf pair is what makes "the operator never touched this" literally
+                // null, so the descriptor and everything downstream behave exactly as before.
+                val mtu = SrtMtu.coerceMtu(
+                    preferences[stringPreferencesKey(context.getString(R.string.srt_mtu_key))]
+                        ?.toIntOrNull()
+                        ?: SrtMtu.DEFAULT_MTU
+                )
                 SrtMediaDescriptor(
                     host = ip,
                     port = port,
                     streamId = streamId,
                     passPhrase = passPhrase,
-                    latency = latency
+                    latency = latency,
+                    maxSegmentSize = mtu.takeIf { it != SrtMtu.DEFAULT_MTU },
+                    payloadSize = SrtMtu.payloadSizeForMtu(mtu)
+                        .takeIf { it != SrtMtu.DEFAULT_PAYLOAD_SIZE }
                 )
             }
 
@@ -219,13 +230,24 @@ class DataStoreRepository(
                 val passPhrase =
                     preferences[stringPreferencesKey(context.getString(R.string.srtla_passphrase_key))]
                         ?: ""
-                // SRT connects to the local Bond Bunny proxy which forwards to the SRTLA receiver
+                val mtu = SrtMtu.coerceMtu(
+                    preferences[stringPreferencesKey(context.getString(R.string.srt_mtu_key))]
+                        ?.toIntOrNull()
+                        ?: SrtMtu.DEFAULT_MTU
+                )
+                // SRT connects to the local Bond Bunny proxy which forwards to the SRTLA receiver.
+                // The MTU matters more here, not less: srtla forwards datagrams verbatim, and
+                // because this socket connects over loopback libsrt cannot infer anything about
+                // the real path, so an explicit MSS is the only lever there is.
                 SrtMediaDescriptor(
                     host = "127.0.0.1",
                     port = listenPort,
                     streamId = streamId,
                     passPhrase = passPhrase,
-                    latency = latency
+                    latency = latency,
+                    maxSegmentSize = mtu.takeIf { it != SrtMtu.DEFAULT_MTU },
+                    payloadSize = SrtMtu.payloadSizeForMtu(mtu)
+                        .takeIf { it != SrtMtu.DEFAULT_PAYLOAD_SIZE }
                 )
             }
         }
@@ -267,6 +289,18 @@ class DataStoreRepository(
                 ?: context.getString(R.string.default_moblink_port).toInt(),
         )
     }.distinctUntilChanged()
+
+    /** The SRT MTU, already brought into the range the UI offers. */
+    val srtMtuFlow: Flow<Int> = dataStore.data.map { preferences ->
+        SrtMtu.coerceMtu(
+            preferences[stringPreferencesKey(context.getString(R.string.srt_mtu_key))]?.toIntOrNull()
+                ?: SrtMtu.DEFAULT_MTU
+        )
+    }.distinctUntilChanged()
+
+    /** The SRT payload size derived from [srtMtuFlow]. */
+    val srtPayloadSizeFlow: Flow<Int> =
+        srtMtuFlow.map { SrtMtu.payloadSizeForMtu(it) }.distinctUntilChanged()
 
     /** Whether the app may reduce the preview by itself when the phone gets hot. */
     val thermalBackoffEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->

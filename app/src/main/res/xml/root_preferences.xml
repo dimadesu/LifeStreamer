@@ -378,6 +378,19 @@
         </PreferenceCategory>
 
         <PreferenceCategory
+            app:key="@string/srt_transport_key"
+            app:title="@string/srt_transport_title">
+
+            <EditTextPreference
+                app:defaultValue="@string/default_srt_mtu"
+                app:key="@string/srt_mtu_key"
+                app:title="@string/srt_mtu_title"
+                app:dialogMessage="@string/srt_mtu_hint"
+                app:useSimpleSummaryProvider="true" />
+
+        </PreferenceCategory>
+
+        <PreferenceCategory
             app:key="@string/bitrate_regulation_key"
             app:title="@string/bitrate_regulation">
 

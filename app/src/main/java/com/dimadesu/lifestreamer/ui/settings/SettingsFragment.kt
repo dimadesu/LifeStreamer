@@ -15,6 +15,7 @@
  */
 package com.dimadesu.lifestreamer.ui.settings
 
+import io.github.thibaultbee.streampack.ext.srt.configuration.mediadescriptor.SrtMtu
 import android.content.Context
 import android.media.AudioFormat
 import android.media.MediaCodecInfo
@@ -140,6 +141,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<PreferenceCategory>(R.string.rtmp_server_key) ?: error("rtmp_server_key not found")
     }
 
+    private val srtTransportPreference: PreferenceCategory by lazy {
+        findPreferenceSafe(R.string.srt_transport_key) ?: error("srt_transport_key not found")
+    }
+
+    private val srtMtuPreference: EditTextPreference by lazy {
+        findPreferenceSafe(R.string.srt_mtu_key) ?: error("srt_mtu_key not found")
+    }
+
     private val srtEndpointPreference: PreferenceCategory by lazy {
         findPreferenceSafe<PreferenceCategory>(R.string.srt_server_key) ?: error("srt_server_key not found")
     }
@@ -232,6 +241,37 @@ class SettingsFragment : PreferenceFragmentCompat() {
      * The permission for that exemption has been declared in the manifest since forever and was
      * never actually used, so the app could never protect itself from being restricted.
      */
+    private fun loadSrtTransportSettings() {
+        srtMtuPreference.setOnBindEditTextListener { editText ->
+            editText.inputType = InputType.TYPE_CLASS_NUMBER
+            editText.filters = arrayOf(InputFilter.LengthFilter(4))
+        }
+
+        // Shows the derivation rather than leaving the operator to guess where the steps are —
+        // 1360 and 1359 produce different payloads and nothing else would say so.
+        fun summaryFor(value: String?): String {
+            val mtu = value?.toIntOrNull() ?: SrtMtu.DEFAULT_MTU
+            return SrtMtu.describe(mtu)
+        }
+
+        srtMtuPreference.summary = summaryFor(srtMtuPreference.text)
+
+        srtMtuPreference.setOnPreferenceChangeListener { preference, newValue ->
+            val mtu = (newValue as? String)?.toIntOrNull()
+            if (mtu == null || mtu !in SrtMtu.UI_MIN_MTU..SrtMtu.DEFAULT_MTU) {
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    getString(R.string.srt_mtu_invalid, SrtMtu.UI_MIN_MTU, SrtMtu.DEFAULT_MTU),
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                false
+            } else {
+                preference.summary = summaryFor(newValue)
+                true
+            }
+        }
+    }
+
     private fun loadPowerSettings() {
         val powerManager =
             requireContext().getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
@@ -852,6 +892,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         srtlaEndpointPreference.isVisible = endpoint.hasSrtlaCapabilities
         fileEndpointPreference.isVisible = endpoint.hasFileCapabilities
         bitrateRegulationPreference.isVisible = endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities || endpoint.hasRtmpCapabilities
+        // The MTU applies to plain SRT and to SRTLA alike, so it belongs to neither category.
+        srtTransportPreference.isVisible =
+            endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities
         
         val isSrt = endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities
         val isRtmp = endpoint.hasRtmpCapabilities
@@ -911,6 +954,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         loadRtmpSourceSettings()
         loadCompositionSettings()
         loadPowerSettings()
+        loadSrtTransportSettings()
         loadEndpoint()
     }
 }

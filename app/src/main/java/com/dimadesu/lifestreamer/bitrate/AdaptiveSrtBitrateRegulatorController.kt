@@ -20,7 +20,10 @@ class AdaptiveSrtBitrateRegulatorController {
     class Factory(
         private val bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
         private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
-        private val mode: RegulatorMode = RegulatorMode.MOBLIN_FAST
+        private val mode: RegulatorMode = RegulatorMode.MOBLIN_FAST,
+        /** The SRT payload size in use, so the Belabox regulator counts packets correctly. */
+        private val srtPayloadSize: Int =
+            io.github.thibaultbee.streampack.ext.srt.configuration.mediadescriptor.SrtMtu.DEFAULT_PAYLOAD_SIZE
     ) : BitrateRegulatorController.Factory() {
         override fun newBitrateRegulatorController(
             pipelineOutput: IEncodingPipelineOutput,
@@ -49,7 +52,12 @@ class AdaptiveSrtBitrateRegulatorController {
                         onVideoTargetBitrateChange: (Int) -> Unit,
                         onAudioTargetBitrateChange: (Int) -> Unit
                     ): SrtBitrateRegulator {
-                        return BelaboxSrtBelaRegulator(metricsTracker, bitrateRegulatorConfig, onVideoTargetBitrateChange)
+                        return BelaboxSrtBelaRegulator(
+                            metricsTracker,
+                            bitrateRegulatorConfig,
+                            onVideoTargetBitrateChange,
+                            srtPayloadSize
+                        )
                     }
                 }
                 RegulatorMode.MOBLIN_FAST, RegulatorMode.MOBLIN_SLOW -> object : SrtBitrateRegulator.Factory {

@@ -21,7 +21,11 @@ class StreamConfigurationHelper(private val storageRepository: DataStoreReposito
         val config = storageRepository.bitrateRegulatorConfigFlow.first() ?: return null
         return if (sinkType == MediaSinkType.SRT) {
             val mode = storageRepository.regulatorModeFlow.first()
-            AdaptiveSrtBitrateRegulatorController.Factory(bitrateRegulatorConfig = config, mode = mode)
+            AdaptiveSrtBitrateRegulatorController.Factory(
+                bitrateRegulatorConfig = config,
+                mode = mode,
+                srtPayloadSize = storageRepository.srtPayloadSizeFlow.first()
+            )
         } else {
             intervalBitrateRegulatorControllerFactory(
                 bitrateRegulatorFactory = RtmpSendDurationBitrateRegulator.Factory(),
