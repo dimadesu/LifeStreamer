@@ -30,6 +30,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.net.URLDecoder
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -73,7 +74,18 @@ class RemoteControlServer(
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
 
-    private val requestPool = Executors.newFixedThreadPool(REQUEST_THREADS)
+    /**
+     * Request threads run slightly above background but deliberately **below** video (-10) and
+     * audio (-16). At the default nice 0 they were the lowest priority in the process while
+     * streaming -- the main thread is raised to -19 when a stream starts -- so under thermal
+     * throttling they got whatever was left. They must never compete with what goes on air.
+     */
+    private val requestPool = Executors.newFixedThreadPool(REQUEST_THREADS) { r ->
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+            r.run()
+        }, "RemoteControlRequest").apply { isDaemon = true }
+    }
 
     /**
      * An open event stream used to hold a thread each, which starved command handling with only
@@ -92,7 +104,10 @@ class RemoteControlServer(
      * One thread also keeps pushes in order.
      */
     private val pushExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "RemoteControlPush").apply { isDaemon = true }
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+            r.run()
+        }, "RemoteControlPush").apply { isDaemon = true }
     }
 
     private val revision = AtomicLong(0)
@@ -104,34 +119,130 @@ class RemoteControlServer(
     @Volatile
     private var lastStateFingerprint: String? = null
 
-    /**
-     * One connected page. Owns its socket, and serialises its own writes: the heartbeat thread,
-     * a state push and a message broadcast can all reach the same stream, and a BufferedOutputStream
-     * interleaved by two threads corrupts the SSE framing so the browser's JSON.parse throws.
-     */
-    private class EventClient(private val socket: Socket, private val output: BufferedOutputStream) {
-        private val writeLock = Any()
+    private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
 
-        fun writeRaw(text: String) {
-            synchronized(writeLock) {
-                output.write(text.toByteArray())
-                output.flush()
-            }
-        }
+    private val pushPending = AtomicBoolean(false)
+    private val forcePush = AtomicBoolean(false)
 
-        fun send(event: String, data: String) = writeRaw("event: $event\ndata: $data\n\n")
-
-        fun ping() = writeRaw(":ping\n\n")
-
-        fun close() {
-            runCatching { output.close() }
-            runCatching { socket.close() }
-        }
-    }
+    @Volatile
+    private var lastPushAtMs: Long = 0L
 
     private val pageBytes: ByteArray by lazy {
         // Assets are stored compressed, so available() is not a length: read it all.
         context.assets.open("remote/index.html").use { it.readBytes() }
+    }
+
+    /**
+     * The page gzipped once, because it crosses the same saturated radio as the video. 25 KB of
+     * HTML is a real cost on a link the bitrate regulator deliberately keeps full.
+     */
+    private val pageBytesGzipped: ByteArray by lazy {
+        java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.GZIPOutputStream(out).use { it.write(pageBytes) }
+        }.toByteArray()
+    }
+
+    /**
+     * One connected page, with its own outbound queue and writer thread.
+     *
+     * Writes used to happen on whichever thread pushed, under a lock. That is fatal here: a
+     * `java.net.Socket` has **no write timeout** -- SO_TIMEOUT only covers reads -- so when the
+     * live stream saturates the radio and the browser's TCP window closes, `flush()` blocks
+     * indefinitely. With one shared push thread, a single slow client stalled every other client,
+     * and the same block on a request thread meant a command never got answered.
+     *
+     * So: bounded queue, and when it overflows the **oldest state is dropped**. State is
+     * last-writer-wins, so a slow client losing intermediate frames is correct; blocking everyone
+     * else is not. A watchdog closes the socket from outside if a write hangs, which is the only
+     * way to unblock a stuck write.
+     */
+    private class EventClient(
+        private val socket: Socket,
+        private val output: BufferedOutputStream,
+        val address: String,
+        private val onDead: (EventClient, String) -> Unit
+    ) {
+        private class Frame(val text: String, val droppable: Boolean)
+
+        private val queue = ArrayBlockingQueue<Frame>(QUEUE_CAPACITY)
+        private val closed = AtomicBoolean(false)
+
+        /** When the in-progress write started, or 0. Read by the watchdog from another thread. */
+        @Volatile
+        var writeStartedAtMs: Long = 0L
+            private set
+
+        private val writer = Thread({
+            try {
+                while (!closed.get()) {
+                    val frame = queue.take()
+                    if (frame === POISON) break
+                    writeStartedAtMs = System.currentTimeMillis()
+                    try {
+                        output.write(frame.text.toByteArray())
+                        output.flush()
+                    } finally {
+                        writeStartedAtMs = 0L
+                    }
+                }
+            } catch (_: InterruptedException) {
+                // Shutting down.
+            } catch (t: Throwable) {
+                onDead(this, "write failed: ${t.message}")
+            }
+        }, "RemoteControlWriter").apply { isDaemon = true }
+
+        fun start() = writer.start()
+
+        /**
+         * @param droppable true for state, which is superseded by the next one. Messages and the
+         * keepalive are not dropped; if even those cannot be queued the client is hopeless.
+         */
+        private fun enqueue(text: String, droppable: Boolean) {
+            if (closed.get()) return
+            val frame = Frame(text, droppable)
+            if (queue.offer(frame)) return
+
+            if (droppable) {
+                // Make room by discarding the oldest droppable frame. Falling behind on state is
+                // survivable; blocking the pusher is not.
+                val head = queue.poll()
+                if (head != null && !head.droppable) {
+                    // Do not silently swallow a message; put it back and give up on this frame.
+                    queue.offer(head)
+                    return
+                }
+                queue.offer(frame)
+            } else {
+                onDead(this, "outbound queue full")
+            }
+        }
+
+        fun send(event: String, data: String, droppable: Boolean = true) =
+            enqueue("event: $event\ndata: $data\n\n", droppable)
+
+        fun ping() = enqueue(":ping\n\n", droppable = false)
+
+        /** Written directly by the thread that opened the stream, before the writer starts. */
+        fun writeHeaderDirectly(text: String) {
+            output.write(text.toByteArray())
+            output.flush()
+        }
+
+        fun close() {
+            if (!closed.getAndSet(true)) {
+                queue.offer(POISON)
+                writer.interrupt()
+                // Closing from here is what unblocks a writer stuck inside flush().
+                runCatching { socket.close() }
+                runCatching { output.close() }
+            }
+        }
+
+        companion object {
+            private const val QUEUE_CAPACITY = 8
+            private val POISON = Frame("", droppable = false)
+        }
     }
 
     fun start() {
@@ -149,7 +260,31 @@ class RemoteControlServer(
 
                 while (isRunning.get()) {
                     val client = socket.accept()
-                    requestPool.execute { serveConnection(client) }
+                    runCatching { client.trafficClass = IPTOS_LOWDELAY }
+
+                    // A fixed pool with an unbounded queue used to accept connections it had no
+                    // thread for; they sat with no timeout and the command simply never arrived.
+                    // An error the browser can see beats a command that vanishes.
+                    if (activeConnections.get() >= REQUEST_THREADS) {
+                        Log.w(TAG, "Refusing a connection: all $REQUEST_THREADS request threads are busy")
+                        runCatching {
+                            client.getOutputStream().write(
+                                ("HTTP/1.1 503 Service Unavailable\r\n" +
+                                        "Content-Length: 0\r\nConnection: close\r\n\r\n").toByteArray()
+                            )
+                        }
+                        runCatching { client.close() }
+                        continue
+                    }
+
+                    activeConnections.incrementAndGet()
+                    requestPool.execute {
+                        try {
+                            serveConnection(client)
+                        } finally {
+                            activeConnections.decrementAndGet()
+                        }
+                    }
                 }
             } catch (e: SocketException) {
                 if (isRunning.get()) {
@@ -161,14 +296,32 @@ class RemoteControlServer(
         }, "RemoteControlAccept").also { it.start() }
 
         heartbeatThread = Thread({
+            var sinceLastPing = 0L
             while (isRunning.get()) {
-                runCatching { Thread.sleep(PING_INTERVAL_MS) }.onFailure { return@Thread }
-                // A comment keeps NAT open and is how a browser that went away is noticed.
+                runCatching { Thread.sleep(WATCHDOG_INTERVAL_MS) }.onFailure { return@Thread }
+
+                // A write with no timeout can hang forever when the radio is saturated by the
+                // live stream. Closing the socket from here is the only thing that unblocks it.
+                val now = System.currentTimeMillis()
                 eventClients.forEach { client ->
-                    runCatching { client.ping() }.onFailure { dropClient(client, "ping failed", it) }
+                    val started = client.writeStartedAtMs
+                    if (started != 0L && now - started > WRITE_STALL_MS) {
+                        dropClient(client, "write stalled for ${now - started}ms")
+                    }
+                }
+
+                sinceLastPing += WATCHDOG_INTERVAL_MS
+                if (sinceLastPing >= PING_INTERVAL_MS) {
+                    sinceLastPing = 0L
+                    // A comment keeps NAT open and is how a browser that went away is noticed.
+                    eventClients.forEach { client -> client.ping() }
                 }
             }
-        }, "RemoteControlHeartbeat").also { it.isDaemon = true; it.start() }
+        }, "RemoteControlHeartbeat").also {
+            it.isDaemon = true
+            it.priority = Thread.NORM_PRIORITY
+            it.start()
+        }
     }
 
     fun stop() {
@@ -298,7 +451,15 @@ class RemoteControlServer(
         output: BufferedOutputStream
     ): RouteResult {
         if (request.path == "/" || request.path == "/index.html") {
-            respond(output, 200, "text/html; charset=utf-8", pageBytes, "Cache-Control: no-store")
+            val acceptsGzip = request.headers["accept-encoding"]?.contains("gzip", ignoreCase = true) == true
+            if (acceptsGzip) {
+                respond(
+                    output, 200, "text/html; charset=utf-8", pageBytesGzipped,
+                    "Cache-Control: no-store", "Content-Encoding: gzip"
+                )
+            } else {
+                respond(output, 200, "text/html; charset=utf-8", pageBytes, "Cache-Control: no-store")
+            }
             return RouteResult.REUSE
         }
 
@@ -429,9 +590,15 @@ class RemoteControlServer(
                 } else {
                     // Structural, so it is awaited: the answer says whether the hardware allowed
                     // it, which is what the page shows instead of doing nothing.
-                    val result = kotlinx.coroutines.runBlocking {
-                        controller.setLayerCamera(body.layerId, body.cameraId)
-                    }
+                    // Bounded: this reopens a camera2 device with the session live and used to
+                    // hold a request thread for as long as that took.
+                    val result = runCatching {
+                        kotlinx.coroutines.runBlocking {
+                            kotlinx.coroutines.withTimeout(CAMERA_SWITCH_TIMEOUT_MS) {
+                                controller.setLayerCamera(body.layerId, body.cameraId)
+                            }
+                        }
+                    }.getOrElse { Result.failure(it) }
                     respondJson(
                         output, 200,
                         RemoteDto.OkResponse(
@@ -506,10 +673,10 @@ class RemoteControlServer(
         val layout = composite?.layoutFlow?.value
         val camerasInUse = controller.cameraIdsInUse()
 
-        // Zoom comes from a cache and a refresh is kicked off out of band. Reading it inline used
-        // to mean a suspending camera call per layer inside runBlocking on this very thread, so a
-        // single stalled read froze every connected page on a stale snapshot.
-        controller.refreshZoomAsync()
+        // Zoom is read from a cache that the controller refreshes when the composition or the
+        // zoom actually changes. Kicking a refresh off from here fed a loop: refresh -> emits
+        // layersInvalidated -> broadcastState -> buildState -> refresh, which never settled while
+        // the value jittered.
 
         val layers = layout?.layers?.sortedBy { it.z }?.map { layer ->
             val cameraId = (composite.childSource(layer.id) as? ICameraSource)?.cameraId
@@ -536,7 +703,9 @@ class RemoteControlServer(
         } ?: emptyList()
 
         return RemoteDto.StateDto(
-            revision = revision.incrementAndGet(),
+            // Bumped once per actual send, in pushState. Incrementing here too made
+            // every push jump by two, so the page could think it had missed a state.
+            revision = revision.get(),
             composition = composite != null,
             streaming = hooks.isStreaming(),
             muted = hooks.isMuted(),
@@ -584,9 +753,9 @@ class RemoteControlServer(
             dropClient(oldest, "making room for a new client")
         }
 
-        val client = EventClient(socket, output)
+        val client = EventClient(socket, output, address) { dead, why -> dropClient(dead, why) }
         return try {
-            client.writeRaw(
+            client.writeHeaderDirectly(
                 "HTTP/1.1 200 OK\r\n" +
                         "Content-Type: text/event-stream\r\n" +
                         "Cache-Control: no-store\r\n" +
@@ -597,6 +766,10 @@ class RemoteControlServer(
             // Nothing is read from this socket again, and a read timeout must not apply to a
             // connection that is meant to stay open indefinitely.
             runCatching { socket.soTimeout = 0 }
+            // Commands are interactive; ask the driver not to queue them behind the bulk video
+            // that shares this radio. Ignored by some drivers, harmless when it is.
+            runCatching { socket.trafficClass = IPTOS_LOWDELAY }
+            client.start()
             eventClients.add(client)
             client.send("state", gson.toJson(buildState()))
             Log.i(TAG, "Event stream opened for $address (${eventClients.size} client(s))")
@@ -630,7 +803,24 @@ class RemoteControlServer(
             lastStateFingerprint = null
             return
         }
-        runCatching { pushExecutor.execute { pushState(force) } }
+        // Conflated: a drag emits a layout change per pointer event (~60/s) and each one used to
+        // become its own task, each doing a full buildState plus two serialisations. Only the
+        // most recent request matters, so coalesce and rate-limit.
+        if (force) forcePush.set(true)
+        if (pushPending.getAndSet(true)) {
+            return
+        }
+        runCatching {
+            pushExecutor.execute {
+                val sinceLast = System.currentTimeMillis() - lastPushAtMs
+                if (sinceLast < MIN_PUSH_INTERVAL_MS) {
+                    runCatching { Thread.sleep(MIN_PUSH_INTERVAL_MS - sinceLast) }
+                }
+                pushPending.set(false)
+                lastPushAtMs = System.currentTimeMillis()
+                pushState(forcePush.getAndSet(false))
+            }
+        }.onFailure { pushPending.set(false) }
     }
 
     private fun pushState(force: Boolean) {
@@ -703,7 +893,11 @@ class RemoteControlServer(
             append("Content-Type: $contentType\r\n")
             append("Content-Length: ${body.size}\r\n")
             extraHeaders.forEach { append("$it\r\n") }
-            append("Connection: keep-alive\r\n\r\n")
+            append("Connection: keep-alive\r\n")
+            // Tell the browser when we will hang up, so it closes first. Without this it kept
+            // reusing a connection we were about to drop, and a POST lost that race is simply
+            // gone -- browsers do not retry POST.
+            append("Keep-Alive: timeout=${KEEP_ALIVE_ADVERTISED_S}\r\n\r\n")
         }
 
         output.write(header.toByteArray())
@@ -722,6 +916,19 @@ class RemoteControlServer(
 
         private const val MAX_EVENT_CLIENTS = 4
 
+        /** DSCP/TOS hint for interactive traffic, so commands do not queue behind the video. */
+        private const val IPTOS_LOWDELAY = 0x10
+
+        private const val WATCHDOG_INTERVAL_MS = 1_000L
+
+        /** A write still unfinished after this is treated as a dead client and its socket closed. */
+        private const val WRITE_STALL_MS = 5_000L
+
+        /** At most this often; a drag would otherwise push ~60 states a second. */
+        private const val MIN_PUSH_INTERVAL_MS = 100L
+
+        private const val CAMERA_SWITCH_TIMEOUT_MS = 8_000L
+
         /**
          * How long an idle keep-alive connection may hold a request thread.
          *
@@ -730,7 +937,10 @@ class RemoteControlServer(
          * later commands sat in the queue unanswered -- which looked like commands being lost.
          * Event streams set their own timeout to zero once handed off.
          */
-        private const val SOCKET_TIMEOUT_MS = 5_000
+        private const val SOCKET_TIMEOUT_MS = 30_000
+
+        /** Slightly under the socket timeout, so the browser closes before the server does. */
+        private const val KEEP_ALIVE_ADVERTISED_S = 25
 
         /** Keepalive only; state is pushed when it changes, not on this tick. */
         private const val PING_INTERVAL_MS = 15_000L

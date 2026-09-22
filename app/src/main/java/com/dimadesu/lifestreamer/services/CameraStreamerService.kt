@@ -28,6 +28,7 @@ import io.github.thibaultbee.streampack.core.pipelines.StreamerPipeline
 import io.github.thibaultbee.streampack.services.StreamerService
 import io.github.thibaultbee.streampack.services.utils.StreamerFactory
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.view.Surface
 import android.view.WindowManager
@@ -117,7 +118,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     val compositionController by lazy {
         com.dimadesu.lifestreamer.composition.CompositionController(
             context = this,
-            scope = serviceScope,
+            parentScope = serviceScope,
             videoSourceProvider = {
                 (streamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)
                     ?.videoInput?.sourceFlow?.value
@@ -181,6 +182,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Wake lock to prevent audio silencing
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
+
+    private var wifiLock: WifiManager.WifiLock? = null
     
     // Network wake lock to prevent network I/O throttling during background streaming
     // Especially important for SRT streaming
@@ -536,8 +539,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // its layout rather than binding once to a layout that may not exist yet.
         serviceScope.launch {
             videoInputSourceFlow()?.collectLatest { source ->
+                // The zoom cache is refreshed here rather than while serialising state: doing it
+                // there fed a loop (refresh -> layersInvalidated -> push -> refresh) that never
+                // settled while the value jittered.
+                compositionController.refreshZoomAsync()
                 RemoteControlManager.broadcastState()
                 (source as? ICompositeVideoSource)?.layoutFlow?.collect {
+                    compositionController.refreshZoomAsync()
                     RemoteControlManager.broadcastState()
                 }
             }
@@ -955,16 +963,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
                     // Reuse the already computed statusLabel for the notification key
                     // Build notification and key using canonical helper so it's consistent
-                    // Build notification; include uptime when streaming
-                    val (notification, notificationKey) = buildNotificationForStatus(serviceStatus)
-
-
-                    // Skip rebuilding the notification if nothing relevant changed.
+                    // The key is checked before building. Building first meant a full
+                    // NotificationCompat with five actions was constructed every two seconds on
+                    // the main thread and then thrown away, which is exactly the kind of waste
+                    // that makes remote commands queue behind it while streaming.
+                    val notificationKey = notificationKeyForStatus(serviceStatus)
                     if (notificationKey == lastNotificationKey) {
                         delay(2000)
                         continue
                     }
 
+                    val (notification, _) = buildNotificationForStatus(serviceStatus)
                     customNotificationUtils.notify(notification)
                     lastNotificationKey = notificationKey
                 } catch (e: Exception) {
@@ -996,10 +1005,25 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     }
 
     // Build the notification and its key in the same way as the status updater
-    private fun buildNotificationForStatus(status: StreamStatus): Pair<Notification, String> {
-        val title = getString(R.string.service_notification_title)
+    /**
+     * The text that decides whether the notification needs redrawing at all.
+     *
+     * Split out from the builder so the two-second updater can answer "nothing changed" without
+     * constructing a NotificationCompat with five actions first and throwing it away -- on the
+     * main thread, while streaming, ahead of everything the remote control wants to do.
+     */
+    private data class NotificationContent(
+        val statusLabel: String,
+        val content: String,
+        val bitrateText: String,
+        val fpsText: String,
+        val finalText: String
+    ) {
+        fun key(status: StreamStatus, muted: Boolean): String =
+            listOf(status.name, muted, content, bitrateText, fpsText, statusLabel).joinToString("|")
+    }
 
-        // Compute canonical status label
+    private fun notificationContentFor(status: StreamStatus): NotificationContent {
         val statusLabel = when (status) {
             StreamStatus.STREAMING -> getString(R.string.status_streaming)
             StreamStatus.STARTING -> getString(R.string.status_starting)
@@ -1008,12 +1032,43 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             else -> getString(R.string.status_not_streaming)
         }
 
-        // When streaming, append uptime to the content (e.g., "Live • 00:01:23")
         val content = if (status == StreamStatus.STREAMING) {
             val uptimeMillis = System.currentTimeMillis() - (streamingStartTime ?: System.currentTimeMillis())
             val uptime = try { formatUptime(uptimeMillis) } catch (_: Throwable) { "" }
             if (uptime.isNotEmpty()) "$statusLabel • $uptime" else statusLabel
         } else statusLabel
+
+        val videoEncoderRef = if (status == StreamStatus.STREAMING) {
+            (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder
+        } else null
+        val videoBitrate = videoEncoderRef?.bitrate
+        val fpsText = try {
+            videoEncoderRef?.getStats()?.let { s -> "%.1f fps".format(java.util.Locale.US, s.outputFps) }
+        } catch (_: Throwable) { null }.orEmpty()
+
+        val bitrateText = videoBitrate?.let { b ->
+            if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0)
+            else String.format(java.util.Locale.US, "%d kb/s", b / 1000)
+        } ?: ""
+
+        val finalText = if (status == StreamStatus.STREAMING) {
+            val fpsAppend = if (fpsText.isNotEmpty()) " • $fpsText" else ""
+            "$content • $bitrateText$fpsAppend"
+        } else content
+
+        return NotificationContent(statusLabel, content, bitrateText, fpsText, finalText)
+    }
+
+    private fun notificationKeyForStatus(status: StreamStatus): String =
+        notificationContentFor(status).key(status, isCurrentlyMuted())
+
+    private fun buildNotificationForStatus(status: StreamStatus): Pair<Notification, String> {
+        val title = getString(R.string.service_notification_title)
+        val parts = notificationContentFor(status)
+
+        // Compute canonical status label
+        val statusLabel = parts.statusLabel
+        val content = parts.content
 
         // Determine mute/unmute label and pending intents
         val muteLabel = currentMuteLabel()
@@ -1024,30 +1079,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                       status == StreamStatus.CONNECTING || 
                       status == StreamStatus.STARTING
 
-        // Only read bitrate and FPS when streaming
-        val videoEncoderRef = if (status == StreamStatus.STREAMING) {
-            (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder
-        } else null
-        val videoBitrate = videoEncoderRef?.bitrate
-        val fpsText = try {
-            videoEncoderRef?.getStats()?.let { s -> "%.1f fps".format(java.util.Locale.US, s.outputFps) }
-        } catch (_: Throwable) { null }
-
-        val bitrateText = videoBitrate?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
-
-        val contentWithBitrate = if (status == StreamStatus.STREAMING) {
-            val vb = videoBitrate?.let { b -> if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0) else String.format(java.util.Locale.US, "%d kb/s", b / 1000) } ?: ""
-            // content already contains statusLabel when streaming (e.g., "Live • 00:01:23"),
-            // so avoid appending the statusLabel again. Just add bitrate and FPS after whatever
-            // content we've computed.
-            val fpsAppend = fpsText?.let { " • $it" } ?: ""
-            "$content • $vb$fpsAppend"
-        } else content
-
-        // Avoid duplicating the status label. Use contentWithBitrate directly as the
-        // notification's content text; the small status label (statusLabel) is used by
-        // the collapsed header where appropriate via NotificationUtils.
-        val finalContentText = contentWithBitrate
+        val finalContentText = parts.finalText
         
         val isFg = status == StreamStatus.STREAMING || status == StreamStatus.CONNECTING
 
@@ -1067,8 +1099,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             openPending = openPendingIntent
         )
 
-        val key = listOf(status.name, isCurrentlyMuted(), content, bitrateText, fpsText ?: "", statusLabel).joinToString("|")
-        return Pair(notification, key)
+        return Pair(notification, parts.key(status, isCurrentlyMuted()))
     }
 
     // Decide the effective status using streamer immediate state when available,
@@ -1216,7 +1247,48 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * An untimed lock means any path that misses the release pins the CPU awake until the phone
      * is rebooted, which is a far worse failure than the renewal being late.
      */
+    /**
+     * Keeps the Wi-Fi radio out of power save while streaming.
+     *
+     * Measured on the device: with the radio idle a local ping averages 55 ms with 166 ms peaks;
+     * with traffic keeping it awake, 18 ms. The operator's video and the remote control share
+     * this radio, so those stalls land directly on the commands. Held only while streaming --
+     * awake costs battery and heat, and heat is the real risk with the phone on a windscreen.
+     */
+    private fun acquireWifiLock() {
+        if (wifiLock == null) {
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = runCatching {
+                (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+                    .createWifiLock(mode, "LifeStreamer::Stream")
+                    ?.apply { setReferenceCounted(false) }
+            }.getOrNull()
+        }
+        runCatching {
+            wifiLock?.takeIf { !it.isHeld }?.let {
+                it.acquire()
+                Log.i(TAG, "Wi-Fi lock acquired (radio stays awake while streaming)")
+            }
+        }.onFailure { Log.w(TAG, "Could not acquire the Wi-Fi lock: ${it.message}") }
+    }
+
+    private fun releaseWifiLock() {
+        runCatching {
+            wifiLock?.takeIf { it.isHeld }?.let {
+                it.release()
+                Log.i(TAG, "Wi-Fi lock released")
+            }
+        }.onFailure { Log.w(TAG, "Could not release the Wi-Fi lock: ${it.message}") }
+        wifiLock = null
+    }
+
     private fun acquireWakeLock() {
+        acquireWifiLock()
         if (wakeLock == null) {
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
@@ -1255,6 +1327,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Release wake lock
      */
     private fun releaseWakeLock() {
+        releaseWifiLock()
         wakeLockRenewalJob?.cancel()
         wakeLockRenewalJob = null
         wakeLock?.let { lock ->

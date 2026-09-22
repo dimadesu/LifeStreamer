@@ -36,6 +36,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.composite.IC
 import io.github.thibaultbee.streampack.core.elements.sources.video.composite.LayerSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -69,9 +70,32 @@ data class ZoomState(val min: Float, val max: Float, val ratio: Float)
  */
 class CompositionController(
     private val context: Context,
-    private val scope: CoroutineScope,
+    parentScope: CoroutineScope,
     private val videoSourceProvider: () -> IVideoSource?
 ) {
+    /**
+     * The one thread every mutation and every camera read runs on.
+     *
+     * Single-threaded on purpose: it is what makes the unguarded read-modify-writes in the
+     * composite source safe with two writers (the UI and the remote control). Kept off the main
+     * thread so a busy UI cannot delay a remote command, and below video and audio priority so it
+     * can never compete with what goes on air.
+     */
+    private var confinementThread: Thread? = null
+
+    private val confinementExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+            r.run()
+        }, "CompositionController").apply {
+            isDaemon = true
+            confinementThread = this
+        }
+    }
+
+    private val scope: CoroutineScope =
+        CoroutineScope(parentScope.coroutineContext + confinementExecutor.asCoroutineDispatcher())
+
     private val capabilities = CompositionCapabilities(context)
     private val store = CompositionStore(context)
 
@@ -128,9 +152,16 @@ class CompositionController(
      * [ICompositeVideoSource.updateLayer] is an unguarded read-modify-write and `childSource`
      * reads the children map outside the mutex that otherwise guards it. That was safe while the
      * UI thread was the only writer; the remote control is the second one.
+     *
+     * That thread used to be the **main** thread, which is the worst possible choice here: while
+     * streaming the main thread carries the notification updater, the thermal ticks and the whole
+     * UI, and it is raised to priority -19 when a stream starts. Every remote command was acked
+     * instantly by the HTTP handler and then queued behind all of that, which is exactly what
+     * "the commands do not arrive" felt like. It is now a private single thread, so a command
+     * takes effect whether or not the UI is busy.
      */
     private fun confined(block: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
+        if (Thread.currentThread() === confinementThread) {
             block()
         } else {
             scope.launch { block() }
