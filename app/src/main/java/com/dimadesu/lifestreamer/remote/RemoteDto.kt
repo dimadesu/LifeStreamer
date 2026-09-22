@@ -41,7 +41,10 @@ object RemoteDto {
         val cameras: List<CameraDto>,
         val thermal: ThermalDto?,
         val power: PowerDto,
-        val stream: StreamDto
+        val stream: StreamDto,
+        /** #RRGGBB, or null when there is no composition. */
+        val backgroundColor: String?,
+        val pipSources: List<PipSourceDto>
     )
 
     /**
@@ -83,7 +86,25 @@ object RemoteDto {
         val visible: Boolean,
         val primary: Boolean,
         val cameraId: String?,
-        val zoom: ZoomDto?
+        val zoom: ZoomDto?,
+        /** FIT, FILL or STRETCH. */
+        val scaleMode: String,
+        val alpha: Float,
+        val mirror: Boolean,
+        val rotation: Int,
+        /** For the second layer: which source kind it is meant to show. */
+        val sourceKind: String?,
+        /** True when that source could not be built or died and the test image stands in. */
+        val onPlaceholder: Boolean
+    )
+
+    @Keep
+    data class PipSourceDto(
+        val kind: String,
+        val label: String,
+        val available: Boolean,
+        val reason: String?,
+        val active: Boolean
     )
 
     @Keep
@@ -169,6 +190,24 @@ object RemoteDto {
 
     @Keep
     data class MuteRequest(val muted: Boolean? = null)
+
+    @Keep
+    data class CompositionRequest(val enabled: Boolean? = null)
+
+    @Keep
+    data class PipSourceRequest(val kind: String? = null)
+
+    @Keep
+    data class LayerStyleRequest(
+        val layerId: String? = null,
+        val scaleMode: String? = null,
+        val alpha: Float? = null,
+        val mirror: Boolean? = null,
+        val rotation: Int? = null
+    )
+
+    @Keep
+    data class BackgroundRequest(val color: String? = null)
 
     @Keep
     data class PreviewRequest(val enabled: Boolean? = null)

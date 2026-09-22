@@ -50,6 +50,9 @@ import com.dimadesu.lifestreamer.ui.main.usecases.BuildStreamerUseCase
 import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.uvc.UvcVideoSource
+import com.dimadesu.lifestreamer.composition.CompositionLayers
+import com.dimadesu.lifestreamer.composition.ExternalPipSourceProvider
+import com.dimadesu.lifestreamer.composition.PipSourceKind
 import com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection.MediaProjectionVideoSourceFactory
@@ -133,7 +136,7 @@ import kotlinx.coroutines.withContext
 
 
 class PreviewViewModel(private val application: Application) : ObservableViewModel(),
-    com.dimadesu.lifestreamer.power.ThermalActuator {
+    com.dimadesu.lifestreamer.power.ThermalActuator, ExternalPipSourceProvider {
     private val storageRepository = DataStoreRepository(application, application.dataStore)
     private val streamConfigurationHelper = StreamConfigurationHelper(storageRepository)
     private val rotationRepository = RotationRepository.getInstance(application)
@@ -1353,6 +1356,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                 Log.w(TAG, "Failed to collect composition messages: ${t.message}")
                             }
 
+                            // Screen and USB layers need grants that only this screen can ask for.
+                            binder.compositionController().externalPipProvider = this@PreviewViewModel
+
                             try {
                                 binder.thermalPolicy().actuator = this@PreviewViewModel
                                 viewModelScope.launch {
@@ -1426,8 +1432,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     Manifest.permission.CAMERA
                 ) == PackageManager.PERMISSION_GRANTED
             ) {
-                Log.i(TAG, "Camera permission granted, setting video source")
-                currentStreamer.setVideoSource(CameraSourceFactory(application))
+                if (currentStreamer.videoInput?.sourceFlow?.value is ICompositeVideoSource) {
+                    // Turned on from the remote page while this screen was closed. Replacing it
+                    // with a camera here would switch the composition off just by opening the app.
+                    Log.i(TAG, "Keeping the running composition instead of resetting to camera")
+                } else {
+                    Log.i(TAG, "Camera permission granted, setting video source")
+                    currentStreamer.setVideoSource(CameraSourceFactory(application))
+                }
             } else {
                 Log.w(TAG, "Camera permission not granted")
             }
@@ -3478,6 +3490,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Remember current camera ID before switching away
                         if (videoSource is ICameraSource) {
                             lastUsedCameraId = videoSource.cameraId
+                        compositionController?.primaryCameraHint = videoSource.cameraId
                             Log.d(TAG, "Saved camera ID for later: $lastUsedCameraId")
                         }
 
@@ -3757,6 +3770,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Remember current camera
                         lastUsedCameraId = videoSource.cameraId
+                        compositionController?.primaryCameraHint = videoSource.cameraId
                         Log.d(TAG, "Saved camera ID: $lastUsedCameraId")
                         
                         // Release any existing CameraHelper before creating a new one
@@ -4227,73 +4241,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * layout UI come later; the engine underneath is the same.
      */
     fun toggleCompositeSource() {
-        val currentStreamer = serviceStreamer
-        if (currentStreamer == null) {
+        val controller = compositionController
+        if (controller == null) {
             _streamerErrorLiveData.postValue("Service not available")
             return
         }
 
+        // The lifecycle lives in the controller now, so the remote page can do the same with the
+        // app's screen gone. The screen-side reactions (the bar, the selection, monitor audio)
+        // happen in onVideoSourceChanged, whichever side made the change.
         viewModelScope.launch {
-            try {
-                removeBitrateRegulatorIfNeeded()
-                // Let the previous source release before the new one opens the camera.
-                delay(300)
-
-                val cameraId = lastUsedCameraId
-                    ?: application.cameraManager.cameras.firstOrNull()
-                    ?: "0"
-
-                if (_isCompositeSource.value == true) {
-                    layerFailureJob?.cancel()
-                    layerFailureJob = null
-                    layoutObserverJob?.cancel()
-                    layoutObserverJob = null
-                    _compositionLayers.postValue(emptyList())
-                    _isCompositionEditMode.postValue(false)
-                    currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
-                    _isCompositeSource.postValue(false)
-                    Log.i(TAG, "Composition off, back to camera $cameraId")
-                } else {
-                    currentStreamer.setVideoSource(
-                        CompositeVideoSourceFactory(
-                            listOf(mainLayerSpec(cameraId), pipLayerSpec())
-                        )
-                    )
-                    layoutCycleStep = 0
-                    (currentStreamer.videoInput?.sourceFlow?.value as? ICompositeVideoSource)
-                        ?.let {
-                            observeCompositionFailures(it)
-                            observeCompositionLayout(it)
-                            restoreSavedComposition(it)
-                            it.previewMaxFps = previewMaxFps
-                            // Without a selection the first camera tap would silently land on
-                            // whichever layer happened to be primary.
-                            _selectedCompositionLayerId.postValue(COMPOSITION_LAYER_MAIN)
-                        }
-                    _isCompositeSource.postValue(true)
-                    Log.i(TAG, "Composition on: camera $cameraId + bitmap picture-in-picture")
-                }
-
-                readdBitrateRegulatorIfNeeded()
-                if (_isMonitorAudioOn.value == true) {
-                    applyMonitorAudioState()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to toggle composition: ${e.message}", e)
-                _streamerErrorLiveData.postValue("Composition failed: ${e.message}")
+            val result = if (_isCompositeSource.value == true) {
+                controller.disableComposition()
+            } else {
+                controller.enableComposition()
+            }
+            result.onFailure {
+                Log.e(TAG, "Failed to toggle composition: ${it.message}", it)
+                _streamerErrorLiveData.postValue("Composition failed: ${it.message}")
             }
         }
-    }
-
-    /**
-     * What feeds the second layer of the composition.
-     */
-    enum class CompositionPipSource(val label: String) {
-        TEST_IMAGE("Test image"),
-        CAMERA("Second camera"),
-        USB("USB camera"),
-        SCREEN("Screen"),
-        RTMP("RTMP / SRT source")
     }
 
     /**
@@ -4310,25 +4277,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * The picker shows unavailable options disabled with this reason rather than hiding them:
      * the question an operator actually has is "why can't I?", and a missing row never answers it.
      */
-    fun reasonPipSourceUnavailable(source: CompositionPipSource): String? = when (source) {
-        CompositionPipSource.CAMERA ->
-            compositionCapabilities.reasonSecondCameraUnavailable(currentCameraIdOrDefault())
-
-        CompositionPipSource.USB ->
-            if (uvcCameraHelper?.deviceList.isNullOrEmpty() &&
-                (application.getSystemService(android.content.Context.USB_SERVICE)
-                        as android.hardware.usb.UsbManager).deviceList.isEmpty()
-            ) {
-                "No USB camera connected"
-            } else {
-                null
-            }
-
-        // The test image always works; screen and network sources report their own problems when
-        // the layer is built, because permission and connectivity can change between now and then.
-        CompositionPipSource.TEST_IMAGE,
-        CompositionPipSource.SCREEN,
-        CompositionPipSource.RTMP -> null
+    fun reasonPipSourceUnavailable(source: PipSourceKind): String? {
+        // Here, on the phone, a missing screen grant is not a reason to refuse: choosing Screen is
+        // exactly what asks for it. Only the remote page, which cannot show that dialog, is told no.
+        if (source == PipSourceKind.SCREEN) return null
+        val controller = compositionController ?: return "Service not available"
+        return controller.pipSourceOptions().firstOrNull { it.kind == source }?.reason
     }
 
     private fun currentCameraIdOrDefault(): String =
@@ -4336,18 +4290,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             ?: application.cameraManager.cameras.firstOrNull()
             ?: "0"
 
-    private val _compositionPipSource = MutableLiveData(CompositionPipSource.TEST_IMAGE)
-    val compositionPipSource: LiveData<CompositionPipSource> = _compositionPipSource
+    /** What the second layer is meant to show; owned by the controller. */
+    val compositionPipSource: PipSourceKind
+        get() = compositionController?.pipSource?.value ?: PipSourceKind.TEST_IMAGE
 
-    /**
-     * True while the picture-in-picture is showing the placeholder because its real source died.
-     * Stops the failure handler from replacing a placeholder with another placeholder.
-     */
-    private var isPipOnPlaceholder = false
-
-    fun setCompositionPipSource(source: CompositionPipSource) {
-        _compositionPipSource.postValue(source)
-        scheduleCompositionSave()
+    fun setCompositionPipSource(source: PipSourceKind) {
+        val controller = compositionController ?: return
+        viewModelScope.launch {
+            // Applied live now; it used to change only the chip's label until COMPOSE was cycled.
+            controller.setPipSource(source).onFailure {
+                _streamerErrorLiveData.postValue("Could not switch the second layer: ${it.message}")
+            }
+        }
         Log.i(TAG, "Composition picture-in-picture source set to ${source.label}")
     }
 
@@ -4375,136 +4329,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (projection != null) {
                 startupMediaProjection = projection
                 Log.i(TAG, "MediaProjection granted for the screen layer")
+                // The layer was built before the grant arrived and fell back to the placeholder;
+                // now that it can be built for real, put the screen in.
+                if (compositionPipSource == PipSourceKind.SCREEN && activeComposite() != null) {
+                    setCompositionPipSource(PipSourceKind.SCREEN)
+                }
             } else {
                 Log.w(TAG, "MediaProjection denied for the screen layer")
                 _streamerErrorLiveData.postValue("Screen permission denied - layer not available")
-            }
-        }
-    }
-
-    private fun mainLayerSpec(cameraId: String) = LayerSpec(
-        layer = VideoLayer(
-            id = COMPOSITION_LAYER_MAIN,
-            z = 0,
-            rect = LayerRect.FULL,
-            scaleMode = LayerScaleMode.FILL
-        ),
-        childFactory = CameraSourceFactory(cameraId),
-        /**
-         * With a second camera on screen both devices must stay inside the concurrent-pair
-         * configuration, so the main camera is capped too — capping only the small one would
-         * still fail to open.
-         */
-        captureResolution = if (_compositionPipSource.value == CompositionPipSource.CAMERA) {
-            compositionCapabilities.report().concurrentCameraMaxSize
-        } else {
-            null
-        }
-    )
-
-    private fun pipLayer() = VideoLayer(
-        id = COMPOSITION_LAYER_PIP,
-        z = 1,
-        rect = LayerRect.PIP_BOTTOM_RIGHT,
-        scaleMode = LayerScaleMode.FIT
-    )
-
-    /**
-     * The placeholder a dead layer falls back to. A bitmap source cannot itself fail, which is
-     * what makes it a safe terminal state.
-     */
-    private fun placeholderPipSpec() = LayerSpec(
-        layer = pipLayer(),
-        childFactory = BitmapSourceFactory(testBitmap)
-    )
-
-    /**
-     * Builds the second layer from the currently selected source.
-     *
-     * A source that cannot be built right now (no screen permission, no RTMP URL) degrades to the
-     * placeholder instead of failing the whole composition.
-     */
-    private suspend fun pipLayerSpec(): LayerSpec {
-        val requested = _compositionPipSource.value ?: CompositionPipSource.TEST_IMAGE
-        isPipOnPlaceholder = false
-
-        return when (requested) {
-            CompositionPipSource.TEST_IMAGE -> {
-                isPipOnPlaceholder = true
-                placeholderPipSpec()
-            }
-
-            CompositionPipSource.CAMERA -> {
-                val primaryId = currentCameraIdOrDefault()
-                val secondId = compositionCapabilities.secondCameraFor(primaryId)
-                if (secondId == null) {
-                    Log.w(TAG, "No camera can run alongside $primaryId")
-                    _rtmpStatusLiveData.postValue(
-                        compositionCapabilities.reasonSecondCameraUnavailable(primaryId)
-                    )
-                    isPipOnPlaceholder = true
-                    placeholderPipSpec()
-                } else {
-                    LayerSpec(
-                        layer = pipLayer(),
-                        childFactory = CameraSourceFactory(secondId),
-                        // Both cameras of a concurrent pair have to stay inside the guaranteed
-                        // configuration, so the capture size is capped rather than inherited.
-                        captureResolution = compositionCapabilities.report().concurrentCameraMaxSize
-                    )
-                }
-            }
-
-            CompositionPipSource.USB -> {
-                val helper = uvcCameraHelper
-                if (helper == null || helper.deviceList.isNullOrEmpty()) {
-                    Log.w(TAG, "No USB camera ready, using the placeholder for now")
-                    _rtmpStatusLiveData.postValue("Waiting for the USB camera")
-                    isPipOnPlaceholder = true
-                    placeholderPipSpec()
-                } else {
-                    LayerSpec(
-                        layer = pipLayer(),
-                        childFactory = UvcVideoSource.Factory(helper)
-                    )
-                }
-            }
-
-            CompositionPipSource.SCREEN -> {
-                val projection = startupMediaProjection
-                    ?: streamingMediaProjection
-                    ?: mediaProjectionHelper.getMediaProjection()
-                if (projection == null) {
-                    Log.w(TAG, "No MediaProjection for the screen layer, using the placeholder")
-                    _rtmpStatusLiveData.postValue("Screen permission missing - showing placeholder")
-                    isPipOnPlaceholder = true
-                    placeholderPipSpec()
-                } else {
-                    val fps = videoConfigLiveData.value?.fps ?: 30
-                    LayerSpec(
-                        layer = pipLayer(),
-                        childFactory = MediaProjectionVideoSourceFactory(projection, fps)
-                    )
-                }
-            }
-
-            CompositionPipSource.RTMP -> {
-                try {
-                    val url = storageRepository.rtmpSourceUrlFlow(1).first()
-                    require(url.isNotBlank()) { "RTMP source 1 has no URL" }
-
-                    val bufferMs = storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
-                    val player = RtmpSourceSwitchHelper.createExoPlayer(application, url, bufferMs)
-                    LayerSpec(
-                        layer = pipLayer(),
-                        childFactory = RTMPVideoSource.Factory(player)
-                    )
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not build the RTMP layer: ${e.message}")
-                    _rtmpStatusLiveData.postValue("RTMP source unavailable - showing placeholder")
-                    isPipOnPlaceholder = true
-                    placeholderPipSpec()
-                }
             }
         }
     }
@@ -4548,22 +4380,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     if (!isCompositionUsbLayerWanted()) {
                         return
                     }
-                    val composite = activeComposite() ?: return
+                    val controller = compositionController ?: return
+                    val usbHelper = this@apply
                     viewModelScope.launch {
-                        try {
-                            isPipOnPlaceholder = false
-                            composite.replaceLayerSource(
-                                COMPOSITION_LAYER_PIP,
-                                LayerSpec(
-                                    layer = pipLayer(),
-                                    childFactory = UvcVideoSource.Factory(this@apply)
-                                )
-                            )
-                            _rtmpStatusLiveData.postValue(null)
-                            Log.i(TAG, "USB camera is now the picture-in-picture")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to put the USB camera in the layer: ${e.message}", e)
-                        }
+                        controller.replacePipSource(UvcVideoSource.Factory(usbHelper))
+                            .onSuccess {
+                                _rtmpStatusLiveData.postValue(null)
+                                Log.i(TAG, "USB camera is now the picture-in-picture")
+                            }
+                            .onFailure {
+                                Log.e(TAG, "Failed to put the USB camera in the layer: ${it.message}", it)
+                            }
                     }
                 }
 
@@ -4587,22 +4414,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                 override fun onDetach(device: android.hardware.usb.UsbDevice) {
                     Log.w(TAG, "USB camera detached from the composition")
-                    if (!isCompositionUsbLayerWanted() || isPipOnPlaceholder) {
+                    val controller = compositionController ?: return
+                    if (!isCompositionUsbLayerWanted() || controller.isPipOnPlaceholder) {
                         return
                     }
-                    val composite = activeComposite() ?: return
                     viewModelScope.launch {
-                        try {
-                            isPipOnPlaceholder = true
-                            composite.replaceLayerSource(
-                                COMPOSITION_LAYER_PIP,
-                                placeholderPipSpec()
-                            )
-                            _rtmpStatusLiveData.postValue("USB camera unplugged - showing placeholder")
-                            Log.i(TAG, "USB layer degraded to the placeholder; the stream continues")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to degrade the USB layer: ${e.message}", e)
-                        }
+                        controller.degradePipToPlaceholder("USB camera unplugged - showing placeholder")
+                        _rtmpStatusLiveData.postValue("USB camera unplugged - showing placeholder")
                     }
                 }
             })
@@ -4621,9 +4439,37 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         helper.selectDevice(devices[0])
     }
 
+    // region ExternalPipSourceProvider -- the layers only this screen can build
+
+    private fun usableProjection(): android.media.projection.MediaProjection? =
+        (startupMediaProjection ?: streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection())
+            ?.takeUnless { MediaProjectionVideoSourceFactory.isProjectionExhaustedForVideo(it) }
+
+    override fun factoryFor(kind: PipSourceKind): IVideoSourceInternal.Factory? = when (kind) {
+        PipSourceKind.SCREEN -> usableProjection()?.let {
+            MediaProjectionVideoSourceFactory(it, videoConfigLiveData.value?.fps ?: 30)
+        }
+        PipSourceKind.USB -> uvcCameraHelper
+            ?.takeUnless { it.deviceList.isNullOrEmpty() }
+            ?.let { UvcVideoSource.Factory(it) }
+        else -> null
+    }
+
+    override fun reasonUnavailable(kind: PipSourceKind): String? = when (kind) {
+        PipSourceKind.SCREEN ->
+            if (usableProjection() == null) "Needs screen permission, granted on the phone" else null
+        PipSourceKind.USB ->
+            if (uvcCameraHelper?.deviceList.isNullOrEmpty() &&
+                (application.getSystemService(android.content.Context.USB_SERVICE)
+                        as android.hardware.usb.UsbManager).deviceList.isEmpty()
+            ) "No USB camera connected" else null
+        else -> null
+    }
+
+    // endregion
+
     private fun isCompositionUsbLayerWanted(): Boolean =
-        _isCompositeSource.value == true &&
-                _compositionPipSource.value == CompositionPipSource.USB
+        _isCompositeSource.value == true && compositionPipSource == PipSourceKind.USB
 
     private fun activeComposite(): ICompositeVideoSource? =
         serviceStreamer?.videoInput?.sourceFlow?.value as? ICompositeVideoSource
@@ -4638,51 +4484,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val visible: Boolean,
         val isPrimary: Boolean
     )
-
-    private val compositionStore by lazy {
-        com.dimadesu.lifestreamer.composition.CompositionStore(application)
-    }
-
-    private var compositionSaveJob: kotlinx.coroutines.Job? = null
-
-    /**
-     * Persists the arranged layout, debounced so a drag does not hammer storage.
-     */
-    private fun scheduleCompositionSave() {
-        compositionSaveJob?.cancel()
-        compositionSaveJob = viewModelScope.launch {
-            delay(COMPOSITION_SAVE_DEBOUNCE_MS)
-            val layout = activeComposite()?.layoutFlow?.value ?: return@launch
-            compositionStore.save(
-                pipSourceName = (_compositionPipSource.value ?: CompositionPipSource.TEST_IMAGE).name,
-                rects = layout.layers.associate { it.id to it.rect },
-                hidden = layout.layers.filterNot { it.visible }.map { it.id }.toSet()
-            )
-        }
-    }
-
-    /**
-     * Puts a previously arranged layout back, if there is one and it still matches the layers.
-     */
-    private fun restoreSavedComposition(composite: ICompositeVideoSource) {
-        val saved = compositionStore.load() ?: return
-        var layout = composite.layoutFlow.value
-        var changed = false
-
-        layout.layers.forEach { layer ->
-            saved.rects[layer.id]?.let { rect ->
-                layout = layout.mapLayer(layer.id) {
-                    it.copy(rect = rect, visible = !saved.hidden.contains(layer.id))
-                }
-                changed = true
-            }
-        }
-
-        if (changed) {
-            composite.updateLayout(layout)
-            Log.i(TAG, "Restored the saved layout")
-        }
-    }
 
     private val _compositionLayers = MutableLiveData<List<CompositionLayerUi>>(emptyList())
     val compositionLayers: LiveData<List<CompositionLayerUi>> = _compositionLayers
@@ -4819,15 +4620,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * "Camera" and "Second camera" say nothing about which is which.
      */
     private fun layerLabel(layerId: String): String {
+        // One naming rule for the phone and the page: two copies had already started to disagree.
+        compositionController?.let { return it.layerLabel(layerId) }
         val cameraId = (activeComposite()?.childSource(layerId) as? ICameraSource)?.cameraId
-        if (cameraId != null) {
-            return cameraDisplayName(cameraId)
-        }
-        return when (layerId) {
-            COMPOSITION_LAYER_MAIN -> "Camera"
-            COMPOSITION_LAYER_PIP -> _compositionPipSource.value?.label ?: "Layer 2"
-            else -> layerId
-        }
+        return cameraId?.let { cameraDisplayName(it) } ?: layerId
     }
 
     /**
@@ -4885,6 +4681,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (isComposite) {
             if (!wasComposite) {
                 _isCompositeSource.postValue(true)
+                // A composition can now appear without this screen creating it -- from the page,
+                // or already running when the app is reopened. Wire up everything the screen needs
+                // here, instead of only in the code path of the COMPOSE button.
+                val composite = source as ICompositeVideoSource
+                compositionController?.onCompositionAppeared(composite)
+                observeCompositionLayout(composite)
+                composite.previewMaxFps = previewMaxFps
+                _selectedCompositionLayerId.postValue(CompositionLayers.MAIN)
+                if (_isMonitorAudioOn.value == true) {
+                    viewModelScope.launch { applyMonitorAudioState() }
+                }
             }
             _compositionCameraIds.postValue(compositionCameraIds())
             return
@@ -4897,10 +4704,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             _compositionLayers.postValue(emptyList())
             _selectedCompositionLayerId.postValue(null)
             _compositionCameraIds.postValue(emptySet())
-            layerFailureJob?.cancel()
-            layerFailureJob = null
             layoutObserverJob?.cancel()
             layoutObserverJob = null
+            if (_isMonitorAudioOn.value == true) {
+                viewModelScope.launch { applyMonitorAudioState() }
+            }
         }
     }
 
@@ -4962,90 +4770,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun cameraDisplayName(cameraId: String): String =
         _availableCamerasLiveData.value?.firstOrNull { it.id == cameraId }?.displayName ?: cameraId
 
-    private var layerFailureJob: kotlinx.coroutines.Job? = null
-
-    /**
-     * Degrades a dead layer to the placeholder instead of dropping the stream.
-     *
-     * This is the per-layer version of [switchToUvcBitmapFallback]. Today a USB unplug or an RTMP
-     * drop sends the whole programme to the test card; under a composition only that one
-     * rectangle changes and the main camera keeps streaming.
-     */
-    private fun observeCompositionFailures(composite: ICompositeVideoSource) {
-        layerFailureJob?.cancel()
-        layerFailureJob = viewModelScope.launch {
-            composite.layerFailureFlow.collect { failure ->
-                Log.w(TAG, "Layer ${failure.layerId} failed: ${failure.reason}")
-
-                if (failure.layerId != COMPOSITION_LAYER_PIP || isPipOnPlaceholder) {
-                    return@collect
-                }
-
-                val sourceLabel = _compositionPipSource.value?.label ?: "Layer"
-                _rtmpStatusLiveData.postValue("$sourceLabel lost - showing placeholder")
-                try {
-                    isPipOnPlaceholder = true
-                    composite.replaceLayerSource(COMPOSITION_LAYER_PIP, placeholderPipSpec())
-                    Log.i(TAG, "Picture-in-picture degraded to the placeholder")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to degrade the picture-in-picture: ${e.message}", e)
-                }
-            }
-        }
-    }
-
-    private var layoutCycleStep = 0
-
-    /**
-     * Steps through every built-in layout, then removes and re-adds the picture-in-picture layer.
-     *
-     * Temporary scaffolding until the layout UI exists, but it covers both kinds of live change on
-     * purpose. The preset steps are **geometry only**: no source restarts, no encoder
-     * reconfiguration, no surface reallocation — the compositor just reads the new layout on its
-     * next frame, which is why they are safe to tap on air. The last two steps are **structural**:
-     * they create and destroy a source and its GL input while the rest of the composition keeps
-     * streaming.
-     */
-    fun cycleLayout() {
-        val composite = activeComposite()
-        if (composite == null) {
-            Log.w(TAG, "cycleLayout: no composition active")
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                val presets = CompositionPresets.ALL
-                val step = layoutCycleStep
-                layoutCycleStep = (step + 1) % (presets.size + 2)
-
-                when {
-                    step < presets.size -> {
-                        val preset = presets[step]
-                        composite.updateLayout(composite.layoutFlow.value.applyPreset(preset))
-                        Log.i(TAG, "Layout preset: ${preset.name}")
-                    }
-
-                    step == presets.size -> {
-                        composite.removeLayer(COMPOSITION_LAYER_PIP)
-                        Log.i(TAG, "Removed the picture-in-picture layer")
-                    }
-
-                    else -> {
-                        composite.addLayer(pipLayerSpec())
-                        composite.updateLayout(
-                            composite.layoutFlow.value
-                                .applyPreset(CompositionPresets.PIP_BOTTOM_RIGHT)
-                        )
-                        Log.i(TAG, "Re-added the picture-in-picture layer")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to cycle layout: ${e.message}", e)
-                _streamerErrorLiveData.postValue("Layout change failed: ${e.message}")
-            }
-        }
-    }
 
     fun toggleScreenSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null) {
         val currentStreamer = serviceStreamer
@@ -5143,6 +4867,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val videoSource = currentStreamer.videoInput?.sourceFlow?.value
         if (videoSource is ICameraSource) {
             lastUsedCameraId = videoSource.cameraId
+                        compositionController?.primaryCameraHint = videoSource.cameraId
         }
         
         val useCfr = true // Or whatever config you want
@@ -5538,6 +5263,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // The policy must not keep a reference to a dead ViewModel.
         try {
             serviceBinder?.thermalPolicy()?.actuator = null
+            serviceBinder?.compositionController()?.let {
+                if (it.externalPipProvider === this) it.externalPipProvider = null
+            }
         } catch (_: Throwable) {
         }
         

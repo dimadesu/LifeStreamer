@@ -24,14 +24,17 @@ import android.util.SizeF
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.CompositionLayout
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.CompositionPresets
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerRect
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerScaleMode
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayoutPreset
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.VideoLayer
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.applyPreset
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.swapLayerOrder
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSettings
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.composite.CompositeVideoSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.composite.ICompositeVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.composite.LayerSpec
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +47,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.atan
@@ -71,7 +75,14 @@ data class ZoomState(val min: Float, val max: Float, val ratio: Float)
 class CompositionController(
     private val context: Context,
     parentScope: CoroutineScope,
-    private val videoSourceProvider: () -> IVideoSource?
+    private val videoSourceProvider: () -> IVideoSource?,
+    /**
+     * Replaces the whole video source. Supplied by the service, which owns the streamer; this is
+     * what lets a composition be turned on and off without the app's screen.
+     */
+    private val videoSourceSwitcher: (suspend (IVideoSourceInternal.Factory) -> Unit)? = null,
+    /** URL and buffer of the RTMP source used for the second layer, or null when unset. */
+    rtmpPipConfig: suspend () -> Pair<String, Int>? = { null }
 ) {
     /**
      * The one thread every mutation and every camera read runs on.
@@ -98,6 +109,42 @@ class CompositionController(
 
     private val capabilities = CompositionCapabilities(context)
     private val store = CompositionStore(context)
+
+    private val sources = CompositionSources(
+        context.applicationContext as android.app.Application, capabilities, rtmpPipConfig
+    )
+
+    /**
+     * What the second layer is meant to show. Persisted, and applied live when it changes.
+     *
+     * It used to be a LiveData in the ViewModel that nothing observed: choosing a new source with
+     * the composition running changed the chip's label and nothing else, until the composition was
+     * switched off and on again.
+     */
+    private val _pipSource = MutableStateFlow(
+        store.load()?.pipSourceName
+            ?.let { runCatching { PipSourceKind.valueOf(it) }.getOrNull() }
+            ?: PipSourceKind.TEST_IMAGE
+    )
+    val pipSource: StateFlow<PipSourceKind> = _pipSource.asStateFlow()
+
+    /**
+     * True while the second layer shows the placeholder because its real source could not be built
+     * or died. Stops a failure from replacing a placeholder with another placeholder.
+     */
+    @Volatile
+    var isPipOnPlaceholder: Boolean = true
+        private set
+
+    /** Registered by the ViewModel while it is alive; builds the sources only the app can build. */
+    @Volatile
+    var externalPipProvider: ExternalPipSourceProvider? = null
+
+    /** Structural changes (on/off, source swaps) are serialised: two at once would fight over cameras. */
+    private val structuralMutex = kotlinx.coroutines.sync.Mutex()
+
+    private var failureJob: kotlinx.coroutines.Job? = null
+    private var observedComposite: ICompositeVideoSource? = null
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
@@ -297,6 +344,181 @@ class CompositionController(
 
     // endregion
 
+    // region composition lifecycle — replaces the whole video source
+
+    /**
+     * The camera the main layer should use: what is on screen now if it is a camera, else a hint
+     * the app leaves (the last camera the operator picked), else the first camera.
+     */
+    @Volatile
+    var primaryCameraHint: String? = null
+
+    private fun primaryCameraId(): String =
+        (videoSourceProvider() as? ICameraSource)?.cameraId
+            ?: (composite?.childSource(CompositionLayers.MAIN) as? ICameraSource)?.cameraId
+            ?: primaryCameraHint
+            ?: _cameras.value.firstOrNull()?.id
+            ?: "0"
+
+    /**
+     * Turns the composition on: main camera plus the chosen second layer.
+     *
+     * Moved here from PreviewViewModel.toggleCompositeSource so the service -- and so the remote
+     * control -- can do it with the app's screen gone. Switching the video source while streaming
+     * does not reconnect: the encoder is kept and the picture freezes briefly.
+     */
+    suspend fun enableComposition(): Result<Unit> = structural {
+        val switcher = videoSourceSwitcher ?: error("Cannot switch the video source from here")
+        if (composite != null) return@structural
+        val cameraId = primaryCameraId()
+        val kind = _pipSource.value
+        val pip = sources.pipSpec(kind, cameraId, externalPipProvider)
+        switcher(
+            CompositeVideoSourceFactory(
+                listOf(sources.mainSpec(cameraId, pairedWithCamera = kind == PipSourceKind.CAMERA && !pip.isPlaceholder), pip.spec)
+            )
+        )
+        isPipOnPlaceholder = pip.isPlaceholder
+        composite?.let { onCompositionAppeared(it) }
+        restoreSaved()
+        pip.note?.let { _messages.tryEmit(it) }
+        Log.i(TAG, "Composition on: camera $cameraId + ${kind.label}")
+    }
+
+    /** Turns the composition off, back to the camera the main layer was showing. */
+    suspend fun disableComposition(): Result<Unit> = structural {
+        val switcher = videoSourceSwitcher ?: error("Cannot switch the video source from here")
+        val target = composite ?: return@structural
+        val cameraId = (target.childSource(CompositionLayers.MAIN) as? ICameraSource)?.cameraId
+            ?: primaryCameraId()
+        stopObservingFailures()
+        switcher(CameraSourceFactory(cameraId))
+        Log.i(TAG, "Composition off, back to camera $cameraId")
+    }
+
+    /**
+     * Chooses what the second layer shows, and applies it at once if a composition is running.
+     */
+    suspend fun setPipSource(kind: PipSourceKind): Result<Unit> = structural {
+        _pipSource.value = kind
+        scheduleSave()
+        val target = composite ?: return@structural
+        val pip = sources.pipSpec(kind, primaryCameraId(), externalPipProvider)
+        target.replaceLayerSource(CompositionLayers.PIP, pip.spec)
+        isPipOnPlaceholder = pip.isPlaceholder
+        pip.note?.let { _messages.tryEmit(it) }
+        _layersInvalidated.tryEmit(Unit)
+        refreshZoomAsync()
+        Log.i(TAG, "Second layer is now ${kind.label}${if (pip.isPlaceholder) " (placeholder)" else ""}")
+    }
+
+    /**
+     * Puts an app-built source in the second layer, for sources whose readiness arrives later by
+     * callback -- a USB camera that finishes opening after the composition was built.
+     */
+    suspend fun replacePipSource(factory: IVideoSourceInternal.Factory): Result<Unit> = structural {
+        val target = composite ?: return@structural
+        target.replaceLayerSource(CompositionLayers.PIP, LayerSpec(sources.pipLayer(), factory))
+        isPipOnPlaceholder = false
+        _layersInvalidated.tryEmit(Unit)
+    }
+
+    /** Falls back to the test image, keeping the stream going. [reason] is told to the operator. */
+    suspend fun degradePipToPlaceholder(reason: String): Result<Unit> = structural {
+        val target = composite ?: return@structural
+        if (isPipOnPlaceholder) return@structural
+        target.replaceLayerSource(CompositionLayers.PIP, sources.placeholderSpec())
+        isPipOnPlaceholder = true
+        _messages.tryEmit(reason)
+        _layersInvalidated.tryEmit(Unit)
+        Log.i(TAG, "Second layer degraded to the placeholder: $reason")
+    }
+
+    /** One row per kind, with why it cannot be used right now, for the page and the app's picker. */
+    data class PipSourceOption(val kind: PipSourceKind, val available: Boolean, val reason: String?)
+
+    fun pipSourceOptions(): List<PipSourceOption> = PipSourceKind.entries.map { kind ->
+        val reason = when (kind) {
+            PipSourceKind.TEST_IMAGE, PipSourceKind.RTMP -> null
+            PipSourceKind.CAMERA -> capabilities.reasonSecondCameraUnavailable(primaryCameraId())
+            PipSourceKind.SCREEN, PipSourceKind.USB ->
+                externalPipProvider?.reasonUnavailable(kind)
+                    ?: if (externalPipProvider == null) CompositionSources.OPEN_APP_REASON else null
+        }
+        PipSourceOption(kind, reason == null, reason)
+    }
+
+    /**
+     * Wires failure handling to a composition, whoever created it -- the app, the page, or a
+     * restored session. Idempotent per instance.
+     *
+     * This used to live in the ViewModel and died with it, so with the app's screen gone a second
+     * layer whose source failed (an RTMP feed that stopped, say) simply went black.
+     */
+    fun onCompositionAppeared(target: ICompositeVideoSource) {
+        if (observedComposite === target && failureJob?.isActive == true) return
+        stopObservingFailures()
+        observedComposite = target
+        failureJob = scope.launch {
+            target.layerFailureFlow.collect { failure ->
+                Log.w(TAG, "Layer ${failure.layerId} failed: ${failure.reason}")
+                if (failure.layerId == CompositionLayers.PIP) {
+                    degradePipToPlaceholder("${_pipSource.value.label} lost - showing placeholder")
+                }
+            }
+        }
+    }
+
+    private fun stopObservingFailures() {
+        failureJob?.cancel()
+        failureJob = null
+        observedComposite = null
+    }
+
+    private suspend fun structural(block: suspend () -> Unit): Result<Unit> =
+        structuralMutex.withLock { runCatching { block() } }
+            .onFailure { Log.w(TAG, "Composition change failed: ${it.message}", it) }
+
+    // endregion
+
+    // region style — geometry only, safe while streaming
+
+    /**
+     * Changes how a layer is drawn. Null leaves that property as it is.
+     *
+     * Only what the compositor reads each frame: no source restarts and no encoder changes, so it
+     * is safe on air. Changing the scale mode stops matching any preset, which is correct -- the
+     * layout is no longer the preset's.
+     */
+    fun setLayerStyle(
+        layerId: String,
+        scaleMode: LayerScaleMode? = null,
+        alpha: Float? = null,
+        mirror: Boolean? = null,
+        rotationDegrees: Int? = null
+    ) = confined {
+        composite?.updateLayer(layerId) {
+            it.copy(
+                scaleMode = scaleMode ?: it.scaleMode,
+                // Zero removes the layer from drawing, which hiding already does; keep it visible.
+                alpha = (alpha ?: it.alpha).coerceIn(MIN_ALPHA, 1f),
+                mirror = mirror ?: it.mirror,
+                rotationDegrees = rotationDegrees?.let { r -> ((r % 360) + 360) % 360 / 90 * 90 }
+                    ?: it.rotationDegrees
+            )
+        }
+        scheduleSave()
+    }
+
+    /** The colour behind the layers, shown wherever they do not cover the canvas. */
+    fun setBackgroundColor(argb: Int) = confined {
+        val target = composite ?: return@confined
+        target.updateLayout(target.layoutFlow.value.copy(backgroundColor = argb))
+        scheduleSave()
+    }
+
+    // endregion
+
     // region zoom
 
     /**
@@ -413,7 +635,15 @@ class CompositionController(
      */
     fun layerLabel(layerId: String): String {
         val cameraId = (composite?.childSource(layerId) as? ICameraSource)?.cameraId
-        return cameraId?.let { displayName(it) } ?: layerId
+        if (cameraId != null) return displayName(cameraId)
+        return when (layerId) {
+            CompositionLayers.MAIN -> "Camera"
+            // Says what is really on screen: a source that could not be built, or died, shows the
+            // test image, and the label must not keep naming the source that is not there.
+            CompositionLayers.PIP ->
+                if (isPipOnPlaceholder) PipSourceKind.TEST_IMAGE.label else _pipSource.value.label
+            else -> layerId
+        }
     }
 
     /**
@@ -483,17 +713,17 @@ class CompositionController(
         saveJob = scope.launch {
             kotlinx.coroutines.delay(SAVE_DEBOUNCE_MS)
             val current = layout ?: return@launch
-            store.save(
-                pipSourceName = savedPipSourceName,
-                rects = current.layers.associate { it.id to it.rect },
-                hidden = current.layers.filterNot { it.visible }.map { it.id }.toSet()
-            )
+            // The source kind used to come from a field nobody ever assigned, so every save made
+            // here -- a drag, a preset, a swap, from the phone or the page -- wrote an empty name
+            // over the one the ViewModel had saved.
+            store.save(pipSourceName = _pipSource.value.name, layout = current)
         }
     }
 
-    /** Set by the app so the stored blob keeps naming the chosen second source. */
-    var savedPipSourceName: String = ""
-
+    /**
+     * Puts the saved arrangement back: rectangles, visibility, each layer's style and the
+     * background. Only for layers that still exist; the rest keep their defaults.
+     */
     fun restoreSaved() {
         val target = composite ?: return
         val saved = store.load() ?: return
@@ -507,6 +737,21 @@ class CompositionController(
                 }
                 changed = true
             }
+            saved.styles[layer.id]?.let { style ->
+                current = current.mapLayer(layer.id) {
+                    it.copy(
+                        scaleMode = style.scaleMode ?: it.scaleMode,
+                        alpha = style.alpha ?: it.alpha,
+                        mirror = style.mirror ?: it.mirror,
+                        rotationDegrees = style.rotationDegrees ?: it.rotationDegrees
+                    )
+                }
+                changed = true
+            }
+        }
+        saved.backgroundColor?.let {
+            current = current.copy(backgroundColor = it)
+            changed = true
         }
 
         if (changed) {
@@ -514,8 +759,6 @@ class CompositionController(
             Log.i(TAG, "Restored the saved layout")
         }
     }
-
-    fun savedPipSourceNameOrNull(): String? = store.load()?.pipSourceName
 
     // endregion
 
@@ -525,5 +768,6 @@ class CompositionController(
         /** How close to an edge or the centre a dragged layer snaps, in canvas fractions. */
         private const val SNAP_THRESHOLD = 0.02f
         private const val SAVE_DEBOUNCE_MS = 500L
+        private const val MIN_ALPHA = 0.1f
     }
 }

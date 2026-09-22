@@ -122,6 +122,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             videoSourceProvider = {
                 (streamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)
                     ?.videoInput?.sourceFlow?.value
+            },
+            videoSourceSwitcher = { factory -> switchVideoSource(factory) },
+            rtmpPipConfig = {
+                val url = storageRepository.rtmpSourceUrlFlow(1).first()
+                if (url.isBlank()) null
+                else url to storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
             }
         )
     }
@@ -581,6 +587,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // its layout rather than binding once to a layout that may not exist yet.
         serviceScope.launch {
             videoInputSourceFlow()?.collectLatest { source ->
+                // Failure handling for the second layer, whoever built the composition: with the
+                // app's screen gone it used to go black when its source died.
+                (source as? ICompositeVideoSource)?.let { compositionController.onCompositionAppeared(it) }
                 // The zoom cache is refreshed here rather than while serialising state: doing it
                 // there fed a loop (refresh -> layersInvalidated -> push -> refresh) that never
                 // settled while the value jittered.
@@ -1458,6 +1467,36 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Start streaming using the endpoint configured in DataStore.
      * Mirrors the logic from PreviewViewModel.startStream(): open with timeout and attach regulator if needed.
      */
+    /**
+     * Replaces the whole video source, the way the app's screen always did it: the bitrate
+     * regulator is taken off first and put back after, and the previous source gets a moment to
+     * release its camera before the new one opens it.
+     *
+     * Lives here so a composition can be switched on and off with the screen gone.
+     */
+    private suspend fun switchVideoSource(
+        factory: io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal.Factory
+    ) {
+        val videoStreamer = streamer as? IVideoSingleStreamer
+        val live = runCatching { streamer?.isStreamingFlow?.value == true }.getOrDefault(false)
+        val sinkType = runCatching { storageRepository.endpointDescriptorFlow.first().type.sinkType }.getOrNull()
+        val regulated = live && (sinkType == io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType.SRT ||
+                sinkType == io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType.RTMP)
+
+        if (regulated) {
+            runCatching { videoStreamer?.bitrateRegulatorControllerFactory = null }
+        }
+        delay(300)
+        (streamer as io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource).setVideoSource(factory)
+
+        if (regulated && storageRepository.bitrateRegulatorConfigFlow.first() != null) {
+            delay(200)
+            runCatching {
+                streamConfigurationHelper.attachBitrateRegulator(videoStreamer, sinkType!!, TAG)
+            }.onFailure { Log.w(TAG, "Could not re-add bitrate regulator: ${it.message}") }
+        }
+    }
+
     /** Outcome of a start request: accepted (and running in the background) or refused with why. */
     data class StartDecision(val accepted: Boolean, val reason: String? = null)
 

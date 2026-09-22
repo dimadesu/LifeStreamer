@@ -18,6 +18,11 @@ package com.dimadesu.lifestreamer.remote
 import android.content.Context
 import android.util.Log
 import com.dimadesu.lifestreamer.composition.CompositionController
+import com.dimadesu.lifestreamer.composition.CompositionLayers
+import com.dimadesu.lifestreamer.composition.PipSourceKind
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerScaleMode
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.google.gson.Gson
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.matchingPreset
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
@@ -125,6 +130,21 @@ class RemoteControlServer(
     private var lastStateFingerprint: String? = null
 
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Runs structural commands -- composition on/off, a new second-layer source -- which open
+     * cameras and can take a second or two. The request is answered at once and the result comes
+     * back as pushed state, instead of holding a request thread for the duration.
+     */
+    private val commandScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+    )
+
+    private fun launchStructural(what: String, block: suspend () -> Result<Unit>) {
+        commandScope.launch {
+            block().onFailure { broadcastMessage("$what failed: ${it.message}") }
+        }
+    }
 
     private val pushPending = AtomicBoolean(false)
     private val forcePush = AtomicBoolean(false)
@@ -345,6 +365,7 @@ class RemoteControlServer(
         auth.revokeAll()
         heartbeatThread?.interrupt()
         heartbeatThread = null
+        commandScope.cancel()
         pushExecutor.shutdownNow()
         requestPool.shutdownNow()
         runCatching { requestPool.awaitTermination(1, TimeUnit.SECONDS) }
@@ -627,6 +648,54 @@ class RemoteControlServer(
                 respondJson(output, 200, RemoteDto.OkResponse(true))
             }
 
+            "/api/composition" -> {
+                val enabled = parse<RemoteDto.CompositionRequest>(request.body)?.enabled
+                if (enabled == null) {
+                    respondJson(output, 400, RemoteDto.OkResponse(false, "Missing enabled"))
+                } else {
+                    launchStructural(if (enabled) "Turning the composition on" else "Turning the composition off") {
+                        if (enabled) controller.enableComposition() else controller.disableComposition()
+                    }
+                    respondJson(output, 202, RemoteDto.OkResponse(true))
+                }
+            }
+
+            "/api/layer/source" -> {
+                val kind = parse<RemoteDto.PipSourceRequest>(request.body)?.kind
+                    ?.let { runCatching { PipSourceKind.valueOf(it) }.getOrNull() }
+                val option = kind?.let { k -> controller.pipSourceOptions().firstOrNull { it.kind == k } }
+                when {
+                    kind == null -> respondJson(output, 400, RemoteDto.OkResponse(false, "Unknown source"))
+                    option?.available == false ->
+                        respondJson(output, 409, RemoteDto.OkResponse(false, option.reason))
+                    else -> {
+                        launchStructural("Switching the second layer") { controller.setPipSource(kind) }
+                        respondJson(output, 202, RemoteDto.OkResponse(true))
+                    }
+                }
+            }
+
+            "/api/layer/style" -> {
+                val body = parse<RemoteDto.LayerStyleRequest>(request.body)
+                val scale = body?.scaleMode?.let { runCatching { LayerScaleMode.valueOf(it) }.getOrNull() }
+                if (body?.layerId == null || (body.scaleMode != null && scale == null)) {
+                    respondJson(output, 400, RemoteDto.OkResponse(false, "Missing layer or unknown scale mode"))
+                } else {
+                    controller.setLayerStyle(body.layerId, scale, body.alpha, body.mirror, body.rotation)
+                    respondJson(output, 200, RemoteDto.OkResponse(true))
+                }
+            }
+
+            "/api/background" -> {
+                val color = parse<RemoteDto.BackgroundRequest>(request.body)?.color?.let(::parseColor)
+                if (color == null) {
+                    respondJson(output, 400, RemoteDto.OkResponse(false, "Color must be #RRGGBB"))
+                } else {
+                    controller.setBackgroundColor(color)
+                    respondJson(output, 200, RemoteDto.OkResponse(true))
+                }
+            }
+
             "/api/stream/start" -> {
                 // Answers at once: a start takes up to ~13 s, and progress reaches the page through
                 // the pushed state rather than by holding this request thread.
@@ -682,6 +751,15 @@ class RemoteControlServer(
 
     private fun round2(value: Float): Float = Math.round(value * 100f) / 100f
 
+    /** "#RRGGBB" to an opaque ARGB int, or null. A background with alpha would show nothing useful. */
+    private fun parseColor(text: String): Int? {
+        val hex = text.trim().removePrefix("#")
+        if (hex.length != 6) return null
+        return hex.toIntOrNull(16)?.let { 0xFF000000.toInt() or it }
+    }
+
+    private fun formatColor(argb: Int): String = "#%06X".format(argb and 0xFFFFFF)
+
     private inline fun <reified T> parse(body: String): T? =
         runCatching { gson.fromJson(body, T::class.java) }.getOrNull()
 
@@ -719,7 +797,13 @@ class RemoteControlServer(
                     RemoteDto.ZoomDto(
                         round2(it.min), round2(it.max), round2(it.ratio), cameraId
                     )
-                }
+                },
+                scaleMode = layer.scaleMode.name,
+                alpha = round2(layer.alpha),
+                mirror = layer.mirror,
+                rotation = layer.rotationDegrees,
+                sourceKind = if (layer.id == CompositionLayers.PIP) controller.pipSource.value.name else null,
+                onPlaceholder = layer.id == CompositionLayers.PIP && controller.isPipOnPlaceholder
             )
         } ?: emptyList()
 
@@ -749,7 +833,17 @@ class RemoteControlServer(
             },
             thermal = hooks.thermal(),
             power = hooks.power(),
-            stream = hooks.stream()
+            stream = hooks.stream(),
+            backgroundColor = layout?.backgroundColor?.let(::formatColor),
+            pipSources = controller.pipSourceOptions().map {
+                RemoteDto.PipSourceDto(
+                    kind = it.kind.name,
+                    label = it.kind.label,
+                    available = it.available,
+                    reason = it.reason,
+                    active = it.kind == controller.pipSource.value
+                )
+            }
         )
     }
 

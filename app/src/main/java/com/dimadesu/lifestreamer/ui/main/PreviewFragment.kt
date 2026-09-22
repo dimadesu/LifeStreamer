@@ -1366,8 +1366,8 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
      * exists; for now it is the only way to choose something other than the test image.
      */
     private fun showCompositionSourcePicker() {
-        val options = PreviewViewModel.CompositionPipSource.entries.toTypedArray()
-        val current = previewViewModel.compositionPipSource.value
+        val options = com.dimadesu.lifestreamer.composition.PipSourceKind.entries.toTypedArray()
+        val current = previewViewModel.compositionPipSource
         val checked = options.indexOf(current).coerceAtLeast(0)
 
         // Unavailable options stay on the list, labelled with the reason. Hiding them would leave
@@ -1388,10 +1388,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 }
                 previewViewModel.setCompositionPipSource(chosen)
                 when (chosen) {
-                    PreviewViewModel.CompositionPipSource.SCREEN ->
+                    com.dimadesu.lifestreamer.composition.PipSourceKind.SCREEN ->
                         previewViewModel.ensureMediaProjectionForComposition(mediaProjectionLauncher)
 
-                    PreviewViewModel.CompositionPipSource.USB ->
+                    com.dimadesu.lifestreamer.composition.PipSourceKind.USB ->
                         previewViewModel.prepareUvcForComposition()
 
                     else -> Unit
