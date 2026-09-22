@@ -66,6 +66,7 @@ import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMe
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.IAudioRecordSource
 import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
+import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSourceFactory
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isFpsSupported
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
@@ -81,6 +82,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.Camer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.IBitmapSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.CompositionLayout
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.CompositionPresets
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerRect
 import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayoutPreset
@@ -1407,8 +1409,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val currentStreamer = serviceStreamer ?: return
 
         viewModelScope.launch {
-            currentStreamer.videoInput?.sourceFlow?.collect {
+            currentStreamer.videoInput?.sourceFlow?.collect { source ->
                 notifySourceChanged()
+                onVideoSourceChanged(source)
             }
         }
 
@@ -4048,6 +4051,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             observeCompositionFailures(it)
                             observeCompositionLayout(it)
                             restoreSavedComposition(it)
+                            // Without a selection the first camera tap would silently land on
+                            // whichever layer happened to be primary.
+                            _selectedCompositionLayerId.postValue(COMPOSITION_LAYER_MAIN)
                         }
                     _isCompositeSource.postValue(true)
                     Log.i(TAG, "Composition on: camera $cameraId + bitmap picture-in-picture")
@@ -4485,28 +4491,49 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun observeCompositionLayout(composite: ICompositeVideoSource) {
         layoutObserverJob?.cancel()
         layoutObserverJob = viewModelScope.launch {
-            composite.layoutFlow.collect { layout ->
-                _compositionLayers.postValue(
-                    layout.layers.sortedBy { it.z }.map { layer ->
-                        CompositionLayerUi(
-                            id = layer.id,
-                            label = layerLabel(layer.id),
-                            rect = layer.rect,
-                            visible = layer.visible,
-                            isPrimary = layer.id == layout.primaryLayer?.id
-                        )
-                    }
-                )
-            }
+            composite.layoutFlow.collect { publishCompositionLayers(it) }
         }
     }
 
-    private fun layerLabel(layerId: String): String = when (layerId) {
-        COMPOSITION_LAYER_MAIN -> "Camera"
-        COMPOSITION_LAYER_PIP ->
-            _compositionPipSource.value?.label ?: "Layer 2"
+    /**
+     * Republishes what the bar and the editor show.
+     *
+     * Called on layout changes and, separately, after a layer's *source* changes. Swapping a
+     * camera deliberately reuses the same VideoLayer so the rectangle survives, which means the
+     * layout compares equal and the StateFlow does not emit — but the chip label is derived from
+     * the live source, so it would otherwise keep the old camera's name.
+     */
+    private fun publishCompositionLayers(layout: CompositionLayout) {
+        _compositionCameraIds.postValue(compositionCameraIds())
+        _compositionLayers.postValue(
+            layout.layers.sortedBy { it.z }.map { layer ->
+                CompositionLayerUi(
+                    id = layer.id,
+                    label = layerLabel(layer.id),
+                    rect = layer.rect,
+                    visible = layer.visible,
+                    isPrimary = layer.id == layout.primaryLayer?.id
+                )
+            }
+        )
+    }
 
-        else -> layerId
+    /**
+     * What a layer is called on its chip.
+     *
+     * A camera layer is named after the camera itself, because with two of them on screen
+     * "Camera" and "Second camera" say nothing about which is which.
+     */
+    private fun layerLabel(layerId: String): String {
+        val cameraId = (activeComposite()?.childSource(layerId) as? ICameraSource)?.cameraId
+        if (cameraId != null) {
+            return cameraDisplayName(cameraId)
+        }
+        return when (layerId) {
+            COMPOSITION_LAYER_MAIN -> "Camera"
+            COMPOSITION_LAYER_PIP -> _compositionPipSource.value?.label ?: "Layer 2"
+            else -> layerId
+        }
     }
 
     /**
@@ -4580,6 +4607,148 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         scheduleCompositionSave()
     }
 
+    /**
+     * Keeps the composition state honest by deriving it from the live video source.
+     *
+     * Anything can replace the video source — a camera button, the USB toggle, an RTMP retry —
+     * and when it does the composition is gone whether or not that code knew one existed.
+     * Setting the flag only where a composition is built left the bar pointing at a composite
+     * that no longer existed, so every layout action silently did nothing and the only way out
+     * was to kill the app.
+     */
+    private fun onVideoSourceChanged(source: IVideoSource?) {
+        val isComposite = source is ICompositeVideoSource
+        val wasComposite = _isCompositeSource.value == true
+
+        if (isComposite) {
+            if (!wasComposite) {
+                _isCompositeSource.postValue(true)
+            }
+            _compositionCameraIds.postValue(compositionCameraIds())
+            return
+        }
+
+        if (wasComposite) {
+            Log.i(TAG, "Video source is no longer a composition, clearing composition state")
+            _isCompositeSource.postValue(false)
+            _isCompositionEditMode.postValue(false)
+            _compositionLayers.postValue(emptyList())
+            _selectedCompositionLayerId.postValue(null)
+            _compositionCameraIds.postValue(emptySet())
+            layerFailureJob?.cancel()
+            layerFailureJob = null
+            layoutObserverJob?.cancel()
+            layoutObserverJob = null
+        }
+    }
+
+    private val _compositionCameraIds = MutableLiveData<Set<String>>(emptySet())
+
+    /**
+     * The cameras currently feeding a layer, so their buttons can be highlighted. During a
+     * composition more than one can be lit at a time.
+     */
+    val compositionCameraIds: LiveData<Set<String>> = _compositionCameraIds
+
+    private fun compositionCameraIds(): Set<String> {
+        val composite = activeComposite() ?: return emptySet()
+        return composite.layoutFlow.value.layers
+            .mapNotNull { (composite.childSource(it.id) as? ICameraSource)?.cameraId }
+            .toSet()
+    }
+
+    /**
+     * Points a layer at a different camera, instead of throwing the composition away.
+     *
+     * Tapping a camera button used to call setCameraId, which replaces the *whole* video source.
+     * With a composition running that silently destroyed it, which is not what anyone means by
+     * "use this camera" when two are already on screen.
+     */
+    fun setCompositionLayerCamera(cameraId: String) {
+        val composite = activeComposite() ?: return
+
+        viewModelScope.launch {
+            try {
+                val layout = composite.layoutFlow.value
+                val layerId = _selectedCompositionLayerId.value?.takeIf { layout[it] != null }
+                    ?: layout.primaryLayer?.id
+                    ?: return@launch
+                val layer = layout[layerId] ?: return@launch
+
+                if (compositionCameraIds().contains(cameraId) &&
+                    (composite.childSource(layerId) as? ICameraSource)?.cameraId != cameraId
+                ) {
+                    _toastMessageLiveData.postValue("That camera is already used by another layer")
+                    return@launch
+                }
+
+                // Refuse a pairing the hardware cannot honour, rather than letting camera2 fail
+                // to open and leaving the composition half-built.
+                val otherCameraIds = layout.layers
+                    .filter { it.id != layerId }
+                    .mapNotNull { (composite.childSource(it.id) as? ICameraSource)?.cameraId }
+
+                val clash = otherCameraIds.firstOrNull {
+                    !compositionCapabilities.canRunTogether(cameraId, it)
+                }
+                if (clash != null) {
+                    val name = cameraDisplayName(cameraId)
+                    val otherName = cameraDisplayName(clash)
+                    _toastMessageLiveData.postValue(
+                        "$name cannot run at the same time as $otherName on this device"
+                    )
+                    Log.w(TAG, "Refused camera $cameraId: clashes with $clash")
+                    return@launch
+                }
+
+                val captureResolution = if (otherCameraIds.isNotEmpty()) {
+                    compositionCapabilities.report().concurrentCameraMaxSize
+                } else {
+                    null
+                }
+
+                composite.replaceLayerSource(
+                    layerId,
+                    // The existing layer is reused, so its rectangle and depth survive the swap.
+                    LayerSpec(
+                        layer = layer,
+                        childFactory = CameraSourceFactory(cameraId),
+                        captureResolution = captureResolution
+                    )
+                )
+                if (layerId == COMPOSITION_LAYER_MAIN) {
+                    lastUsedCameraId = cameraId
+                }
+                publishCompositionLayers(composite.layoutFlow.value)
+                // With two cameras on screen it is not obvious which one a tap moved, so say so.
+                _toastMessageLiveData.postValue(
+                    "${cameraDisplayName(cameraId)} → ${layerPositionName(layerId)}"
+                )
+                Log.i(TAG, "Layer $layerId now uses camera $cameraId")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to change the layer camera: ${e.message}", e)
+                _streamerErrorLiveData.postValue("Could not switch that layer's camera: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Where a layer sits, in the operator's terms. Independent of what feeds it, so it still
+     * reads correctly right after a source swap.
+     */
+    private fun layerPositionName(layerId: String): String {
+        val layout = activeComposite()?.layoutFlow?.value ?: return layerId
+        val layer = layout[layerId] ?: return layerId
+        return when {
+            layer.rect == LayerRect.FULL -> "main"
+            layout.layers.size <= 1 -> "main"
+            else -> "inset"
+        }
+    }
+
+    private fun cameraDisplayName(cameraId: String): String =
+        _availableCamerasLiveData.value?.firstOrNull { it.id == cameraId }?.displayName ?: cameraId
+
     private var layerFailureJob: kotlinx.coroutines.Job? = null
 
     /**
@@ -4599,7 +4768,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     return@collect
                 }
 
-                _rtmpStatusLiveData.postValue("${'$'}{_compositionPipSource.value?.label} lost - showing placeholder")
+                val sourceLabel = _compositionPipSource.value?.label ?: "Layer"
+                _rtmpStatusLiveData.postValue("$sourceLabel lost - showing placeholder")
                 try {
                     isPipOnPlaceholder = true
                     composite.replaceLayerSource(COMPOSITION_LAYER_PIP, placeholderPipSpec())

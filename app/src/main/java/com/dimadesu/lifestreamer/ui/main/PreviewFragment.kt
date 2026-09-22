@@ -473,7 +473,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             
             if (cameras.isNotEmpty()) {
                 // Get current camera ID to highlight active button
-                val currentCameraId = (previewViewModel.streamer?.videoInput?.sourceFlow?.value as? ICameraSource)?.cameraId
+                val activeCameraIds: Set<String> =
+                    if (previewViewModel.isCompositeSource.value == true) {
+                        previewViewModel.compositionCameraIds.value ?: emptySet()
+                    } else {
+                        setOfNotNull(
+                            (previewViewModel.streamer?.videoInput?.sourceFlow?.value as? ICameraSource)?.cameraId
+                        )
+                    }
                 
                 cameras.forEach { camera ->
                     val button = android.widget.Button(requireContext()).apply {
@@ -486,23 +493,24 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                             marginEnd = 8 // 8dp spacing between buttons
                         }
                         
-                        // Apply green background if this is the active camera
-                        val isActive = camera.id == currentCameraId
-                        backgroundTintList = getButtonColorStateList(context, isActive)
+                        // Apply green background if this camera is feeding something
+                        backgroundTintList =
+                            getButtonColorStateList(context, activeCameraIds.contains(camera.id))
                         
                         setOnClickListener {
+                            // With a composition running, a camera button points the selected
+                            // layer at that camera. Calling setCameraId would replace the whole
+                            // video source and destroy the composition instead.
+                            if (previewViewModel.isCompositeSource.value == true) {
+                                previewViewModel.setCompositionLayerCamera(camera.id)
+                                return@setOnClickListener
+                            }
+
                             lifecycleScope.launch {
                                 try {
                                     (previewViewModel.streamer as? IWithVideoSource)?.setCameraId(camera.id)
                                     Log.i(TAG, "Switched to camera: ${camera.displayName}")
-                                    
-                                    // Update button states
-                                    binding.cameraButtonsContainer.children.forEach { view ->
-                                        if (view is android.widget.Button) {
-                                            val isActive = view.tag == camera.id
-                                            view.backgroundTintList = getButtonColorStateList(requireContext(), isActive)
-                                        }
-                                    }
+                                    refreshCameraButtonHighlight()
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed to switch camera: ${e.message}", e)
                                     Toast.makeText(requireContext(), "Failed to switch camera", Toast.LENGTH_SHORT).show()
@@ -527,19 +535,14 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         previewViewModel.streamerLiveData.observe(viewLifecycleOwner) { streamer ->
             (streamer as? IWithVideoSource)?.videoInput?.sourceFlow?.let { sourceFlow ->
                 lifecycleScope.launch {
-                    sourceFlow.collect { source ->
-                        val currentCameraId = (source as? ICameraSource)?.cameraId
-                        
-                        // Update all camera button states
-                        binding.cameraButtonsContainer.children.forEach { view ->
-                            if (view is android.widget.Button) {
-                                val isActive = view.tag == currentCameraId
-                                view.backgroundTintList = getButtonColorStateList(requireContext(), isActive)
-                            }
-                        }
-                    }
+                    sourceFlow.collect { refreshCameraButtonHighlight() }
                 }
             }
+        }
+
+        // A composition can have two cameras live at once, so more than one button can be lit.
+        previewViewModel.compositionCameraIds.observe(viewLifecycleOwner) {
+            refreshCameraButtonHighlight()
         }
 
         // Rebind preview when streaming stops to ensure preview is active
@@ -1442,6 +1445,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
 
         previewViewModel.selectedCompositionLayerId.observe(viewLifecycleOwner) { id ->
             binding.compositionOverlay.setSelectedLayer(id)
+            // The chips are tinted by selection, so they have to be redrawn for it too — not
+            // only when the layers themselves change.
+            previewViewModel.compositionLayers.value?.let { rebuildLayerChips(it) }
         }
 
         previewViewModel.isCompositionEditMode.observe(viewLifecycleOwner) { editing ->
@@ -1525,6 +1531,28 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 }
             }
             container.addView(chip)
+        }
+    }
+
+    /**
+     * Lights the camera buttons that are actually in use.
+     *
+     * With a composition running that can be more than one, so the highlight comes from the set
+     * of cameras feeding a layer rather than from a single active source.
+     */
+    private fun refreshCameraButtonHighlight() {
+        val activeIds: Set<String> = if (previewViewModel.isCompositeSource.value == true) {
+            previewViewModel.compositionCameraIds.value ?: emptySet()
+        } else {
+            val source = previewViewModel.streamer?.videoInput?.sourceFlow?.value
+            setOfNotNull((source as? ICameraSource)?.cameraId)
+        }
+
+        binding.cameraButtonsContainer.children.forEach { view ->
+            if (view is android.widget.Button) {
+                view.backgroundTintList =
+                    getButtonColorStateList(requireContext(), activeIds.contains(view.tag))
+            }
         }
     }
 

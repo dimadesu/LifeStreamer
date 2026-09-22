@@ -85,6 +85,19 @@ class CompositionCapabilities(private val context: Context) {
     }
 
     /**
+     * Whether these two cameras can be open at the same time.
+     *
+     * Two ids that are not in a concurrent set will fail to open together, so this has to be
+     * asked *before* swapping a camera into a layer rather than discovering it as a crash.
+     */
+    fun canRunTogether(first: String, second: String): Boolean {
+        if (first == second) {
+            return false
+        }
+        return cached.concurrentCameraIdSets.any { it.contains(first) && it.contains(second) }
+    }
+
+    /**
      * Why a second camera layer is unavailable, or `null` when it is available.
      */
     fun reasonSecondCameraUnavailable(primaryCameraId: String?): String? = when {
