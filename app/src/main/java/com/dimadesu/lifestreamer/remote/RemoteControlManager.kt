@@ -18,6 +18,9 @@ package com.dimadesu.lifestreamer.remote
 import android.content.Context
 import android.util.Log
 import com.dimadesu.lifestreamer.composition.CompositionController
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Owns the one remote control server, mirroring how SrtlaManager owns Moblink.
@@ -39,6 +42,15 @@ object RemoteControlManager {
         private set
 
     val isRunning: Boolean get() = server != null
+
+    /**
+     * Emits whenever the server comes up or goes down, so the settings screen can redraw the
+     * address and PIN without the operator having to leave and re-enter it. Starting is
+     * asynchronous (preference -> DataStore -> service), so a one-shot read after the switch
+     * flips would still see the old state.
+     */
+    private val _stateFlow = MutableStateFlow(false)
+    val stateFlow: StateFlow<Boolean> = _stateFlow.asStateFlow()
 
     /**
      * The address to show the operator, or null when the server is not up.
@@ -83,11 +95,13 @@ object RemoteControlManager {
             instance.start()
             server = instance
             currentPort = port
+            _stateFlow.value = true
             Log.i(TAG, "Remote control started on port $port")
         } catch (t: Throwable) {
             lastError = t.message ?: "Could not start on port $port"
             Log.e(TAG, "Remote control failed to start: ${t.message}", t)
             runCatching { instance.stop() }
+            _stateFlow.value = false
         }
     }
 
@@ -95,6 +109,7 @@ object RemoteControlManager {
         server?.let { runCatching { it.stop() } }
         server = null
         currentPort = 0
+        _stateFlow.value = false
     }
 
     fun broadcastMessage(text: String) {

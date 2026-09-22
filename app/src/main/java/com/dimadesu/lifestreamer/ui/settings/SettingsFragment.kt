@@ -23,7 +23,9 @@ import android.media.MediaFormat
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
@@ -244,9 +246,23 @@ class SettingsFragment : PreferenceFragmentCompat() {
     /**
      * The address, the PIN and the QR code that carries both.
      *
-     * Refreshed in onResume rather than observed: the server lives in the service and the address
-     * only changes when the network does.
+     * Refreshed in onResume, because the address only changes when the network does, and also
+     * whenever the server itself comes up or goes down (see onViewCreated).
      */
+    override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        // The server starts asynchronously (switch -> DataStore -> service), so a one-shot read
+        // right after the switch flips still sees the old state and the summary would read
+        // "Not running" on a server that is up. Redraw when it actually comes up or goes down.
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                com.dimadesu.lifestreamer.remote.RemoteControlManager.stateFlow.collect {
+                    runCatching { loadRemoteControlSettings() }
+                }
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         // The address and the thermal reading are snapshots, not observed state: refresh them
@@ -259,9 +275,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val addressPreference =
             findPreference<Preference>(getString(R.string.remote_control_address_key))
         val url = com.dimadesu.lifestreamer.remote.RemoteControlManager.url(requireContext())
-        val pin = androidx.preference.PreferenceManager
-            .getDefaultSharedPreferences(requireContext())
-            .getString(getString(R.string.remote_control_pin_key), "")
+        // The PIN lives in the same DataStore the whole preference screen is backed by
+        // (see preferenceDataStore above). Reading it from default SharedPreferences would
+        // always come back empty: this app has no default SharedPreferences file.
+        val pin = preferenceManager.preferenceDataStore
+            ?.getString(getString(R.string.remote_control_pin_key), "")
             .orEmpty()
 
         addressPreference?.summary = when {

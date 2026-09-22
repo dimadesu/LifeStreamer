@@ -539,18 +539,35 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             )
         }
 
+        // The remote page is the only control an operator has over a mounted phone, so the same
+        // rule the PREVIEW button follows applies here: a command that relaxes the preview
+        // overrules the policy for a while. Without this the policy undoes the operator's command
+        // on its next step, and the web button silently does nothing.
+        //
+        // A command that *tightens* the preview deliberately does not override: it pushes in the
+        // same direction as the policy, and suspending the ladder there would stop it escalating
+        // when the phone is still heating up.
         override fun setPreviewEnabled(enabled: Boolean) {
             thermalPolicy.actuator?.setPreviewEnabled(enabled)
+            if (enabled) {
+                thermalPolicy.onManualOverride()
+            }
         }
 
         override fun setPreviewShortEdge(shortEdge: Int?) {
             thermalPolicy.actuator?.setPreviewShortEdge(shortEdge)
+            if (shortEdge == null) {
+                thermalPolicy.onManualOverride()
+            }
         }
 
         override fun setPreviewFpsCap(maxFps: Int?) {
             thermalPolicy.actuator?.setPreviewFpsCap(maxFps)
             // Works with the UI gone too: the compositor lives in the service.
             (compositionController.composite)?.previewMaxFps = maxFps
+            if (maxFps == null) {
+                thermalPolicy.onManualOverride()
+            }
         }
 
         override fun onLockdown() {
