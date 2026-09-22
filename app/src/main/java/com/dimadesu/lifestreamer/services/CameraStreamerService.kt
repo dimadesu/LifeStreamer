@@ -217,6 +217,33 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Use replay=0 because we'll handle notification-start timing differently
     private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val criticalErrors = _criticalErrors.asSharedFlow()
+
+    /**
+     * The last thing that went wrong with a stream, kept until the next start.
+     *
+     * [criticalErrors] has no replay, so with nobody collecting -- the UI gone, which is exactly
+     * when the remote control is used -- the message was simply lost and the operator saw a stream
+     * that had stopped for no stated reason.
+     */
+    private val _lastStreamError = MutableStateFlow<String?>(null)
+    val lastStreamError = _lastStreamError.asStateFlow()
+
+    /**
+     * Whether a screen (the ViewModel) is bound and listening for stream errors.
+     *
+     * With one, failures keep the current behaviour: status stays CONNECTING and the ViewModel runs
+     * its reconnection. Without one, nothing would ever leave CONNECTING, so the service settles the
+     * state itself.
+     */
+    private val isUiAttached: Boolean
+        get() = _criticalErrors.subscriptionCount.value > 0
+
+    /**
+     * Serialises the start/stop *decision*, not the whole operation: a start can take ~13 s and a
+     * stop must be able to interrupt it. The UI has its own mutex, private to the ViewModel, so the
+     * page and the phone could otherwise both open the endpoint.
+     */
+    private val streamControlMutex = kotlinx.coroutines.sync.Mutex()
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
@@ -525,6 +552,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         serviceScope.launch {
             isMutedFlow.collect { RemoteControlManager.broadcastState() }
         }
+        // STARTING, CONNECTING, ERROR and reconnection never reached the page before: only the
+        // streaming flag did, so a start that was stuck or failing looked identical to one that
+        // had not been tried.
+        serviceScope.launch {
+            serviceStreamStatus.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            isReconnecting.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            reconnectionStatusMessage.collect { RemoteControlManager.broadcastState() }
+        }
+        serviceScope.launch {
+            lastStreamError.collect { RemoteControlManager.broadcastState() }
+        }
         serviceScope.launch {
             thermalMonitor.stateFlow.collect { RemoteControlManager.broadcastState() }
         }
@@ -601,6 +643,30 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         override fun setMuted(muted: Boolean) {
             this@CameraStreamerService.setMuted(muted)
+        }
+
+        override fun stream(): RemoteDto.StreamDto {
+            val status = getEffectiveServiceStatus()
+            val blocked = startBlockedReason()
+            return RemoteDto.StreamDto(
+                status = status.name,
+                reconnecting = _isReconnecting.value,
+                reconnectionMessage = _reconnectionStatusMessage.value,
+                startedAtMs = streamingStartTime.takeIf { status == StreamStatus.STREAMING },
+                lastError = _lastStreamError.value,
+                canStart = blocked == null,
+                startBlockedReason = blocked
+            )
+        }
+
+        // Only the decision is awaited -- a lock and a few checks. The start itself runs in the
+        // background and its progress is pushed as state.
+        override fun startStream(): String? = runBlocking {
+            startStreamFromService().let { if (it.accepted) null else it.reason ?: "Cannot start" }
+        }
+
+        override fun stopStream() {
+            serviceScope.launch(Dispatchers.Default) { stopStreamFromService() }
         }
 
         override fun power(): RemoteDto.PowerDto = RemoteDto.PowerDto(
@@ -754,66 +820,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ACTION_START_STREAM -> {
                     Log.i(TAG, "Notification action: START_STREAM")
                     serviceScope.launch(Dispatchers.Default) {
-                        // Check if we can start (cleanup not in progress)
-                        if (!canStartStream()) {
-                            Log.w(TAG, "Cannot start from notification - cleanup in progress or blocked")
-                            return@launch
-                        }
-                        
-                        // Clear manual stop flag since user is explicitly starting
-                        clearUserStoppedManually()
-                        
-                        try {
-                            startStreamFromConfiguredEndpoint()
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Start from notification failed: ${e.message}")
+                        val decision = startStreamFromService()
+                        if (!decision.accepted) {
+                            Log.w(TAG, "Cannot start from notification: ${decision.reason}")
                         }
                     }
                 }
                 ACTION_STOP_STREAM -> {
                     Log.i(TAG, "Notification action: STOP_STREAM")
                     // stop streaming but keep service alive
-                    serviceScope.launch(Dispatchers.Default) {
-                        // Mark that user manually stopped (prevents reconnection)
-                        markUserStoppedManually()
-                        
-                        // Mark cleanup in progress to prevent start racing with close()
-                        isCleanupInProgress = true
-                        Log.i(TAG, "Notification STOP - Set isCleanupInProgress=true")
-                        
-                        try {
-                            // Signal that user manually stopped from notification
-                            // This allows ViewModel to cancel reconnection timer immediately
-                            _userStoppedFromNotification.emit(Unit)
-                            
-                            streamer?.stopStream()
-
-                            // Stop embedded SRTLA proxy if it was running for this stream
-                            val srtlaConfig = storageRepository.srtlaConfigFlow.first()
-                            if (srtlaConfig != null && SrtlaManager.isRunning) {
-                                SrtlaManager.stop()
-                            }
-                            
-                            // Unlock stream rotation since streaming has stopped
-                            unlockStreamRotation()
-                            
-                            // Close the endpoint to allow fresh connection on next start
-                            try {
-                                withTimeout(3000) {
-                                    streamer?.close()
-                                }
-                                Log.i(TAG, "Endpoint closed after stop from notification")
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Error closing endpoint after notification stop: ${e.message}", e)
-                            }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Stop from notification failed: ${e.message}")
-                        } finally {
-                            // Clear cleanup flag - it's now safe to start again
-                            isCleanupInProgress = false
-                            Log.i(TAG, "Notification STOP - Cleared isCleanupInProgress, cleanup complete")
-                        }
-                    }
+                    serviceScope.launch(Dispatchers.Default) { stopStreamFromService() }
                 }
                 ACTION_TOGGLE_MUTE -> {
                     Log.i(TAG, "Notification action: TOGGLE_MUTE")
@@ -967,7 +983,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // NotificationCompat with five actions was constructed every two seconds on
                     // the main thread and then thrown away, which is exactly the kind of waste
                     // that makes remote commands queue behind it while streaming.
-                    val notificationKey = notificationKeyForStatus(serviceStatus)
+                    val parts = notificationContentFor(serviceStatus)
+                    // Same two-second tick feeds the remote page's live stats, computed once.
+                    if (serviceStatus == StreamStatus.STREAMING) {
+                        RemoteControlManager.broadcastStats(parts.bitrateBps?.div(1000), parts.fps)
+                    }
+                    val notificationKey = parts.key(serviceStatus, isCurrentlyMuted())
                     if (notificationKey == lastNotificationKey) {
                         delay(2000)
                         continue
@@ -1017,7 +1038,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val content: String,
         val bitrateText: String,
         val fpsText: String,
-        val finalText: String
+        val finalText: String,
+        val bitrateBps: Int? = null,
+        val fps: Float? = null
     ) {
         fun key(status: StreamStatus, muted: Boolean): String =
             listOf(status.name, muted, content, bitrateText, fpsText, statusLabel).joinToString("|")
@@ -1042,9 +1065,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             (streamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder
         } else null
         val videoBitrate = videoEncoderRef?.bitrate
-        val fpsText = try {
-            videoEncoderRef?.getStats()?.let { s -> "%.1f fps".format(java.util.Locale.US, s.outputFps) }
-        } catch (_: Throwable) { null }.orEmpty()
+        val fpsValue = try { videoEncoderRef?.getStats()?.outputFps } catch (_: Throwable) { null }
+        val fpsText = fpsValue?.let { "%.1f fps".format(java.util.Locale.US, it) }.orEmpty()
 
         val bitrateText = videoBitrate?.let { b ->
             if (b >= 1_000_000) String.format(java.util.Locale.US, "%.2f Mbps", b / 1_000_000.0)
@@ -1056,7 +1078,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             "$content • $bitrateText$fpsAppend"
         } else content
 
-        return NotificationContent(statusLabel, content, bitrateText, fpsText, finalText)
+        return NotificationContent(
+            statusLabel, content, bitrateText, fpsText, finalText,
+            bitrateBps = videoBitrate, fps = fpsValue?.toFloat()
+        )
     }
 
     private fun notificationKeyForStatus(status: StreamStatus): String =
@@ -1433,6 +1458,139 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Start streaming using the endpoint configured in DataStore.
      * Mirrors the logic from PreviewViewModel.startStream(): open with timeout and attach regulator if needed.
      */
+    /** Outcome of a start request: accepted (and running in the background) or refused with why. */
+    data class StartDecision(val accepted: Boolean, val reason: String? = null)
+
+    /**
+     * Why a start would be refused right now, or null if it can go ahead. No side effects, so the
+     * remote page can show it next to a disabled button before anyone taps.
+     *
+     * `canStartStream()` only checks cleanup, despite its comment; in the notification it is the
+     * Start button disappearing that prevents a second start. A remote start has no such button,
+     * and without these checks it would open the endpoint twice or race the ViewModel's
+     * reconnection timer.
+     */
+    fun startBlockedReason(): String? {
+        val status = getEffectiveServiceStatus()
+        if (runCatching { streamer?.isStreamingFlow?.value == true }.getOrDefault(false) ||
+            status == StreamStatus.STREAMING
+        ) return "Already live"
+        if (_isReconnecting.value) return "Reconnecting"
+        if (status == StreamStatus.STARTING || status == StreamStatus.CONNECTING) return "Already starting"
+        if (isCleanupInProgress) return "Still stopping, try again in a moment"
+
+        val granted = { permission: String ->
+            androidx.core.content.ContextCompat.checkSelfPermission(this, permission) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (!granted(android.Manifest.permission.CAMERA) || !granted(android.Manifest.permission.RECORD_AUDIO)) {
+            return "Open the app on the phone to grant camera and microphone access"
+        }
+
+        // Checked directly rather than through validateSourcesConfigured(), which logs on every
+        // call: this runs each time the remote state is built.
+        val hasVideo = (streamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)
+            ?.videoInput?.sourceFlow?.value != null
+        val hasAudio = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value != null
+        if (!hasVideo || !hasAudio) {
+            // Sources are attached by the app's screen. A service started or recreated without it
+            // has none, and none can be created from here.
+            return "Open the app on the phone first"
+        }
+
+        // A screen source needs a fresh capture grant for every stream, and that grant is an
+        // interactive dialog on the phone.
+        val video = (streamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)
+            ?.videoInput?.sourceFlow?.value
+        if (video is io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource &&
+            io.github.thibaultbee.streampack.core.elements.sources.video.mediaprojection
+                .MediaProjectionVideoSourceFactory.isProjectionExhaustedForVideo(video.mediaProjection)
+        ) {
+            return "Screen capture needs a new permission on the phone"
+        }
+        return null
+    }
+
+    /**
+     * Starts the stream from inside the service, for the remote control.
+     *
+     * Deliberately a method call and never a new startService(): the camera and microphone may
+     * only be used by a foreground service that was *started while the app was visible*. This
+     * instance was, so it keeps that right with the screen off; a service started from a network
+     * request would not.
+     *
+     * Returns at once. A start can take ~13 s (sources, open, encoders) and progress reaches the
+     * page through the pushed state, not through this call.
+     */
+    suspend fun startStreamFromService(): StartDecision {
+        streamControlMutex.lock()
+        try {
+            startBlockedReason()?.let { return StartDecision(false, it) }
+            clearUserStoppedManually()
+            _lastStreamError.value = null
+            // Claimed inside the lock so a second request sees STARTING and is refused.
+            _serviceStreamStatus.value = StreamStatus.STARTING
+        } finally {
+            streamControlMutex.unlock()
+        }
+
+        serviceScope.launch(Dispatchers.Default) {
+            startStreamFromConfiguredEndpoint()
+            // The app's own start does this; the notification's never did, so a Bluetooth mic
+            // stayed off when the stream was started from outside the app.
+            if (runCatching { streamer?.isStreamingFlow?.value == true }.getOrDefault(false)) {
+                runCatching { triggerBluetoothMicActivation() }
+            }
+        }
+        return StartDecision(true)
+    }
+
+    /**
+     * Stops the stream from inside the service; shared by the notification and the remote control.
+     *
+     * Accepts being called while starting, connecting or reconnecting. It ends by putting the
+     * status back to NOT_STREAMING itself: that used to be done by a collector in the ViewModel,
+     * so without a screen a stop during CONNECTING left the status stuck there.
+     */
+    suspend fun stopStreamFromService() {
+        streamControlMutex.lock()
+        try {
+            markUserStoppedManually()
+            isCleanupInProgress = true
+        } finally {
+            streamControlMutex.unlock()
+        }
+        Log.i(TAG, "stopStreamFromService - Set isCleanupInProgress=true")
+
+        try {
+            // Lets a bound ViewModel cancel its reconnection timer immediately.
+            _userStoppedFromNotification.emit(Unit)
+
+            streamer?.stopStream()
+
+            // Stop the embedded SRTLA proxy whenever it runs, not only when the config says so:
+            // a proxy left behind by a failed start holds the port for the next one.
+            if (SrtlaManager.isRunning) {
+                SrtlaManager.stop()
+            }
+
+            unlockStreamRotation()
+
+            try {
+                withTimeout(3000) { streamer?.close() }
+                Log.i(TAG, "Endpoint closed after stop")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing endpoint after stop: ${e.message}", e)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Stop failed: ${e.message}")
+        } finally {
+            isCleanupInProgress = false
+            cancelReconnection()
+            Log.i(TAG, "stopStreamFromService - cleanup complete")
+        }
+    }
+
     private suspend fun startStreamFromConfiguredEndpoint() {
         try {
             // Lock stream rotation BEFORE starting to ensure consistent orientation
@@ -1485,10 +1643,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             if (!hasVideoSource || !hasAudioSource) {
                 // Sources still not available after waiting - this means ViewModel hasn't initialized them
                 // This can happen if user clicks Start in notification before opening the app
-                val errorMsg = "Sources not initialized - please start from app first"
-                Log.w(TAG, errorMsg)
-                customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
-                serviceScope.launch { _criticalErrors.emit(errorMsg) }
+                reportStartFailure("Sources not initialized - open the app on the phone first", alwaysNotify = true)
                 return
             }
 
@@ -1497,17 +1652,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 storageRepository.endpointDescriptorFlow.first()
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read endpoint descriptor from storage: ${e.message}")
-                customNotificationUtils.notify(onErrorNotification(Throwable("No endpoint configured")) ?: onCreateNotification())
+                reportStartFailure("No endpoint configured", alwaysNotify = true)
                 return
             }
 
             // Final validation: Ensure both sources are still configured right before starting stream
             val (sourcesValid, sourceError) = validateSourcesConfigured()
             if (!sourcesValid) {
-                val errorMsg = "Cannot start stream: $sourceError"
-                Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
-                customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
-                serviceScope.launch { _criticalErrors.emit(errorMsg) }
+                reportStartFailure("Cannot start stream: $sourceError", alwaysNotify = true)
                 return
             }
             Log.i(TAG, "startStreamFromConfiguredEndpoint: Final source validation passed")
@@ -1550,10 +1702,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 if (!encodersReady) {
                     val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
                     val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
-                    val errorMsg = "Encoders not ready after open (video=$videoEncoderExists, audio=$audioEncoderExists)"
-                    Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
-                    customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
-                    serviceScope.launch { _criticalErrors.emit(errorMsg) }
+                    reportStartFailure(
+                        "Encoders not ready after open (video=$videoEncoderExists, audio=$audioEncoderExists)",
+                        alwaysNotify = true
+                    )
                     return
                 }
                 val videoEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder != null
@@ -1566,8 +1718,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
                 // Don't call notify(onCreateNotification()) here - let the status observer handle it
                 // to avoid overwriting the CONNECTING notification
-                // Emit critical error for ViewModel to observe and trigger reconnection
-                serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
+                // Emit critical error for ViewModel to observe and trigger reconnection. With no
+                // ViewModel, reportStartFailure settles the state instead of leaving it stuck.
+                reportStartFailure("Open failed: ${e.message}")
+                return
+            }
+
+            // A stop may have arrived while open() was running -- from the page, the notification
+            // or the phone. Going on to startStream() here would put the stream on air right after
+            // the operator asked for it to stop.
+            if (_userStoppedManually.value) {
+                Log.i(TAG, "startStreamFromConfiguredEndpoint: stopped during open, not starting")
+                runCatching { withTimeout(3000) { currentStreamer.close() } }
                 return
             }
 
@@ -1597,8 +1759,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
                 // Don't call notify(onCreateNotification()) here - let the status observer handle it
                 // to avoid overwriting the CONNECTING notification
-                // Emit critical error for ViewModel to observe and trigger reconnection
-                serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
+                // Emit critical error for ViewModel to observe and trigger reconnection. With no
+                // ViewModel, reportStartFailure settles the state instead of leaving it stuck.
+                reportStartFailure("Start failed: ${e.message}")
                 return
             }
 
@@ -1613,11 +1776,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.w(TAG, "Failed to attach bitrate regulator: ${e.message}")
             }
 
+            _lastStreamError.value = null
             Log.i(TAG, "startStreamFromConfiguredEndpoint: stream started successfully")
             // Notify UI of success via notification / status flow; no dialog needed
             // Keep API surface unchanged for future use
         } catch (e: Exception) {
+            // Reached when SrtlaManager.start throws, which used to leave the status in STARTING.
             Log.w(TAG, "startStreamFromConfiguredEndpoint error: ${e.message}")
+            reportStartFailure(e.message ?: "Start failed")
         }
     }
     
@@ -2071,6 +2237,58 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             exitPending = exitPendingIntent,
             openPending = openPendingIntent
         )
+    }
+
+    /**
+     * A stream error must not take the service down.
+     *
+     * The base class notifies and then calls `stopSelf()`. While a screen is bound that does
+     * nothing visible, but with the Activity dismissed -- a phone on a windscreen -- a single
+     * network drop destroyed the service, and with it the remote control server: the operator
+     * lost the stream and the button to restart it at the same moment.
+     */
+    override fun onError(t: Throwable) {
+        Log.e(TAG, "Stream error: ${t.message}", t)
+        _lastStreamError.value = t.message ?: t.javaClass.simpleName
+        onErrorNotification(t)?.let { customNotificationUtils.notify(it) }
+        if (!isUiAttached) {
+            serviceScope.launch(Dispatchers.Default) { settleAfterFailure() }
+        }
+    }
+
+    /**
+     * Records a start failure and, when no screen will handle it, leaves a state that can be
+     * recovered from.
+     *
+     * With a screen bound, the failure paths deliberately stay in CONNECTING so the ViewModel can
+     * reconnect; that is left exactly as it was. Without one, CONNECTING was a dead end: nothing
+     * retried, the Start button stayed hidden in the notification, and the SRTLA proxy kept running.
+     */
+    private suspend fun reportStartFailure(message: String, alwaysNotify: Boolean = false) {
+        Log.w(TAG, "Start failed: $message")
+        _lastStreamError.value = message
+        val uiAttached = isUiAttached
+        if (alwaysNotify || !uiAttached) {
+            // onErrorNotification also emits to criticalErrors, so no separate emit here.
+            customNotificationUtils.notify(onErrorNotification(Throwable(message)) ?: onCreateNotification())
+        } else {
+            runCatching { _criticalErrors.emit(message) }
+        }
+        if (!uiAttached) {
+            settleAfterFailure()
+        }
+    }
+
+    private suspend fun settleAfterFailure() {
+        runCatching { streamer?.stopStream() }
+        if (SrtlaManager.isRunning) {
+            runCatching { SrtlaManager.stop() }
+        }
+        runCatching { withTimeout(3000) { streamer?.close() } }
+        unlockStreamRotation()
+        _isReconnecting.value = false
+        _reconnectionStatusMessage.value = null
+        _serviceStreamStatus.value = StreamStatus.ERROR
     }
 
     override fun onErrorNotification(t: Throwable): Notification? {

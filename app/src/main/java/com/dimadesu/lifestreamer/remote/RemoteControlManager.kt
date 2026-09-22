@@ -119,6 +119,10 @@ object RemoteControlManager {
         server?.broadcastState()
     }
 
+    fun broadcastStats(bitrateKbps: Int?, fps: Float?) {
+        server?.broadcastStats(bitrateKbps, fps)
+    }
+
     fun broadcastMessage(text: String) {
         server?.broadcastMessage(text)
     }

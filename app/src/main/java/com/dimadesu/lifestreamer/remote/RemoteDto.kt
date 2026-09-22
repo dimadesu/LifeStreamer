@@ -40,8 +40,33 @@ object RemoteDto {
         val layers: List<LayerDto>,
         val cameras: List<CameraDto>,
         val thermal: ThermalDto?,
-        val power: PowerDto
+        val power: PowerDto,
+        val stream: StreamDto
     )
+
+    /**
+     * The stream as the operator needs to see it from outside: not just live or not, but starting,
+     * connecting, reconnecting and why it failed -- and whether it can be started right now.
+     *
+     * Bitrate and fps are deliberately not here: they change every two seconds, and in the state
+     * they would defeat the "only push when something changed" rule and rebuild the page mid-drag.
+     * They travel in a separate `stats` event.
+     */
+    @Keep
+    data class StreamDto(
+        /** NOT_STREAMING, STARTING, CONNECTING, STREAMING or ERROR. */
+        val status: String,
+        val reconnecting: Boolean,
+        val reconnectionMessage: String?,
+        /** Epoch ms when the stream went live; the page derives the uptime from it. */
+        val startedAtMs: Long?,
+        val lastError: String?,
+        val canStart: Boolean,
+        val startBlockedReason: String?
+    )
+
+    @Keep
+    data class StatsDto(val bitrateKbps: Int?, val fps: Float?)
 
     @Keep
     data class PresetDto(val id: String, val name: String)

@@ -61,6 +61,11 @@ class RemoteControlServer(
         fun setMuted(muted: Boolean)
         fun thermal(): RemoteDto.ThermalDto?
         fun power(): RemoteDto.PowerDto
+        fun stream(): RemoteDto.StreamDto
+
+        /** @return null when the start was accepted, otherwise why it was refused. */
+        fun startStream(): String?
+        fun stopStream()
         fun setPreviewEnabled(enabled: Boolean)
         fun setPreviewShortEdge(shortEdge: Int?)
         fun setPreviewFpsCap(maxFps: Int?)
@@ -622,6 +627,22 @@ class RemoteControlServer(
                 respondJson(output, 200, RemoteDto.OkResponse(true))
             }
 
+            "/api/stream/start" -> {
+                // Answers at once: a start takes up to ~13 s, and progress reaches the page through
+                // the pushed state rather than by holding this request thread.
+                val refused = hooks.startStream()
+                if (refused == null) {
+                    respondJson(output, 202, RemoteDto.OkResponse(true))
+                } else {
+                    respondJson(output, 409, RemoteDto.OkResponse(false, refused))
+                }
+            }
+
+            "/api/stream/stop" -> {
+                hooks.stopStream()
+                respondJson(output, 202, RemoteDto.OkResponse(true))
+            }
+
             "/api/mute" -> {
                 val wanted = parse<RemoteDto.MuteRequest>(request.body)?.muted
                 if (wanted == null) {
@@ -727,7 +748,8 @@ class RemoteControlServer(
                 )
             },
             thermal = hooks.thermal(),
-            power = hooks.power()
+            power = hooks.power(),
+            stream = hooks.stream()
         )
     }
 
@@ -844,6 +866,21 @@ class RemoteControlServer(
     }
 
     /**
+     * Live bitrate and fps, sent on their own event rather than inside the state: they change every
+     * two seconds, and in the state they would make every snapshot look new and rebuild the page.
+     * Droppable, like state: a slow client simply sees fewer updates.
+     */
+    fun broadcastStats(bitrateKbps: Int?, fps: Float?) {
+        if (eventClients.isEmpty()) return
+        val payload = gson.toJson(RemoteDto.StatsDto(bitrateKbps, fps))
+        runCatching {
+            pushExecutor.execute {
+                eventClients.forEach { client -> client.send("stats", payload) }
+            }
+        }
+    }
+
+    /**
      * Pushes a message to every connected page, so a refusal reaches the remote operator rather
      * than looking like a tap that did nothing.
      */
@@ -880,9 +917,12 @@ class RemoteControlServer(
     ) {
         val reason = when (status) {
             200 -> "OK"
+            202 -> "Accepted"
             204 -> "No Content"
+            400 -> "Bad Request"
             401 -> "Unauthorized"
             404 -> "Not Found"
+            409 -> "Conflict"
             429 -> "Too Many Requests"
             503 -> "Service Unavailable"
             else -> "OK"
