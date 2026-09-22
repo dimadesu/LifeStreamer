@@ -964,9 +964,9 @@ class RemoteControlServer(
      * two seconds, and in the state they would make every snapshot look new and rebuild the page.
      * Droppable, like state: a slow client simply sees fewer updates.
      */
-    fun broadcastStats(bitrateKbps: Int?, fps: Float?) {
+    fun broadcastStats(bitrateKbps: Int?, fps: Float?, uptimeSec: Long?) {
         if (eventClients.isEmpty()) return
-        val payload = gson.toJson(RemoteDto.StatsDto(bitrateKbps, fps))
+        val payload = gson.toJson(RemoteDto.StatsDto(bitrateKbps, fps?.let { round2(it) }, uptimeSec))
         runCatching {
             pushExecutor.execute {
                 eventClients.forEach { client -> client.send("stats", payload) }

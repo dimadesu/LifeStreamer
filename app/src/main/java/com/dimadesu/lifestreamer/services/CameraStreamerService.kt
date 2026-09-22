@@ -581,7 +581,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
         serviceScope.launch {
             runCatching { streamer.isStreamingFlow }.getOrNull()
-                ?.collect { RemoteControlManager.broadcastState() }
+                ?.collect {
+                    // With the preview off -- the normal state when mounted -- a composition's
+                    // cameras only run while live, so this is when zoom first becomes readable.
+                    compositionController.refreshZoomAsync()
+                    RemoteControlManager.broadcastState()
+                }
         }
         // The composition itself can be replaced (COMPOSE on/off), so follow the source and then
         // its layout rather than binding once to a layout that may not exist yet.
@@ -995,7 +1000,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val parts = notificationContentFor(serviceStatus)
                     // Same two-second tick feeds the remote page's live stats, computed once.
                     if (serviceStatus == StreamStatus.STREAMING) {
-                        RemoteControlManager.broadcastStats(parts.bitrateBps?.div(1000), parts.fps)
+                        RemoteControlManager.broadcastStats(
+                            parts.bitrateBps?.div(1000),
+                            parts.fps,
+                            streamingStartTime?.let { (System.currentTimeMillis() - it) / 1000 }
+                        )
                     }
                     val notificationKey = parts.key(serviceStatus, isCurrentlyMuted())
                     if (notificationKey == lastNotificationKey) {

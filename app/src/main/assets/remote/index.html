@@ -64,6 +64,36 @@
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
   #thermal { margin-bottom: 8px; }
   .muted { color: var(--dim); font-size: 12px; }
+  /* The live bar is the most important control on the page, so it sits on top and reads at a
+     glance: what state the stream is in, and the one button that changes it. */
+  #live { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #live .info { flex: 1; min-width: 0; }
+  #liveStatus { font-weight: 700; font-size: 16px; display: flex; align-items: center; }
+  #liveMeta { font-variant-numeric: tabular-nums; }
+  #liveReason { color: var(--warn); font-size: 12px; }
+  #liveBtn { min-width: 116px; font-weight: 700; font-size: 15px; }
+  #liveBtn.start { background: var(--accent); border-color: var(--accent); color: #062; }
+  #liveBtn.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .st-live { background: var(--bad); }
+  .st-busy { background: var(--warn); }
+  .st-idle { background: #666; }
+
+  /* An in-page dialog rather than window.confirm, which mobile browsers may suppress. */
+  #confirm { position: fixed; inset: 0; background: #000b; z-index: 20; display: flex;
+             align-items: center; justify-content: center; padding: 20px; }
+  #confirm .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+                  padding: 16px; max-width: 360px; width: 100%; }
+  #confirm .title { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+  #confirm .row { justify-content: flex-end; margin-top: 14px; }
+  #confirmOk.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+  .seg button { min-height: 36px; padding: 6px 10px; }
+  .swatch { width: 36px; min-height: 36px; padding: 0; border: 2px solid var(--line); }
+  .swatch.on { border-color: var(--accent); }
+  input[type=color] { width: 44px; height: 36px; border: 1px solid var(--line); border-radius: 6px;
+                      background: #2a2a2a; padding: 2px; }
+  input[type=range] { accent-color: var(--accent); }
+
   @media (orientation: landscape) and (min-width: 700px) {
     #main { display: grid; grid-template-columns: 1fr 340px; gap: 12px; align-items: start; }
   }
@@ -80,8 +110,27 @@
   <div id="gateError" style="color:var(--bad);min-height:18px"></div>
 </div>
 
+<div id="confirm" hidden>
+  <div class="box">
+    <div class="title" id="confirmTitle"></div>
+    <div class="muted" id="confirmText"></div>
+    <div class="row">
+      <button id="confirmCancel">Cancel</button>
+      <button id="confirmOk"></button>
+    </div>
+  </div>
+</div>
+
 <div id="main" hidden>
   <div>
+    <div id="live" class="panel">
+      <div class="info">
+        <div id="liveStatus"><span class="dot st-idle"></span><span>Not streaming</span></div>
+        <div id="liveMeta" class="muted"></div>
+        <div id="liveReason"></div>
+      </div>
+      <button id="liveBtn" class="start">Start live</button>
+    </div>
     <div id="thermal" class="panel" hidden></div>
     <div id="stage"><div class="grid"></div></div>
     <h2>Layout</h2>
@@ -93,6 +142,20 @@
   </div>
 
   <div>
+    <h2>Composition</h2>
+    <div class="panel" id="compBox">
+      <div class="row" style="align-items:center;justify-content:space-between">
+        <div id="compLabel" class="muted"></div>
+        <button id="compToggle">Turn on</button>
+      </div>
+      <div id="compDetails">
+        <div class="muted" style="margin-top:8px">Second layer</div>
+        <div class="row seg" id="pipSources" style="margin-top:4px"></div>
+        <div class="muted" id="pipReason" style="margin-top:4px"></div>
+        <div class="muted" style="margin-top:8px">Background</div>
+        <div class="row" id="bgRow" style="margin-top:4px;align-items:center"></div>
+      </div>
+    </div>
     <h2>Layers</h2>
     <div id="layers"></div>
     <h2>Zoom</h2>
@@ -132,6 +195,16 @@ var dragging = null;
 var pendingRect = null;
 var rectInFlight = false;
 var zoomHeld = false;
+
+// Live stats arrive on their own event every two seconds; the uptime is interpolated in between
+// from the phone's own count, so a clock difference between phone and browser cannot skew it.
+var liveStats = null;
+var liveStatsAt = 0;
+
+// While a finger is on an opacity slider the layers panel must not be rebuilt under it.
+var styleHeld = false;
+var pendingStyle = null;
+var styleInFlight = false;
 var pendingZoom = null;
 var zoomInFlight = false;
 
@@ -181,6 +254,11 @@ function connect() {
   if (events) events.close();
   events = new EventSource("/api/events?token=" + encodeURIComponent(token));
   events.addEventListener("state", function (e) { render(JSON.parse(e.data)); });
+  events.addEventListener("stats", function (e) {
+    liveStats = JSON.parse(e.data);
+    liveStatsAt = Date.now();
+    renderLiveMeta();
+  });
   events.addEventListener("message", function (e) {
     showStatus(JSON.parse(e.data).text, "#444");
   });
@@ -231,6 +309,8 @@ function render(s) {
     stage.style.aspectRatio = s.canvasWidth + "/" + s.canvasHeight;
   }
 
+  renderLive(s.stream);
+  renderComposition(s);
   renderThermal(s.thermal);
   renderPresets(s.presets, s.activePresetId);
   renderStage(s.layers);
@@ -241,6 +321,254 @@ function render(s) {
   var mute = document.getElementById("mute");
   mute.textContent = s.muted ? "Unmute" : "Mute";
   mute.className = s.muted ? "on" : "";
+}
+
+// ---- live bar ----
+
+var LIVE_STATES = {
+  NOT_STREAMING: { text: "Not streaming", dot: "st-idle" },
+  STARTING: { text: "Starting…", dot: "st-busy" },
+  CONNECTING: { text: "Connecting…", dot: "st-busy" },
+  STREAMING: { text: "Live", dot: "st-live" },
+  ERROR: { text: "Error", dot: "st-idle" }
+};
+
+function isLiveOrGoing(st) {
+  return st && (st.status === "STREAMING" || st.status === "STARTING" ||
+                st.status === "CONNECTING" || st.reconnecting);
+}
+
+function renderLive(st) {
+  if (!st) return;
+  var info = LIVE_STATES[st.status] || LIVE_STATES.NOT_STREAMING;
+  var text = st.reconnecting ? (st.reconnectionMessage || "Reconnecting…") : info.text;
+  var status = document.getElementById("liveStatus");
+  status.innerHTML = "";
+  var dot = document.createElement("span");
+  dot.className = "dot " + (st.reconnecting ? "st-busy" : info.dot);
+  var label = document.createElement("span");
+  label.textContent = text;
+  status.appendChild(dot);
+  status.appendChild(label);
+
+  // Why it stopped, or why it cannot start: the operator is not next to the phone to find out.
+  var reason = "";
+  if (st.status === "ERROR" && st.lastError) reason = st.lastError;
+  else if (!isLiveOrGoing(st) && !st.canStart && st.startBlockedReason) reason = st.startBlockedReason;
+  else if (!isLiveOrGoing(st) && st.lastError) reason = "Last error: " + st.lastError;
+  document.getElementById("liveReason").textContent = reason;
+
+  var btn = document.getElementById("liveBtn");
+  if (isLiveOrGoing(st)) {
+    btn.textContent = "Stop";
+    btn.className = "stop";
+    btn.disabled = false;
+  } else {
+    btn.textContent = "Start live";
+    btn.className = "start";
+    btn.disabled = !st.canStart;
+  }
+  if (st.status !== "STREAMING") liveStats = null;
+  renderLiveMeta();
+}
+
+function formatUptime(sec) {
+  var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  var mm = (m < 10 ? "0" : "") + m, ss = (s < 10 ? "0" : "") + s;
+  return h > 0 ? h + ":" + mm + ":" + ss : m + ":" + ss;
+}
+
+function renderLiveMeta() {
+  var el = document.getElementById("liveMeta");
+  var st = state && state.stream;
+  if (!st || st.status !== "STREAMING" || !liveStats) { el.textContent = ""; return; }
+  var parts = [];
+  if (liveStats.uptimeSec !== null && liveStats.uptimeSec !== undefined) {
+    parts.push(formatUptime(liveStats.uptimeSec + Math.floor((Date.now() - liveStatsAt) / 1000)));
+  }
+  if (liveStats.bitrateKbps) {
+    parts.push(liveStats.bitrateKbps >= 1000
+      ? (liveStats.bitrateKbps / 1000).toFixed(2) + " Mbps"
+      : liveStats.bitrateKbps + " kb/s");
+  }
+  if (liveStats.fps) parts.push(liveStats.fps.toFixed(1) + " fps");
+  el.textContent = parts.join(" · ");
+}
+setInterval(renderLiveMeta, 1000);
+
+document.getElementById("liveBtn").onclick = function () {
+  var st = state && state.stream;
+  if (!st) return;
+  if (isLiveOrGoing(st)) {
+    // Ending the stream cannot be undone, and on a phone a stray tap is easy.
+    confirmDialog("End the stream?", "The live stream stops for everyone watching.", "Stop", true)
+      .then(function (yes) { if (yes) api("/api/stream/stop"); });
+  } else {
+    api("/api/stream/start").catch(function () {});
+  }
+};
+
+// ---- confirmation dialog ----
+
+var confirmResolve = null;
+
+function confirmDialog(title, text, okLabel, danger) {
+  document.getElementById("confirmTitle").textContent = title;
+  document.getElementById("confirmText").textContent = text;
+  var ok = document.getElementById("confirmOk");
+  ok.textContent = okLabel;
+  ok.className = danger ? "danger" : "on";
+  document.getElementById("confirm").hidden = false;
+  return new Promise(function (resolve) { confirmResolve = resolve; });
+}
+
+function closeConfirm(answer) {
+  document.getElementById("confirm").hidden = true;
+  if (confirmResolve) { var r = confirmResolve; confirmResolve = null; r(answer); }
+}
+document.getElementById("confirmOk").onclick = function () { closeConfirm(true); };
+document.getElementById("confirmCancel").onclick = function () { closeConfirm(false); };
+document.getElementById("confirm").addEventListener("click", function (e) {
+  if (e.target.id === "confirm") closeConfirm(false);
+});
+
+// ---- composition ----
+
+var BG_SWATCHES = ["#000000", "#FFFFFF", "#404040", "#00B140", "#0047BB"];
+
+function renderComposition(s) {
+  var on = !!s.composition;
+  document.getElementById("compLabel").textContent = on ? "On" : "Off — only the main camera";
+  var toggle = document.getElementById("compToggle");
+  toggle.textContent = on ? "Turn off" : "Turn on";
+  toggle.className = on ? "" : "on";
+
+  var box = document.getElementById("pipSources");
+  box.innerHTML = "";
+  var reasonEl = document.getElementById("pipReason");
+  reasonEl.textContent = "";
+  (s.pipSources || []).forEach(function (p) {
+    var b = document.createElement("button");
+    b.textContent = p.label;
+    if (p.active) b.className = "on";
+    if (!p.available) {
+      b.disabled = true;
+      b.title = p.reason || "";
+    }
+    b.onclick = function () { api("/api/layer/source", { kind: p.kind }); };
+    box.appendChild(b);
+  });
+  // The reasons of the unavailable ones, so a disabled button is never a mystery.
+  var why = (s.pipSources || []).filter(function (p) { return !p.available && p.reason; })
+    .map(function (p) { return p.label + ": " + p.reason; });
+  reasonEl.textContent = why.join(" · ");
+
+  var pip = (s.layers || []).filter(function (l) { return l.id === "pip"; })[0];
+  if (pip && pip.onPlaceholder && pip.sourceKind && pip.sourceKind !== "TEST_IMAGE") {
+    reasonEl.textContent = "Showing the test image: the chosen source is not available. " + reasonEl.textContent;
+  }
+
+  var bg = document.getElementById("bgRow");
+  if (!bg.querySelector("input")) {
+    BG_SWATCHES.forEach(function (c) {
+      var sw = document.createElement("button");
+      sw.className = "swatch";
+      sw.dataset.color = c;
+      sw.style.background = c;
+      sw.title = c;
+      sw.onclick = function () { api("/api/background", { color: c }); };
+      bg.appendChild(sw);
+    });
+    var picker = document.createElement("input");
+    picker.type = "color";
+    picker.onchange = function () { api("/api/background", { color: picker.value.toUpperCase() }); };
+    bg.appendChild(picker);
+  }
+  var current = (s.backgroundColor || "").toUpperCase();
+  bg.querySelectorAll(".swatch").forEach(function (sw) {
+    sw.className = "swatch" + (sw.dataset.color === current ? " on" : "");
+  });
+  if (current) bg.querySelector("input").value = current.toLowerCase();
+
+  document.getElementById("compDetails").style.opacity = on ? "1" : ".6";
+}
+
+document.getElementById("compToggle").onclick = function () {
+  var on = !!(state && state.composition);
+  var go = function () { api("/api/composition", { enabled: !on }); };
+  if (state && isLiveOrGoing(state.stream)) {
+    confirmDialog(on ? "Turn the composition off?" : "Turn the composition on?",
+      "The stream stays on air, but the picture freezes for about a second while the cameras switch.",
+      on ? "Turn off" : "Turn on", false).then(function (yes) { if (yes) go(); });
+  } else {
+    go();
+  }
+};
+
+/**
+ * Coalesced like zoom and the drag rectangles: one request in flight, the newest wins.
+ */
+function sendStyle(layerId, patch) {
+  pendingStyle = Object.assign({ layerId: layerId }, patch);
+  if (styleInFlight) return;
+  styleInFlight = true;
+  var payload = pendingStyle;
+  pendingStyle = null;
+  api("/api/layer/style", payload).catch(function () {}).then(function () {
+    styleInFlight = false;
+    if (pendingStyle) sendStyle(pendingStyle.layerId, pendingStyle);
+  });
+}
+
+function buildStyleRow(l) {
+  var wrap = document.createElement("div");
+  wrap.style.marginTop = "6px";
+
+  var seg = document.createElement("div");
+  seg.className = "row seg";
+  [["FILL", "Fill"], ["FIT", "Fit"], ["STRETCH", "Stretch"]].forEach(function (m) {
+    var b = document.createElement("button");
+    b.textContent = m[1];
+    if (l.scaleMode === m[0]) b.className = "on";
+    b.onclick = function () { api("/api/layer/style", { layerId: l.id, scaleMode: m[0] }); };
+    seg.appendChild(b);
+  });
+  var mirror = document.createElement("button");
+  mirror.textContent = "Mirror";
+  if (l.mirror) mirror.className = "on";
+  mirror.onclick = function () { api("/api/layer/style", { layerId: l.id, mirror: !l.mirror }); };
+  seg.appendChild(mirror);
+  var rot = document.createElement("button");
+  rot.textContent = "↻ " + (l.rotation || 0) + "°";
+  rot.onclick = function () { api("/api/layer/style", { layerId: l.id, rotation: (l.rotation || 0) + 90 }); };
+  seg.appendChild(rot);
+  wrap.appendChild(seg);
+
+  var opRow = document.createElement("div");
+  opRow.className = "row";
+  opRow.style.alignItems = "center";
+  opRow.style.marginTop = "4px";
+  var opLabel = document.createElement("div");
+  opLabel.className = "muted";
+  opLabel.style.minWidth = "84px";
+  opLabel.textContent = "Opacity " + Math.round((l.alpha || 1) * 100) + "%";
+  var slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = 0.1; slider.max = 1; slider.step = 0.05;
+  slider.value = l.alpha || 1;
+  slider.style.flex = "1";
+  slider.addEventListener("pointerdown", function () { styleHeld = true; });
+  var release = function () { styleHeld = false; };
+  slider.addEventListener("pointerup", release);
+  slider.addEventListener("pointercancel", release);
+  slider.oninput = function () {
+    opLabel.textContent = "Opacity " + Math.round(slider.value * 100) + "%";
+    sendStyle(l.id, { alpha: parseFloat(slider.value) });
+  };
+  opRow.appendChild(opLabel);
+  opRow.appendChild(slider);
+  wrap.appendChild(opRow);
+  return wrap;
 }
 
 function renderThermal(t) {
@@ -337,6 +665,7 @@ function buildLayerBox(l) {
 }
 
 function renderLayers(layers, cameras) {
+  if (styleHeld) return;   // an opacity slider is being dragged; rebuilding would drop it
   var box = document.getElementById("layers");
   box.innerHTML = "";
 
@@ -391,12 +720,13 @@ function renderLayers(layers, cameras) {
       chips.appendChild(b);
     });
     panel.appendChild(chips);
+    panel.appendChild(buildStyleRow(l));
 
     box.appendChild(panel);
   });
 
   if (!layers || !layers.length) {
-    box.innerHTML = '<div class="panel muted">No composition running. Turn on COMPOSE on the phone.</div>';
+    box.innerHTML = '<div class="panel muted">No composition running. Turn it on above.</div>';
   }
 }
 
@@ -405,7 +735,12 @@ function renderZoom(layers) {
   var zoomable = (layers || []).filter(function (l) { return l.zoom; });
 
   if (!zoomable.length) {
-    box.innerHTML = '<div class="muted">No camera layer to zoom</div>';
+    var hasCamera = (layers || []).some(function (l) { return l.cameraId; });
+    // With the preview off and not live, a composition's cameras are idle and have no zoom to
+    // read; saying so beats a message that looks like the cameras are missing.
+    box.innerHTML = '<div class="muted">' + (hasCamera
+      ? "Zoom is available while the cameras run: with the preview on, or live."
+      : "No camera layer to zoom") + '</div>';
     box.dataset.for = "";
     return;
   }

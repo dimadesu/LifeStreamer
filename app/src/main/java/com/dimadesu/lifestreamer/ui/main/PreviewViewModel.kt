@@ -1358,6 +1358,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
                             // Screen and USB layers need grants that only this screen can ask for.
                             binder.compositionController().externalPipProvider = this@PreviewViewModel
+                            // The preview may already have been set before the service was
+                            // bound (mounted mode does it at start-up), and a report made then
+                            // went nowhere: the page showed "Preview on" with the preview off.
+                            reportPreviewState(byThermal = false)
 
                             try {
                                 binder.thermalPolicy().actuator = this@PreviewViewModel
@@ -4105,9 +4109,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * The service is the authority because it outlives this ViewModel, and the remote control is
      * used precisely when the UI is gone.
      */
-    private fun reportPreviewState(byThermal: Boolean) {
+    private fun reportPreviewState(byThermal: Boolean, enabledOverride: Boolean? = null) {
         serviceBinder?.getService()?.notePreviewState(
-            enabled = _isPreviewEnabled.value != false,
+            // postValue lands later, so a caller that has just changed it passes the new value.
+            enabled = enabledOverride ?: (_isPreviewEnabled.value != false),
             shortEdge = _previewShortEdge.value,
             fpsCap = previewMaxFps,
             byThermal = byThermal
@@ -4163,13 +4168,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private fun observeMountedMode() {
         viewModelScope.launch {
             storageRepository.mountedModeFlow.collect { mounted ->
+                // Not through the thermal actuator: this is the operator's own setting, and the
+                // page tells the two apart.
+                _isPreviewEnabled.postValue(!mounted)
+                reportPreviewState(byThermal = false, enabledOverride = !mounted)
                 if (mounted) {
                     // In this position nobody is looking at the screen, and the preview is the
                     // largest controllable draw. Off is the normal state, not an emergency.
-                    setPreviewEnabled(false)
                     Log.i(TAG, "Mounted mode on: preview off")
-                } else {
-                    setPreviewEnabled(true)
                 }
             }
         }

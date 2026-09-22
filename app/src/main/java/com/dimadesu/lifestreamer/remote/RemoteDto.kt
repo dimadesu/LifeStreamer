@@ -69,7 +69,12 @@ object RemoteDto {
     )
 
     @Keep
-    data class StatsDto(val bitrateKbps: Int?, val fps: Float?)
+    data class StatsDto(
+        val bitrateKbps: Int?,
+        val fps: Float?,
+        /** Measured on the phone: the browser's clock need not agree with the phone's. */
+        val uptimeSec: Long?
+    )
 
     @Keep
     data class PresetDto(val id: String, val name: String)

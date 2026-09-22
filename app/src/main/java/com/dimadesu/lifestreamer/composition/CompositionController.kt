@@ -570,15 +570,31 @@ class CompositionController(
      */
     fun refreshZoomAsync() {
         scope.launch {
-            val ids = composite?.layoutFlow?.value?.layers?.map { it.id } ?: return@launch
+            val target = composite ?: return@launch
+            val ids = target.layoutFlow.value.layers.map { it.id }
             val next = mutableMapOf<String, ZoomState>()
             ids.forEach { id -> zoomState(id)?.let { next[id] = it } }
             if (next != zoomCache) {
                 zoomCache = next
                 _layersInvalidated.tryEmit(Unit)
             }
+
+            // A camera that has just been opened reports "not active" for a moment. Refreshing
+            // only on change meant a composition switched on before its cameras settled kept an
+            // empty zoom for good, so retry a few times until every camera layer has a reading.
+            val cameraLayers = ids.count { target.childSource(it) is ICameraSource }
+            if (next.size < cameraLayers && zoomRetries < MAX_ZOOM_RETRIES) {
+                zoomRetries++
+                kotlinx.coroutines.delay(ZOOM_RETRY_MS)
+                refreshZoomAsync()
+            } else {
+                zoomRetries = 0
+            }
         }
     }
+
+    @Volatile
+    private var zoomRetries = 0
 
     /**
      * The layer a zoom command applies to: the one asked for, or the primary when none is given.
@@ -769,5 +785,7 @@ class CompositionController(
         private const val SNAP_THRESHOLD = 0.02f
         private const val SAVE_DEBOUNCE_MS = 500L
         private const val MIN_ALPHA = 0.1f
+        private const val MAX_ZOOM_RETRIES = 10
+        private const val ZOOM_RETRY_MS = 1_000L
     }
 }
