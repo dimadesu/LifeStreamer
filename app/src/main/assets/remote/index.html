@@ -119,11 +119,17 @@ var pendingRect = null;
 var rectInFlight = false;
 
 function api(path, body, method) {
-  return fetch(path, {
-    method: method || "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-    body: body === undefined ? "{}" : JSON.stringify(body)
-  }).then(function (r) {
+  var verb = method || "POST";
+  var init = {
+    method: verb,
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token }
+  };
+  // A GET or HEAD with a body is rejected outright by the browser ("Request cannot have a
+  // body"), so the request never leaves and the page looks dead right after the PIN.
+  if (verb !== "GET" && verb !== "HEAD") {
+    init.body = body === undefined ? "{}" : JSON.stringify(body);
+  }
+  return fetch(path, init).then(function (r) {
     if (r.status === 401) { signOut(); throw new Error("unauthorized"); }
     return r.status === 204 ? null : r.json().catch(function () { return null; });
   });
