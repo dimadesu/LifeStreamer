@@ -20,7 +20,7 @@ android {
         compileSdk = 36
 
         versionCode = 44
-        versionName = "1.46.3"
+        versionName = "1.46.3-s23u-crash-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
