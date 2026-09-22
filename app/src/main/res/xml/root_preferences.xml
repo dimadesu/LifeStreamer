@@ -39,6 +39,45 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        app:key="@string/power_key"
+        app:title="@string/power_category_title">
+
+        <SwitchPreference
+            app:defaultValue="false"
+            app:key="@string/mounted_mode_key"
+            app:title="@string/mounted_mode_title"
+            app:summary="@string/mounted_mode_summary" />
+
+        <SwitchPreference
+            app:defaultValue="true"
+            app:key="@string/thermal_backoff_key"
+            app:title="@string/thermal_backoff_title"
+            app:summary="@string/thermal_backoff_summary" />
+
+        <SwitchPreference
+            app:defaultValue="false"
+            app:key="@string/sustained_performance_key"
+            app:title="@string/sustained_performance_title"
+            app:summary="@string/sustained_performance_summary" />
+
+        <SwitchPreference
+            app:defaultValue="false"
+            app:key="@string/dim_while_live_key"
+            app:title="@string/dim_while_live_title"
+            app:summary="@string/dim_while_live_summary" />
+
+        <Preference
+            app:key="@string/battery_optimization_key"
+            app:title="@string/battery_optimization_title" />
+
+        <Preference
+            app:key="@string/thermal_status_key"
+            app:selectable="false"
+            app:title="@string/thermal_status_title" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
         app:key="@string/composition_key"
         app:title="@string/composition_category_title">
 
@@ -54,6 +93,24 @@
         <PreferenceCategory
             app:key="@string/video_settings_key"
             app:title="@string/settings">
+
+            <ListPreference
+                app:key="@string/preview_resolution_key"
+                app:title="@string/preview_resolution_title"
+                app:summary="@string/preview_resolution_summary"
+                app:defaultValue="@string/default_preview_resolution"
+                app:entries="@array/preview_resolution_entries"
+                app:entryValues="@array/preview_resolution_values"
+                app:useSimpleSummaryProvider="true" />
+
+            <ListPreference
+                app:key="@string/preview_fps_key"
+                app:title="@string/preview_fps_title"
+                app:summary="@string/preview_fps_summary"
+                app:defaultValue="@string/default_preview_fps"
+                app:entries="@array/preview_fps_entries"
+                app:entryValues="@array/preview_fps_values"
+                app:useSimpleSummaryProvider="true" />
 
             <ListPreference
                 app:key="@string/stream_orientation_key"

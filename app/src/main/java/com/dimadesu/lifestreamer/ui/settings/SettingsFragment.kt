@@ -225,6 +225,66 @@ class SettingsFragment : PreferenceFragmentCompat() {
      * Read-only on purpose: it is a device fact, and its whole job is to answer "why can't I add
      * a second camera?" somewhere the operator can find it without asking.
      */
+    /**
+     * Fills in what the device says about its own temperature, and offers the battery
+     * optimisation exemption.
+     *
+     * The permission for that exemption has been declared in the manifest since forever and was
+     * never actually used, so the app could never protect itself from being restricted.
+     */
+    private fun loadPowerSettings() {
+        val powerManager =
+            requireContext().getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+
+        findPreference<Preference>(getString(R.string.thermal_status_key))?.summary = try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val level = com.dimadesu.lifestreamer.power.ThermalLevel
+                    .fromStatus(powerManager.currentThermalStatus)
+                val saver = if (powerManager.isPowerSaveMode) {
+                    "\n\nBattery saver is ON. With the screen off Android may restrict " +
+                            "background work and interrupt the stream. Use Sustained " +
+                            "performance above instead."
+                } else {
+                    ""
+                }
+                "Thermal status: $level$saver"
+            } else {
+                "This device cannot report its temperature (needs Android 10)."
+            }
+        } catch (t: Throwable) {
+            "Could not read the thermal status"
+        }
+
+        findPreference<Preference>(getString(R.string.battery_optimization_key))?.let { preference ->
+            val exempt = try {
+                powerManager.isIgnoringBatteryOptimizations(requireContext().packageName)
+            } catch (t: Throwable) {
+                false
+            }
+
+            preference.summary = if (exempt) {
+                "Exempt. Android will not restrict the app in the background."
+            } else {
+                "Not exempt. Android may restrict the app in the background and interrupt a long stream. Tap to change."
+            }
+
+            preference.setOnPreferenceClickListener {
+                try {
+                    startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    )
+                } catch (t: Throwable) {
+                    android.widget.Toast.makeText(
+                        requireContext(),
+                        "Could not open battery settings",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+                true
+            }
+        }
+    }
+
     private fun loadCompositionSettings() {
         val preference = findPreference<Preference>(
             getString(R.string.composition_capabilities_key)
@@ -850,6 +910,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun loadPreferences() {
         loadRtmpSourceSettings()
         loadCompositionSettings()
+        loadPowerSettings()
         loadEndpoint()
     }
 }

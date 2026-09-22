@@ -75,6 +75,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     notificationIconResourceId = R.drawable.ic_baseline_linked_camera_24
 ) {
     companion object {
+        /** Renewed at half this while streaming; see [acquireWakeLock]. */
+        private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60_000L
+
         const val TAG = "CameraStreamerService"
         const val ACTION_STOP_STREAM = "com.dimadesu.lifestreamer.action.STOP_STREAM"
         const val ACTION_START_STREAM = "com.dimadesu.lifestreamer.action.START_STREAM"
@@ -99,6 +102,30 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private val _serviceReady = MutableStateFlow(false)
     // DataStore repository for reading configured endpoint and regulator settings
     private val storageRepository by lazy { DataStoreRepository(this, this.dataStore) }
+
+    /**
+     * Thermal watching lives here, not in a ViewModel: the stream outlives the UI, and the window
+     * that matters most is the one where the UI is gone.
+     */
+    val thermalMonitor by lazy {
+        com.dimadesu.lifestreamer.power.ThermalMonitor(this, serviceScope)
+    }
+
+    @Volatile
+    private var isThermalBackoffEnabled = true
+
+    @Volatile
+    var isMountedMode = false
+        private set
+
+    val thermalPolicy by lazy {
+        com.dimadesu.lifestreamer.power.ThermalPolicy(
+            scope = serviceScope,
+            monitor = thermalMonitor,
+            isEnabled = { isThermalBackoffEnabled },
+            isMountedMode = { isMountedMode }
+        )
+    }
     private val streamConfigurationHelper by lazy { StreamConfigurationHelper(storageRepository) }
     
     // Current device rotation
@@ -136,6 +163,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     // Network wake lock to prevent network I/O throttling during background streaming
     // Especially important for SRT streaming
     private var networkWakeLock: PowerManager.WakeLock? = null
+
+    private var wakeLockRenewalJob: kotlinx.coroutines.Job? = null
     
     // Create our own NotificationUtils instance for custom notifications
     private val customNotificationUtils: NotificationUtils by lazy {
@@ -415,6 +444,17 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 }
             }
         }
+
+        // Thermal watching runs for the whole life of the service, not just while streaming:
+        // the phone can already be hot before the operator presses LIVE.
+        serviceScope.launch {
+            storageRepository.thermalBackoffEnabledFlow.collect { isThermalBackoffEnabled = it }
+        }
+        serviceScope.launch {
+            storageRepository.mountedModeFlow.collect { isMountedMode = it }
+        }
+        thermalMonitor.start()
+        thermalPolicy.start()
     }
 
     private fun initNotificationPendingIntents() {
@@ -475,6 +515,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
         // Stop Moblink server when the service is destroyed
         try { SrtlaManager.stopMoblink() } catch (_: Exception) {}
+
+        try { thermalPolicy.stop() } catch (_: Throwable) {}
+        try { thermalMonitor.stop() } catch (_: Throwable) {}
 
         // Ensure audio passthrough is stopped - Quit from notification may call
         // Activity.finishAndRemoveTask() which doesn't always guarantee the
@@ -963,15 +1006,47 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     /**
      * Acquire wake lock to prevent audio silencing and ensure stable background recording
      */
+    /**
+     * Keeps the CPU awake for the duration of a stream.
+     *
+     * One lock, not two: partial wake locks are not additive, so a second one held alongside the
+     * first changes nothing except making `dumpsys batterystats` harder to read.
+     *
+     * It is taken with a timeout that is renewed while streaming, rather than held indefinitely.
+     * An untimed lock means any path that misses the release pins the CPU awake until the phone
+     * is rebooted, which is a far worse failure than the renewal being late.
+     */
     private fun acquireWakeLock() {
         if (wakeLock == null) {
-            // Use PARTIAL_WAKE_LOCK for better compatibility across Android versions
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "StreamPack::StableBackgroundAudioRecording"
-            ).apply {
-                acquire() // No timeout - held until manually released
-                Log.i(TAG, "Wake lock acquired for stable background audio recording")
+                "LifeStreamer::Stream"
+            )
+        }
+        renewWakeLock()
+        scheduleWakeLockRenewal()
+    }
+
+    private fun renewWakeLock() {
+        wakeLock?.let { lock ->
+            try {
+                lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+                Log.i(TAG, "Wake lock held for ${WAKE_LOCK_TIMEOUT_MS / 60_000} more minutes")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Could not renew the wake lock: ${t.message}")
+            }
+        }
+    }
+
+    /**
+     * Renews at half the timeout, so one missed tick is not enough to let it lapse.
+     */
+    private fun scheduleWakeLockRenewal() {
+        wakeLockRenewalJob?.cancel()
+        wakeLockRenewalJob = serviceScope.launch {
+            while (isActive) {
+                delay(WAKE_LOCK_TIMEOUT_MS / 2)
+                renewWakeLock()
             }
         }
     }
@@ -980,6 +1055,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Release wake lock
      */
     private fun releaseWakeLock() {
+        wakeLockRenewalJob?.cancel()
+        wakeLockRenewalJob = null
         wakeLock?.let { lock ->
             if (lock.isHeld) {
                 lock.release()
@@ -1039,26 +1116,24 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Acquire network wake lock to prevent network throttling in background
      * Especially important for SRT streaming
      */
-    private fun acquireNetworkWakeLock() {
-        if (networkWakeLock == null) {
-            networkWakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "LifeStreamer::NetworkUpload"
-            ).apply {
-                acquire() // No timeout - held until manually released
-                Log.i(TAG, "Network wake lock acquired for SRT/RTMP upload")
-            }
-        }
-    }
-    
     /**
-     * Release network wake lock
+     * Intentionally does nothing.
+     *
+     * There used to be a second PARTIAL_WAKE_LOCK here for the upload. Partial wake locks are not
+     * additive — the one taken by [acquireWakeLock] already keeps the CPU running for every
+     * thread in the process — so the second lock bought nothing and only split the wake-lock
+     * totals in `dumpsys batterystats` across two names.
+     *
+     * Kept as an empty function so the call sites still read as intent.
      */
+    private fun acquireNetworkWakeLock() = Unit
+
     private fun releaseNetworkWakeLock() {
+        // Release any lock left over from a version that still took a second one.
         networkWakeLock?.let { lock ->
             if (lock.isHeld) {
                 lock.release()
-                Log.i(TAG, "Network wake lock released")
+                Log.i(TAG, "Legacy network wake lock released")
             }
             networkWakeLock = null
         }
@@ -1285,6 +1360,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
         // Expose isMuted flow so UI can reflect mute state changes performed externally
         fun isMutedFlow() = this@CameraStreamerService.isMutedFlow
+
+        fun thermalStateFlow() = this@CameraStreamerService.thermalMonitor.stateFlow
+
+        fun thermalPolicy() = this@CameraStreamerService.thermalPolicy
         // Expose uptime flow so UI can display runtime while streaming
         fun uptimeFlow() = this@CameraStreamerService.uptimeFlow
         // Allow bound clients to set mute centrally in the service

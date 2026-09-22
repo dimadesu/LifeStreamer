@@ -36,6 +36,27 @@ import com.dimadesu.lifestreamer.ui.help.UvcHelpActivity
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: MainActivityBinding
 
+    /**
+     * Screen dimming and the clock ceiling. Owned here because both are window-level.
+     */
+    val screenPower by lazy {
+        com.dimadesu.lifestreamer.power.ScreenPowerController(this)
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        // The first touch on a dark screen only lights it and is swallowed, so a bump in a car
+        // mount cannot press anything.
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN && screenPower.onUserTouch()) {
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        screenPower.onPause()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 

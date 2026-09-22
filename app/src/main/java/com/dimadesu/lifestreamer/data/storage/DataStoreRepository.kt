@@ -268,6 +268,46 @@ class DataStoreRepository(
         )
     }.distinctUntilChanged()
 
+    /** Whether the app may reduce the preview by itself when the phone gets hot. */
+    val thermalBackoffEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[booleanPreferencesKey(context.getString(R.string.thermal_backoff_key))] ?: true
+    }.distinctUntilChanged()
+
+    /** Phone mounted out of reach: preview off, dark screen, sustained clocks. */
+    val mountedModeFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[booleanPreferencesKey(context.getString(R.string.mounted_mode_key))] ?: false
+    }.distinctUntilChanged()
+
+    val sustainedPerformanceFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[booleanPreferencesKey(context.getString(R.string.sustained_performance_key))]
+            ?: false
+    }.distinctUntilChanged()
+
+    val dimWhileLiveFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[booleanPreferencesKey(context.getString(R.string.dim_while_live_key))] ?: false
+    }.distinctUntilChanged()
+
+    /**
+     * Cap on the preview surface's shorter edge, or null for "same as the stream".
+     */
+    val previewResolutionFlow: Flow<Int?> = dataStore.data.map { preferences ->
+        preferences[stringPreferencesKey(context.getString(R.string.preview_resolution_key))]
+            ?.toIntOrNull()
+            ?.takeIf { it > 0 }
+    }.distinctUntilChanged()
+
+    /**
+     * Preview frame-rate cap, or null for "same as the stream".
+     *
+     * Composite mode only: with a single camera source the preview and the stream are two targets
+     * of one capture request, so they cannot have different rates.
+     */
+    val previewFpsFlow: Flow<Int?> = dataStore.data.map { preferences ->
+        preferences[stringPreferencesKey(context.getString(R.string.preview_fps_key))]
+            ?.toIntOrNull()
+            ?.takeIf { it > 0 }
+    }.distinctUntilChanged()
+
     // Flow for RTMP video source URL (primary, index 1)
     val rtmpVideoSourceUrlFlow: Flow<String> = dataStore.data.map { preferences ->
         preferences[stringPreferencesKey(context.getString(R.string.rtmp_source_url_key))]

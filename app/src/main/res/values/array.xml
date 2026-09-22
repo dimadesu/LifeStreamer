@@ -85,4 +85,39 @@
         <item>@string/stream_orientation_value_landscape_reversed</item>
     </string-array>
 
+
+    <!-- Preview frame rate cap. Composite mode only: with a single camera source the preview
+         and the stream are two targets of one capture request and share one frame rate. -->
+    <string-array name="preview_fps_entries">
+        <item>Same as stream</item>
+        <item>30 fps</item>
+        <item>20 fps</item>
+        <item>15 fps</item>
+        <item>10 fps</item>
+    </string-array>
+
+    <string-array name="preview_fps_values">
+        <item>0</item>
+        <item>30</item>
+        <item>20</item>
+        <item>15</item>
+        <item>10</item>
+    </string-array>
+
+    <!-- Cap on the preview surface's shorter edge. The source picks the nearest supported size
+         of the same shape, so the result can be smaller than asked (this phone has no 540-high
+         16:9 output, for instance). -->
+    <string-array name="preview_resolution_entries">
+        <item>Same as stream</item>
+        <item>720p</item>
+        <item>540p</item>
+        <item>360p</item>
+    </string-array>
+
+    <string-array name="preview_resolution_values">
+        <item>0</item>
+        <item>720</item>
+        <item>540</item>
+        <item>360</item>
+    </string-array>
 </resources>

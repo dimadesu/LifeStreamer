@@ -132,7 +132,8 @@ import kotlinx.coroutines.withContext
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 
-class PreviewViewModel(private val application: Application) : ObservableViewModel() {
+class PreviewViewModel(private val application: Application) : ObservableViewModel(),
+    com.dimadesu.lifestreamer.power.ThermalActuator {
     private val storageRepository = DataStoreRepository(application, application.dataStore)
     private val streamConfigurationHelper = StreamConfigurationHelper(storageRepository)
     private val rotationRepository = RotationRepository.getInstance(application)
@@ -1325,6 +1326,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             
                             // Set up audio level monitoring callback
                             setupAudioLevelMonitoring()
+
+                            // The thermal policy acts through this ViewModel while the UI is
+                            // alive. When it is not, the preview is already gone, which is the
+                            // state the policy wants anyway.
+                            try {
+                                binder.thermalPolicy().actuator = this@PreviewViewModel
+                                viewModelScope.launch {
+                                    binder.thermalStateFlow().collect { state ->
+                                        _thermalStateLiveData.postValue(state)
+                                    }
+                                }
+                                viewModelScope.launch {
+                                    binder.thermalPolicy().appliedActionsFlow.collect { actions ->
+                                        _thermalActionsLiveData.postValue(actions)
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to attach the thermal policy: ${t.message}")
+                            }
                             
                     Log.i(TAG, "CameraStreamerService connected and ready - streaming state: ${binder.streamer.isStreamingFlow.value}")
                 }
@@ -1407,6 +1427,19 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private fun observeStreamerFlows() {
         val currentStreamer = serviceStreamer ?: return
+
+        observePreviewFps()
+        observePreviewResolution()
+        observeMountedMode()
+
+        // Flush a preview resolution change that had to wait for the stream to stop.
+        viewModelScope.launch {
+            currentStreamer.isStreamingFlow.collect { isStreaming ->
+                if (!isStreaming) {
+                    flushPendingPreviewShortEdge()
+                }
+            }
+        }
 
         viewModelScope.launch {
             currentStreamer.videoInput?.sourceFlow?.collect { source ->
@@ -4004,6 +4037,143 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isCompositeSource: LiveData<Boolean> = _isCompositeSource
 
     /**
+     * Whether the on-screen preview is running.
+     *
+     * Turning it off is the largest single power saving available while streaming, and with the
+     * phone mounted out of reach it is the normal operating state rather than an emergency
+     * measure. It does not touch the stream.
+     *
+     * Deliberately **not** persisted: a preview stuck off across restarts, with no obvious cause,
+     * is far worse than having to press the button again.
+     */
+    private val _isPreviewEnabled = MutableLiveData(true)
+    val isPreviewEnabled: LiveData<Boolean> = _isPreviewEnabled
+
+    fun togglePreview() {
+        val enabled = _isPreviewEnabled.value != true
+        _isPreviewEnabled.value = enabled
+        Log.i(TAG, "Preview ${if (enabled) "enabled" else "disabled"} by the operator")
+
+        // Turning the preview back on overrules the thermal policy, which then keeps its hands
+        // off for a while. A button that undoes itself is worse than no button.
+        if (enabled) {
+            serviceBinder?.thermalPolicy()?.onManualOverride()
+        }
+    }
+
+    // region ThermalActuator
+    //
+    // Everything here is reversible and none of it touches what goes out: no encoder
+    // reconfiguration, no bitrate, and never stopStream().
+
+    override fun setPreviewEnabled(enabled: Boolean) {
+        if (_isPreviewEnabled.value != enabled) {
+            _isPreviewEnabled.postValue(enabled)
+            Log.i(TAG, "Preview ${if (enabled) "enabled" else "disabled"}")
+        }
+    }
+
+    override fun setPreviewFpsCap(maxFps: Int?) {
+        previewMaxFps = maxFps
+        activeComposite()?.previewMaxFps = maxFps
+    }
+
+    override fun setPreviewShortEdge(shortEdge: Int?) {
+        _previewShortEdge.postValue(shortEdge)
+    }
+
+    override fun setAuxiliaryUiEnabled(enabled: Boolean) {
+        _isAuxiliaryUiEnabled.postValue(enabled)
+        if (!enabled) {
+            disableAudioLevelMonitoring()
+        }
+    }
+
+    /**
+     * Anything on screen that redraws purely to inform: VU meter, SRTLA stats, debug overlays.
+     */
+    /**
+     * Phone mounted out of reach: preview off, dark screen, sustained clocks.
+     */
+    val mountedModeLiveData: LiveData<Boolean> =
+        storageRepository.mountedModeFlow.asLiveData()
+
+    val sustainedPerformanceLiveData: LiveData<Boolean> =
+        storageRepository.sustainedPerformanceFlow.asLiveData()
+
+    val dimWhileLiveLiveData: LiveData<Boolean> =
+        storageRepository.dimWhileLiveFlow.asLiveData()
+
+    private fun observeMountedMode() {
+        viewModelScope.launch {
+            storageRepository.mountedModeFlow.collect { mounted ->
+                if (mounted) {
+                    // In this position nobody is looking at the screen, and the preview is the
+                    // largest controllable draw. Off is the normal state, not an emergency.
+                    setPreviewEnabled(false)
+                    Log.i(TAG, "Mounted mode on: preview off")
+                } else {
+                    setPreviewEnabled(true)
+                }
+            }
+        }
+    }
+
+    /**
+     * Android battery saver is actively dangerous for a long stream: with the screen off it lets
+     * the system restrict background work and kill services. Warn rather than silently lose the
+     * stream, and point at the setting that does what the operator actually wants.
+     */
+    val powerSaveWarningLiveData: LiveData<String?> = _thermalStateLiveDataBacking()
+
+    private fun _thermalStateLiveDataBacking(): LiveData<String?> {
+        val result = MediatorLiveData<String?>()
+        result.addSource(thermalStateLiveData) { state ->
+            result.value = if (state.isPowerSaveMode) {
+                "Battery saver is on. If the screen turns off Android may interrupt the stream - " +
+                        "use Sustained performance instead."
+            } else {
+                null
+            }
+        }
+        return result
+    }
+
+    private val _thermalStateLiveData =
+        MutableLiveData(com.dimadesu.lifestreamer.power.ThermalState())
+
+    /** What the device reports about its own temperature. */
+    val thermalStateLiveData: LiveData<com.dimadesu.lifestreamer.power.ThermalState> =
+        _thermalStateLiveData
+
+    private val _thermalActionsLiveData = MutableLiveData<List<String>>(emptyList())
+
+    /** What the thermal policy has done, in the operator's words. */
+    val thermalActionsLiveData: LiveData<List<String>> = _thermalActionsLiveData
+
+    private val _isAuxiliaryUiEnabled = MutableLiveData(true)
+    val isAuxiliaryUiEnabled: LiveData<Boolean> = _isAuxiliaryUiEnabled
+
+    override fun restoreOperatorPreviewSettings() {
+        viewModelScope.launch {
+            val fps = storageRepository.previewFpsFlow.first()
+            val shortEdge = storageRepository.previewResolutionFlow.first()
+            setPreviewFpsCap(fps)
+            _previewShortEdge.postValue(shortEdge)
+            _isAuxiliaryUiEnabled.postValue(true)
+            Log.i(TAG, "Operator preview settings restored")
+        }
+    }
+
+    override fun notifyOperator(message: String) {
+        _toastMessageLiveData.postValue(message)
+        _rtmpStatusLiveData.postValue(message)
+    }
+
+    // endregion
+
+
+    /**
      * Toggles a two-layer composition: the current camera full frame, with a picture-in-picture
      * in the bottom-right corner.
      *
@@ -4051,6 +4221,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             observeCompositionFailures(it)
                             observeCompositionLayout(it)
                             restoreSavedComposition(it)
+                            it.previewMaxFps = previewMaxFps
                             // Without a selection the first camera tap would silently land on
                             // whichever layer happened to be primary.
                             _selectedCompositionLayerId.postValue(COMPOSITION_LAYER_MAIN)
@@ -4479,6 +4650,71 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isCompositionEditMode: LiveData<Boolean> = _isCompositionEditMode
 
     private var layoutObserverJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * The preview frame-rate cap from settings, kept so a composition built later still gets it.
+     */
+    private var previewMaxFps: Int? = null
+
+    /**
+     * The preview short-edge cap currently in force, as the view should apply it.
+     */
+    private val _previewShortEdge = MutableLiveData<Int?>(null)
+    val previewShortEdge: LiveData<Int?> = _previewShortEdge
+
+    /**
+     * A change that had to wait because applying it would have disturbed a live stream.
+     */
+    private var pendingPreviewShortEdge: Int? = null
+    private var hasPendingPreviewShortEdge = false
+
+    private fun observePreviewResolution() {
+        viewModelScope.launch {
+            storageRepository.previewResolutionFlow.collect { applyPreviewShortEdge(it) }
+        }
+    }
+
+    /**
+     * Applies the cap now, or defers it to the next stream stop.
+     *
+     * In composite mode the preview is just another output of the compositor, so changing it only
+     * re-registers a GL output and is safe at any time. With a single camera source it goes
+     * through removeOutput/addOutput, which recreates the shared capture session — the operation
+     * most likely to upset the camera HAL mid-stream. Same deferral idea as the video config.
+     */
+    private fun applyPreviewShortEdge(shortEdge: Int?) {
+        val isStreaming = serviceStreamer?.isStreamingFlow?.value == true
+        val isComposite = activeComposite() != null
+
+        if (!isStreaming || isComposite) {
+            hasPendingPreviewShortEdge = false
+            _previewShortEdge.postValue(shortEdge)
+            Log.i(TAG, "Preview short edge cap applied: ${shortEdge ?: "off"}")
+        } else {
+            pendingPreviewShortEdge = shortEdge
+            hasPendingPreviewShortEdge = true
+            Log.i(TAG, "Preview short edge cap deferred to the next stream stop")
+            _toastMessageLiveData.postValue("Preview resolution applies when the stream stops")
+        }
+    }
+
+    private fun flushPendingPreviewShortEdge() {
+        if (!hasPendingPreviewShortEdge) {
+            return
+        }
+        hasPendingPreviewShortEdge = false
+        _previewShortEdge.postValue(pendingPreviewShortEdge)
+        Log.i(TAG, "Deferred preview short edge cap applied: ${pendingPreviewShortEdge ?: "off"}")
+    }
+
+    private fun observePreviewFps() {
+        viewModelScope.launch {
+            storageRepository.previewFpsFlow.collect { maxFps ->
+                previewMaxFps = maxFps
+                activeComposite()?.previewMaxFps = maxFps
+            }
+        }
+    }
 
     fun setCompositionEditMode(enabled: Boolean) {
         _isCompositionEditMode.postValue(enabled)
@@ -5321,6 +5557,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     override fun onCleared() {
         super.onCleared()
+
+        // The policy must not keep a reference to a dead ViewModel.
+        try {
+            serviceBinder?.thermalPolicy()?.actuator = null
+        } catch (_: Throwable) {
+        }
         
         // Clean up audio level monitoring
         disableAudioLevelMonitoring()

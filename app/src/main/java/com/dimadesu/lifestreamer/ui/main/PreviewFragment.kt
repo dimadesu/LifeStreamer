@@ -208,6 +208,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         }
 
         setUpCompositionBar()
+        setUpPowerControls()
+
+        binding.togglePreviewButton.setOnClickListener { previewViewModel.togglePreview() }
+        previewViewModel.isPreviewEnabled.observe(viewLifecycleOwner) { enabled ->
+            binding.preview.isPreviewEnabled = enabled
+        }
+        previewViewModel.previewShortEdge.observe(viewLifecycleOwner) { shortEdge ->
+            binding.preview.maxPreviewShortEdge = shortEdge
+        }
 
         binding.uvcTestButton.setOnClickListener {
             val intent = android.content.Intent(requireContext(), com.dimadesu.lifestreamer.uvc.UvcTestActivity::class.java)
@@ -818,16 +827,15 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         previewViewModel.setCompositionEditMode(false)
         cancelEditModeTimeout()
         binding.srtlaStatsView.stopStatsUpdates()
-        // DO NOT stop streaming when going to background - the service should continue streaming
-        // DO NOT stop preview either when the camera is being used for streaming -
-        // the camera source is shared between preview and streaming, so stopping preview
-        // would also stop the streaming. Instead, let the preview continue running.
-        Log.d(TAG, "onPause() - app going to background, keeping both preview and stream active via service")
-        
-        // Note: We used to stop preview here, but that was causing streaming to stop
-        // because the camera source is shared. For background streaming to work properly,
-        // we need to keep the camera active.
-        // stopStream()
+        // Do not stop streaming when going to background: the service owns the stream.
+        //
+        // Nothing needs to be done about the preview either, but not for the reason this comment
+        // used to give. Stopping the preview does NOT stop the stream: preview and stream are
+        // separate targets of the same camera capture request (CameraSource PREVIEW_NAME /
+        // STREAM_NAME), and separate outputs of the compositor in composite mode. PreviewView
+        // already stops the preview by itself when its window goes invisible
+        // (onWindowVisibilityChanged), so the backgrounded case is handled and costs nothing.
+        Log.d(TAG, "onPause() - app going to background, stream continues in the service")
     }
 
     override fun onResume() {
@@ -1552,6 +1560,45 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
             if (view is android.widget.Button) {
                 view.backgroundTintList =
                     getButtonColorStateList(requireContext(), activeIds.contains(view.tag))
+            }
+        }
+    }
+
+    /**
+     * Wires the power and heat behaviour that is window-level rather than stream-level.
+     */
+    private fun setUpPowerControls() {
+        val mainActivity = activity as? MainActivity
+
+        previewViewModel.sustainedPerformanceLiveData.observe(viewLifecycleOwner) { enabled ->
+            mainActivity?.screenPower?.isSustainedPerformance = enabled
+        }
+
+        // Dark screen when mounted out of reach, or while live if the operator asked for it.
+        val refreshDim = {
+            val mounted = previewViewModel.mountedModeLiveData.value == true
+            val dimWhileLive = previewViewModel.dimWhileLiveLiveData.value == true
+            val isStreaming = previewViewModel.isStreamingLiveData.value == true
+            mainActivity?.screenPower?.wantsDim = mounted || (dimWhileLive && isStreaming)
+        }
+        previewViewModel.mountedModeLiveData.observe(viewLifecycleOwner) { refreshDim() }
+        previewViewModel.dimWhileLiveLiveData.observe(viewLifecycleOwner) { refreshDim() }
+        previewViewModel.isStreamingLiveData.observe(viewLifecycleOwner) { refreshDim() }
+
+        // Anything that redraws purely to inform stops when the phone is too hot.
+        previewViewModel.isAuxiliaryUiEnabled.observe(viewLifecycleOwner) { enabled ->
+            if (enabled) {
+                if (binding.srtlaStatsView.visibility == View.VISIBLE) {
+                    binding.srtlaStatsView.startStatsUpdates()
+                }
+            } else {
+                binding.srtlaStatsView.stopStatsUpdates()
+            }
+        }
+
+        previewViewModel.powerSaveWarningLiveData.observe(viewLifecycleOwner) { warning ->
+            if (warning != null) {
+                Log.w(TAG, warning)
             }
         }
     }
