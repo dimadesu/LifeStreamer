@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<!--
+  LifeStreamer remote control.
+
+  One self-contained file: no CDN, no web fonts, no external anything. The Wi-Fi carrying this
+  may have no internet at all — a phone hotspot, a venue LAN — and a page that waits on a font
+  is a page that never loads when it matters.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>LifeStreamer remote</title>
+<style>
+  :root {
+    --bg: #121212; --panel: #1e1e1e; --line: #333;
+    --text: #eee; --dim: #999; --accent: #4caf50; --warn: #ffb300; --bad: #e53935;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, Roboto, sans-serif;
+    user-select: none; padding: 8px; padding-bottom: 24px;
+  }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
+       margin: 14px 0 6px; }
+  button {
+    background: #2a2a2a; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 12px; font-size: 13px; min-height: 44px; cursor: pointer;
+  }
+  button.on { background: var(--accent); border-color: var(--accent); color: #062; font-weight: 600; }
+  button:disabled { opacity: .4; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+
+  /* The schematic stands in for a preview: no frames, no snapshot path, no CPU. */
+  #stage { position: relative; width: 100%; background: #000; border: 1px solid var(--line);
+           border-radius: 8px; overflow: hidden; touch-action: none; aspect-ratio: 16/9; }
+  #stage .grid { position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(to right, #ffffff14 1px, transparent 1px),
+                      linear-gradient(to bottom, #ffffff14 1px, transparent 1px);
+    background-size: 33.33% 33.33%; }
+  .layer { position: absolute; border: 2px solid #fff; border-radius: 4px;
+           display: flex; align-items: flex-start; justify-content: flex-start;
+           font-size: 11px; overflow: hidden; }
+  .layer .tag { background: #000a; padding: 2px 5px; border-radius: 0 0 4px 0; white-space: nowrap; }
+  .layer.sel { border-color: var(--accent); border-width: 3px; }
+  .layer.hidden { opacity: .35; border-style: dashed; }
+  .handle { position: absolute; right: 0; bottom: 0; width: 28px; height: 28px;
+            background: var(--accent); border-radius: 4px 0 0 0; }
+
+  #gate { position: fixed; inset: 0; background: var(--bg); display: flex; z-index: 10;
+          flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; }
+  #pin { font-size: 28px; letter-spacing: .4em; text-align: center; width: 200px; padding: 10px;
+         background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+  #status { position: fixed; top: 0; left: 0; right: 0; padding: 8px 12px; font-size: 13px;
+            text-align: center; z-index: 9; display: none; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  #thermal { margin-bottom: 8px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  @media (orientation: landscape) and (min-width: 700px) {
+    #main { display: grid; grid-template-columns: 1fr 340px; gap: 12px; align-items: start; }
+  }
+</style>
+</head>
+<body>
+
+<div id="status"></div>
+
+<div id="gate">
+  <div style="font-size:18px">LifeStreamer remote</div>
+  <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="------" autofocus>
+  <button id="gateGo">Connect</button>
+  <div id="gateError" style="color:var(--bad);min-height:18px"></div>
+</div>
+
+<div id="main" hidden>
+  <div>
+    <div id="thermal" class="panel" hidden></div>
+    <div id="stage"><div class="grid"></div></div>
+    <h2>Layout</h2>
+    <div class="row" id="presets"></div>
+    <div class="row" style="margin-top:6px">
+      <button id="swap">⇄ Swap</button>
+      <button id="mute">Mute</button>
+    </div>
+  </div>
+
+  <div>
+    <h2>Layers</h2>
+    <div id="layers"></div>
+    <h2>Zoom</h2>
+    <div class="panel" id="zoomBox"><div class="muted">Select a camera layer</div></div>
+    <h2>Power</h2>
+    <div class="row">
+      <button data-preview="off">Preview off</button>
+      <button data-preview="on">Preview on</button>
+      <button data-res="360">Preview 360p</button>
+      <button data-fps="10">Preview 10 fps</button>
+    </div>
+    <div class="muted" style="margin-top:6px">
+      None of these change what you stream.
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+var token = sessionStorage.getItem("lsToken") || "";
+var state = null;
+var selected = null;
+var events = null;
+
+// While dragging we ignore inbound rects for that layer, otherwise the box fights the finger:
+// the server keeps pushing the pre-drag position until our update lands.
+var dragging = null;
+var pendingRect = null;
+var rectInFlight = false;
+
+function api(path, body, method) {
+  return fetch(path, {
+    method: method || "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+    body: body === undefined ? "{}" : JSON.stringify(body)
+  }).then(function (r) {
+    if (r.status === 401) { signOut(); throw new Error("unauthorized"); }
+    return r.status === 204 ? null : r.json().catch(function () { return null; });
+  });
+}
+
+function signOut() {
+  token = "";
+  sessionStorage.removeItem("lsToken");
+  if (events) { events.close(); events = null; }
+  document.getElementById("gate").hidden = false;
+  document.getElementById("main").hidden = true;
+}
+
+function showStatus(text, color) {
+  var el = document.getElementById("status");
+  el.textContent = text;
+  el.style.background = color || "#333";
+  el.style.display = "block";
+  clearTimeout(el._t);
+  el._t = setTimeout(function () { el.style.display = "none"; }, 4000);
+}
+
+function connect() {
+  if (events) events.close();
+  events = new EventSource("/api/events?token=" + encodeURIComponent(token));
+  events.addEventListener("state", function (e) { render(JSON.parse(e.data)); });
+  events.addEventListener("message", function (e) {
+    showStatus(JSON.parse(e.data).text, "#444");
+  });
+  events.onerror = function () { showStatus("Reconnecting…", "#7a5"); };
+}
+
+function authenticate(pin) {
+  return fetch("/api/auth", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin: pin })
+  }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
+}
+
+function enter(pin) {
+  var err = document.getElementById("gateError");
+  err.textContent = "";
+  authenticate(pin).then(function (res) {
+    if (!res.ok) {
+      err.textContent = res.body && res.body.error === "locked"
+        ? "Too many attempts. Wait a moment."
+        : "Wrong PIN";
+      return;
+    }
+    token = res.body.token;
+    sessionStorage.setItem("lsToken", token);
+    document.getElementById("gate").hidden = true;
+    document.getElementById("main").hidden = false;
+    connect();
+    api("/api/state", undefined, "GET").then(render);
+  }).catch(function () { err.textContent = "Could not reach the phone"; });
+}
+
+document.getElementById("gateGo").onclick = function () {
+  enter(document.getElementById("pin").value.trim());
+};
+document.getElementById("pin").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") document.getElementById("gateGo").click();
+});
+
+// ---- rendering ----
+
+function render(s) {
+  if (!s) return;
+  state = s;
+
+  var stage = document.getElementById("stage");
+  if (s.canvasWidth > 0 && s.canvasHeight > 0) {
+    stage.style.aspectRatio = s.canvasWidth + "/" + s.canvasHeight;
+  }
+
+  renderThermal(s.thermal);
+  renderPresets(s.presets);
+  renderStage(s.layers);
+  renderLayers(s.layers, s.cameras);
+  renderZoom(s.layers);
+
+  var mute = document.getElementById("mute");
+  mute.textContent = s.muted ? "Unmute" : "Mute";
+  mute.className = s.muted ? "on" : "";
+}
+
+function renderThermal(t) {
+  var box = document.getElementById("thermal");
+  if (!t) { box.hidden = true; return; }
+  box.hidden = false;
+
+  var colors = { NONE: "#2a2a2a", LIGHT: "#2a2a2a", MODERATE: "#4a3a10", SEVERE: "#5a2410", CRITICAL: "#5a1010" };
+  box.style.background = colors[t.level] || "#2a2a2a";
+
+  var parts = [];
+  parts.push(t.supported ? "Temperature: " + t.level : "Temperature unknown on this phone");
+  // Headroom is the predictive number: it reaches 100% before throttling begins, which is what
+  // gives time to react.
+  if (t.headroom !== null && t.headroom !== undefined) {
+    parts.push("headroom " + Math.round(t.headroom * 100) + "%");
+  }
+  if (t.powerSaveMode) parts.push("battery saver ON");
+  var html = parts.join(" · ");
+  if (t.appliedActions && t.appliedActions.length) {
+    html += '<div class="muted">' + t.appliedActions.join(" · ") + "</div>";
+  }
+  box.innerHTML = html;
+}
+
+function renderPresets(presets) {
+  var box = document.getElementById("presets");
+  box.innerHTML = "";
+  (presets || []).forEach(function (p) {
+    var b = document.createElement("button");
+    b.textContent = p.name;
+    b.onclick = function () { api("/api/layout/preset", { presetId: p.id }); };
+    box.appendChild(b);
+  });
+}
+
+function renderStage(layers) {
+  var stage = document.getElementById("stage");
+  Array.prototype.slice.call(stage.querySelectorAll(".layer")).forEach(function (n) { n.remove(); });
+
+  (layers || []).forEach(function (l) {
+    if (dragging && dragging.id === l.id) return;   // our own drag wins
+    stage.appendChild(buildLayerBox(l));
+  });
+
+  if (dragging) stage.appendChild(buildLayerBox(dragging.layer));
+}
+
+function buildLayerBox(l) {
+  var d = document.createElement("div");
+  d.className = "layer" + (l.id === selected ? " sel" : "") + (l.visible ? "" : " hidden");
+  d.style.left = (l.left * 100) + "%";
+  d.style.top = (l.top * 100) + "%";
+  d.style.width = ((l.right - l.left) * 100) + "%";
+  d.style.height = ((l.bottom - l.top) * 100) + "%";
+  d.dataset.id = l.id;
+
+  var tag = document.createElement("div");
+  tag.className = "tag";
+  tag.textContent = (l.primary ? "● " : "") + l.label;
+  d.appendChild(tag);
+
+  if (l.id === selected) {
+    var h = document.createElement("div");
+    h.className = "handle";
+    d.appendChild(h);
+  }
+  return d;
+}
+
+function renderLayers(layers, cameras) {
+  var box = document.getElementById("layers");
+  box.innerHTML = "";
+
+  (layers || []).forEach(function (l) {
+    var panel = document.createElement("div");
+    panel.className = "panel";
+    panel.style.marginBottom = "6px";
+
+    var head = document.createElement("div");
+    head.className = "row";
+    head.style.alignItems = "center";
+    head.style.justifyContent = "space-between";
+
+    var name = document.createElement("div");
+    name.textContent = l.label;
+    name.style.fontWeight = "600";
+    name.onclick = function () { selected = l.id; render(state); };
+    head.appendChild(name);
+
+    var acts = document.createElement("div");
+    acts.className = "row";
+
+    var eye = document.createElement("button");
+    eye.textContent = l.visible ? "Hide" : "Show";
+    eye.onclick = function () { api("/api/layer/visible", { layerId: l.id, visible: !l.visible }); };
+    acts.appendChild(eye);
+
+    var prim = document.createElement("button");
+    prim.textContent = "Audio";
+    prim.className = l.primary ? "on" : "";
+    prim.onclick = function () { api("/api/layer/primary", { layerId: l.id }); };
+    acts.appendChild(prim);
+
+    head.appendChild(acts);
+    panel.appendChild(head);
+
+    var chips = document.createElement("div");
+    chips.className = "row";
+    chips.style.marginTop = "6px";
+    (cameras || []).forEach(function (c) {
+      var b = document.createElement("button");
+      b.textContent = c.name;
+      if (c.id === l.cameraId) b.className = "on";
+      else if (c.usedByLayerId) b.disabled = true;
+      b.onclick = function () {
+        api("/api/layer/camera", { layerId: l.id, cameraId: c.id }).then(function (r) {
+          // A refusal says why — an impossible camera pair, for instance — instead of looking
+          // like a tap that did nothing.
+          if (r && r.ok === false && r.error) showStatus(r.error, "#722");
+        });
+      };
+      chips.appendChild(b);
+    });
+    panel.appendChild(chips);
+
+    box.appendChild(panel);
+  });
+
+  if (!layers || !layers.length) {
+    box.innerHTML = '<div class="panel muted">No composition running. Turn on COMPOSE on the phone.</div>';
+  }
+}
+
+function renderZoom(layers) {
+  var box = document.getElementById("zoomBox");
+  var layer = (layers || []).filter(function (l) { return l.id === selected && l.zoom; })[0];
+  if (!layer) {
+    box.innerHTML = '<div class="muted">Select a camera layer</div>';
+    return;
+  }
+  if (box.dataset.for === layer.id && box.querySelector("input")) {
+    return;  // leave the slider alone while it is being dragged
+  }
+  box.dataset.for = layer.id;
+  box.innerHTML = "";
+
+  var row = document.createElement("div");
+  row.className = "row";
+  row.style.alignItems = "center";
+
+  var minus = document.createElement("button");
+  minus.textContent = "−";
+  minus.onclick = function () { api("/api/zoom", { layerId: layer.id, factor: 1 / 1.1 }); };
+
+  var slider = document.createElement("input");
+  slider.type = "range";
+  // The minimum can be below 1 where an ultra-wide is part of the logical camera, so it comes
+  // from the device rather than being assumed.
+  slider.min = layer.zoom.min;
+  slider.max = layer.zoom.max;
+  slider.step = 0.01;
+  slider.value = layer.zoom.ratio;
+  slider.style.flex = "1";
+  slider.oninput = function () { api("/api/zoom", { layerId: layer.id, ratio: parseFloat(slider.value) }); };
+
+  var plus = document.createElement("button");
+  plus.textContent = "+";
+  plus.onclick = function () { api("/api/zoom", { layerId: layer.id, factor: 1.1 }); };
+
+  row.appendChild(minus);
+  row.appendChild(slider);
+  row.appendChild(plus);
+  box.appendChild(row);
+}
+
+// ---- gestures on the schematic ----
+
+var MIN_SIZE = 0.08;   // same as the on-device editor, so both agree
+
+function stageRect() { return document.getElementById("stage").getBoundingClientRect(); }
+
+function layerById(id) {
+  return (state && state.layers || []).filter(function (l) { return l.id === id; })[0];
+}
+
+function sendRect(l) {
+  pendingRect = l;
+  if (rectInFlight) return;
+  rectInFlight = true;
+  var payload = pendingRect;
+  pendingRect = null;
+  api("/api/layer/rect", {
+    layerId: payload.id, left: payload.left, top: payload.top,
+    right: payload.right, bottom: payload.bottom
+  }).catch(function () {}).then(function () {
+    rectInFlight = false;
+    if (pendingRect) sendRect(pendingRect);   // coalesced: intermediate positions are dropped
+  });
+}
+
+document.getElementById("stage").addEventListener("pointerdown", function (e) {
+  var box = e.target.closest(".layer");
+  if (!box) { selected = null; render(state); return; }
+
+  var l = layerById(box.dataset.id);
+  if (!l) return;
+
+  if (l.id !== selected) { selected = l.id; render(state); return; }
+
+  var onHandle = e.target.classList.contains("handle");
+  var r = stageRect();
+  dragging = {
+    id: l.id, mode: onHandle ? "resize" : "move",
+    startX: (e.clientX - r.left) / r.width,
+    startY: (e.clientY - r.top) / r.height,
+    origin: { left: l.left, top: l.top, right: l.right, bottom: l.bottom },
+    layer: Object.assign({}, l)
+  };
+  e.target.setPointerCapture(e.pointerId);
+});
+
+document.getElementById("stage").addEventListener("pointermove", function (e) {
+  if (!dragging) return;
+  var r = stageRect();
+  var x = (e.clientX - r.left) / r.width;
+  var y = (e.clientY - r.top) / r.height;
+  var o = dragging.origin;
+  var next;
+
+  if (dragging.mode === "move") {
+    var w = o.right - o.left, h = o.bottom - o.top;
+    var dx = Math.min(Math.max(x - dragging.startX, -o.left), 1 - o.right);
+    var dy = Math.min(Math.max(y - dragging.startY, -o.top), 1 - o.bottom);
+    next = { left: o.left + dx, top: o.top + dy, right: o.right + dx, bottom: o.bottom + dy };
+  } else {
+    // Resizes about the top-left corner, which stays put — same as the on-device editor.
+    next = {
+      left: o.left, top: o.top,
+      right: Math.min(Math.max(x, o.left + MIN_SIZE), 1),
+      bottom: Math.min(Math.max(y, o.top + MIN_SIZE), 1)
+    };
+  }
+
+  dragging.layer = Object.assign({}, dragging.layer, next);
+  dragging.layer.id = dragging.id;
+  renderStage(state ? state.layers : []);
+  sendRect(dragging.layer);
+});
+
+function endDrag() {
+  if (!dragging) return;
+  var id = dragging.id;
+  dragging = null;
+  api("/api/layer/commit", { layerId: id });
+}
+document.getElementById("stage").addEventListener("pointerup", endDrag);
+document.getElementById("stage").addEventListener("pointercancel", endDrag);
+
+// ---- other controls ----
+
+document.getElementById("swap").onclick = function () { api("/api/layout/swap"); };
+document.getElementById("mute").onclick = function () {
+  api("/api/mute", { muted: !(state && state.muted) });
+};
+document.querySelectorAll("[data-preview]").forEach(function (b) {
+  b.onclick = function () { api("/api/preview", { enabled: b.dataset.preview === "on" }); };
+});
+document.querySelectorAll("[data-res]").forEach(function (b) {
+  b.onclick = function () { api("/api/preview/resolution", { shortEdge: parseInt(b.dataset.res, 10) }); };
+});
+document.querySelectorAll("[data-fps]").forEach(function (b) {
+  b.onclick = function () { api("/api/preview/fps", { maxFps: parseInt(b.dataset.fps, 10) }); };
+});
+
+// ---- start ----
+
+// The PIN arrives in the fragment, which browsers never send to the server, so it stays out of
+// access logs. Clear it from the bar once used.
+var hashPin = (location.hash || "").replace("#", "").trim();
+if (hashPin) {
+  history.replaceState(null, "", location.pathname);
+  enter(hashPin);
+} else if (token) {
+  document.getElementById("gate").hidden = true;
+  document.getElementById("main").hidden = false;
+  connect();
+  api("/api/state", undefined, "GET").then(render).catch(function () { signOut(); });
+}
+</script>
+</body>
+</html>

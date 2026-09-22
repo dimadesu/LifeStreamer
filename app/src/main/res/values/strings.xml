@@ -435,4 +435,21 @@
     <string name="default_srt_mtu">1500</string>
     <string name="srt_mtu_hint">Largest UDP datagram SRT will send, including the IP and UDP headers. Lower it on links with a small path MTU such as Starlink, some mobile networks and VPNs. 1500 is the default and 1360 is a safe conservative value that costs nothing. Applies to both SRT and SRTLA, and takes effect on the next connection.</string>
     <string name="srt_mtu_invalid">MTU must be between %1$d and %2$d</string>
+    <string name="remote_control_key">remote_control_key</string>
+    <string name="remote_control_category_title">Remote control</string>
+    <string name="remote_control_enabled_key">remote_control_enabled_key</string>
+    <string name="remote_control_enabled_title">Remote control server</string>
+    <string name="remote_control_enabled_summary">Control cameras, layout, zoom, the microphone and the preview from a browser on another device on the same network.</string>
+    <string name="remote_control_port_key">remote_control_port_key</string>
+    <string name="remote_control_port_title">Port</string>
+    <string name="default_remote_control_port">7778</string>
+    <string name="remote_control_pin_key">remote_control_pin_key</string>
+    <string name="remote_control_address_key">remote_control_address_key</string>
+    <string name="remote_control_address_title">Address and PIN</string>
+    <string name="remote_control_new_pin_key">remote_control_new_pin_key</string>
+    <string name="remote_control_new_pin_title">Generate a new PIN</string>
+    <string name="remote_control_new_pin_summary">Any device already connected will be signed out.</string>
+    <string name="remote_control_warning">Anyone on this network who knows the PIN can control the stream. Use it on a network you trust.</string>
+    <string name="remote_control_qr_title">Scan to open the remote control</string>
+    <string name="remote_control_qr_message">This code contains the PIN, so anyone who photographs the screen can take control. Close it when the other device is connected.</string>
 </resources>

@@ -241,6 +241,107 @@ class SettingsFragment : PreferenceFragmentCompat() {
      * The permission for that exemption has been declared in the manifest since forever and was
      * never actually used, so the app could never protect itself from being restricted.
      */
+    /**
+     * The address, the PIN and the QR code that carries both.
+     *
+     * Refreshed in onResume rather than observed: the server lives in the service and the address
+     * only changes when the network does.
+     */
+    override fun onResume() {
+        super.onResume()
+        // The address and the thermal reading are snapshots, not observed state: refresh them
+        // whenever this screen comes back.
+        runCatching { loadRemoteControlSettings() }
+        runCatching { loadPowerSettings() }
+    }
+
+    private fun loadRemoteControlSettings() {
+        val addressPreference =
+            findPreference<Preference>(getString(R.string.remote_control_address_key))
+        val url = com.dimadesu.lifestreamer.remote.RemoteControlManager.url(requireContext())
+        val pin = androidx.preference.PreferenceManager
+            .getDefaultSharedPreferences(requireContext())
+            .getString(getString(R.string.remote_control_pin_key), "")
+            .orEmpty()
+
+        addressPreference?.summary = when {
+            url == null && com.dimadesu.lifestreamer.remote.RemoteControlManager.lastError != null ->
+                com.dimadesu.lifestreamer.remote.RemoteControlManager.lastError
+            url == null -> "Not running. Turn it on above, and make sure Wi-Fi is connected."
+            else -> "$url   ·   PIN $pin\n\n${getString(R.string.remote_control_warning)}"
+        }
+
+        addressPreference?.setOnPreferenceClickListener {
+            if (url == null) {
+                android.widget.Toast.makeText(
+                    requireContext(), "Remote control is not running", android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                showRemoteControlQr("$url/#$pin")
+            }
+            true
+        }
+
+        findPreference<Preference>(getString(R.string.remote_control_new_pin_key))
+            ?.setOnPreferenceClickListener {
+                lifecycleScope.launch {
+                    val fresh = com.dimadesu.lifestreamer.remote.RemoteAuth {}.generatePin()
+                    storageRepository.setRemoteControlPin(fresh)
+                    loadRemoteControlSettings()
+                    android.widget.Toast.makeText(
+                        requireContext(),
+                        "New PIN: $fresh",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                true
+            }
+    }
+
+    /**
+     * Shows the URL and PIN as a QR code, which is what makes this usable once the phone is
+     * already mounted: the other device points its camera and is in.
+     */
+    private fun showRemoteControlQr(url: String) {
+        val size = (resources.displayMetrics.density * 260).toInt()
+        val bitmap = try {
+            val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(
+                url, com.google.zxing.BarcodeFormat.QR_CODE, size, size
+            )
+            android.graphics.Bitmap.createBitmap(
+                size, size, android.graphics.Bitmap.Config.RGB_565
+            ).also { bmp ->
+                for (x in 0 until size) {
+                    for (y in 0 until size) {
+                        bmp.setPixel(
+                            x, y,
+                            if (matrix.get(x, y)) android.graphics.Color.BLACK
+                            else android.graphics.Color.WHITE
+                        )
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            android.widget.Toast.makeText(
+                requireContext(), "Could not build the QR code", android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val image = android.widget.ImageView(requireContext()).apply {
+            setImageBitmap(bitmap)
+            val pad = (resources.displayMetrics.density * 16).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle(R.string.remote_control_qr_title)
+            .setMessage(R.string.remote_control_qr_message)
+            .setView(image)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
     private fun loadSrtTransportSettings() {
         srtMtuPreference.setOnBindEditTextListener { editText ->
             editText.inputType = InputType.TYPE_CLASS_NUMBER
@@ -955,6 +1056,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         loadCompositionSettings()
         loadPowerSettings()
         loadSrtTransportSettings()
+        loadRemoteControlSettings()
         loadEndpoint()
     }
 }

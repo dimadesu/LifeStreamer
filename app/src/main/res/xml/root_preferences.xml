@@ -39,6 +39,36 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        app:key="@string/remote_control_key"
+        app:title="@string/remote_control_category_title">
+
+        <SwitchPreference
+            app:defaultValue="false"
+            app:key="@string/remote_control_enabled_key"
+            app:title="@string/remote_control_enabled_title"
+            app:summary="@string/remote_control_enabled_summary" />
+
+        <Preference
+            app:key="@string/remote_control_address_key"
+            app:title="@string/remote_control_address_title"
+            app:dependency="@string/remote_control_enabled_key" />
+
+        <EditTextPreference
+            app:defaultValue="@string/default_remote_control_port"
+            app:key="@string/remote_control_port_key"
+            app:title="@string/remote_control_port_title"
+            app:dependency="@string/remote_control_enabled_key"
+            app:useSimpleSummaryProvider="true" />
+
+        <Preference
+            app:key="@string/remote_control_new_pin_key"
+            app:title="@string/remote_control_new_pin_title"
+            app:summary="@string/remote_control_new_pin_summary"
+            app:dependency="@string/remote_control_enabled_key" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
         app:key="@string/power_key"
         app:title="@string/power_category_title">
 
@@ -381,12 +411,13 @@
             app:key="@string/srt_transport_key"
             app:title="@string/srt_transport_title">
 
+            <!-- No useSimpleSummaryProvider: the summary is computed, showing what the MTU
+                 derives into, and androidx forbids having both. -->
             <EditTextPreference
                 app:defaultValue="@string/default_srt_mtu"
                 app:key="@string/srt_mtu_key"
                 app:title="@string/srt_mtu_title"
-                app:dialogMessage="@string/srt_mtu_hint"
-                app:useSimpleSummaryProvider="true" />
+                app:dialogMessage="@string/srt_mtu_hint" />
 
         </PreferenceCategory>
 

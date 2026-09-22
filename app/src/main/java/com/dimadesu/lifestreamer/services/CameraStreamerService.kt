@@ -1,5 +1,8 @@
 package com.dimadesu.lifestreamer.services
 
+import com.dimadesu.lifestreamer.remote.RemoteDto
+import com.dimadesu.lifestreamer.remote.RemoteControlServer
+import com.dimadesu.lifestreamer.remote.RemoteControlManager
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
@@ -102,6 +105,23 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private val _serviceReady = MutableStateFlow(false)
     // DataStore repository for reading configured endpoint and regulator settings
     private val storageRepository by lazy { DataStoreRepository(this, this.dataStore) }
+
+    /**
+     * Owns the running composition, so the remote control can drive it with the Activity gone.
+     *
+     * The source is read through a lambda, never eagerly: `streamer` is lazy and onCreate
+     * deliberately never touches it, so constructing this must not either.
+     */
+    val compositionController by lazy {
+        com.dimadesu.lifestreamer.composition.CompositionController(
+            context = this,
+            scope = serviceScope,
+            videoSourceProvider = {
+                (streamer as? io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource)
+                    ?.videoInput?.sourceFlow?.value
+            }
+        )
+    }
 
     /**
      * Thermal watching lives here, not in a ViewModel: the stream outlives the UI, and the window
@@ -455,6 +475,88 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         }
         thermalMonitor.start()
         thermalPolicy.start()
+
+        // Remote control, same shape as Moblink: settings flow in, manager starts and stops.
+        serviceScope.launch {
+            storageRepository.remoteControlConfigFlow.collect { config ->
+                if (config == null) {
+                    RemoteControlManager.stop()
+                    return@collect
+                }
+
+                // The PIN is generated per install. There is deliberately no default in
+                // strings.xml, which would ship the same PIN to every phone.
+                val pin = if (config.pin.length == com.dimadesu.lifestreamer.remote.RemoteAuth.PIN_LENGTH &&
+                    config.pin.all { it.isDigit() }
+                ) {
+                    config.pin
+                } else {
+                    val generated = com.dimadesu.lifestreamer.remote.RemoteAuth {}.generatePin()
+                    storageRepository.setRemoteControlPin(generated)
+                    generated
+                }
+
+                RemoteControlManager.start(
+                    this@CameraStreamerService,
+                    compositionController,
+                    config.port,
+                    pin,
+                    remoteControlHooks
+                )
+            }
+        }
+
+        // Anything the controller refuses or confirms also reaches the remote page.
+        serviceScope.launch {
+            compositionController.messages.collect { RemoteControlManager.broadcastMessage(it) }
+        }
+    }
+
+    /**
+     * What the remote control server needs that is not the composition.
+     *
+     * The preview actions go through the thermal actuator, which is the UI. When it is not there
+     * the preview is already off, which is what the remote operator was asking for anyway.
+     */
+    private val remoteControlHooks = object : RemoteControlServer.Hooks {
+        override fun isStreaming(): Boolean =
+            runCatching { streamer.isStreamingFlow.value }.getOrDefault(false)
+
+        override fun isMuted(): Boolean = this@CameraStreamerService.isMutedFlow.value
+
+        override fun setMuted(muted: Boolean) {
+            this@CameraStreamerService.setMuted(muted)
+        }
+
+        override fun thermal(): RemoteDto.ThermalDto {
+            val state = thermalMonitor.stateFlow.value
+            return RemoteDto.ThermalDto(
+                level = state.level.name,
+                headroom = state.headroom.takeIf { !it.isNaN() },
+                powerSaveMode = state.isPowerSaveMode,
+                supported = state.isSupported,
+                appliedActions = thermalPolicy.appliedActionsFlow.value
+            )
+        }
+
+        override fun setPreviewEnabled(enabled: Boolean) {
+            thermalPolicy.actuator?.setPreviewEnabled(enabled)
+        }
+
+        override fun setPreviewShortEdge(shortEdge: Int?) {
+            thermalPolicy.actuator?.setPreviewShortEdge(shortEdge)
+        }
+
+        override fun setPreviewFpsCap(maxFps: Int?) {
+            thermalPolicy.actuator?.setPreviewFpsCap(maxFps)
+            // Works with the UI gone too: the compositor lives in the service.
+            (compositionController.composite)?.previewMaxFps = maxFps
+        }
+
+        override fun onLockdown() {
+            Log.e(TAG, "Remote control shut down after repeated wrong PINs")
+            RemoteControlManager.stop()
+        }
     }
 
     private fun initNotificationPendingIntents() {
@@ -516,6 +618,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Stop Moblink server when the service is destroyed
         try { SrtlaManager.stopMoblink() } catch (_: Exception) {}
 
+        try { RemoteControlManager.stop() } catch (_: Throwable) {}
         try { thermalPolicy.stop() } catch (_: Throwable) {}
         try { thermalMonitor.stop() } catch (_: Throwable) {}
 
@@ -1360,6 +1463,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         fun serviceStreamStatus() = this@CameraStreamerService.serviceStreamStatus
         // Expose isMuted flow so UI can reflect mute state changes performed externally
         fun isMutedFlow() = this@CameraStreamerService.isMutedFlow
+
+        fun compositionController() = this@CameraStreamerService.compositionController
 
         fun thermalStateFlow() = this@CameraStreamerService.thermalMonitor.stateFlow
 

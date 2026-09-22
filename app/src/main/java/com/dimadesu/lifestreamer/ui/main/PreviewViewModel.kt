@@ -160,6 +160,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private var serviceBinder: CameraStreamerService.CameraStreamerServiceBinder? = null
 
     /**
+     * The composition logic, which lives in the service so the remote control keeps working when
+     * this ViewModel is gone. Null until the service binds, which is the same degradation the
+     * composition UI already had.
+     */
+    private val compositionController: com.dimadesu.lifestreamer.composition.CompositionController?
+        get() = serviceBinder?.compositionController()
+
+    /**
      * Public getter for the service for foreground recovery
      */
     val service: CameraStreamerService? get() = streamerService
@@ -358,12 +366,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     /**
      * Camera settings.
      */
+    /**
+     * Zoom, exposure and focus for whatever camera is in play.
+     *
+     * This used to cast the top-level source to [ICameraSource], which is null the moment a
+     * composition is active — so these controls were dead on the device whenever COMPOSE was on.
+     * The controller resolves the selected layer's child instead.
+     */
     val cameraSettings: CameraSettings?
-        get() {
-            val currentStreamer = serviceStreamer
-            val videoSource = (currentStreamer as? IWithVideoSource)?.videoInput?.sourceFlow?.value
-            return (videoSource as? ICameraSource)?.settings
-        }
+        get() = compositionController?.cameraSettingsForLayer(_selectedCompositionLayerId.value)
 
     val requiredPermissions: List<String>
         get() {
@@ -1330,6 +1341,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             // The thermal policy acts through this ViewModel while the UI is
                             // alive. When it is not, the preview is already gone, which is the
                             // state the policy wants anyway.
+                            // What the controller refuses or confirms reaches the operator the
+                            // same way whether the tap came from this screen or the remote page.
+                            try {
+                                viewModelScope.launch {
+                                    binder.compositionController().messages.collect { message ->
+                                        _toastMessageLiveData.postValue(message)
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Failed to collect composition messages: ${t.message}")
+                            }
+
                             try {
                                 binder.thermalPolicy().actuator = this@PreviewViewModel
                                 viewModelScope.launch {
@@ -4119,32 +4142,34 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
     }
 
-    /**
-     * Android battery saver is actively dangerous for a long stream: with the screen off it lets
-     * the system restrict background work and kill services. Warn rather than silently lose the
-     * stream, and point at the setting that does what the operator actually wants.
-     */
-    val powerSaveWarningLiveData: LiveData<String?> = _thermalStateLiveDataBacking()
-
-    private fun _thermalStateLiveDataBacking(): LiveData<String?> {
-        val result = MediatorLiveData<String?>()
-        result.addSource(thermalStateLiveData) { state ->
-            result.value = if (state.isPowerSaveMode) {
-                "Battery saver is on. If the screen turns off Android may interrupt the stream - " +
-                        "use Sustained performance instead."
-            } else {
-                null
-            }
-        }
-        return result
-    }
-
     private val _thermalStateLiveData =
         MutableLiveData(com.dimadesu.lifestreamer.power.ThermalState())
 
     /** What the device reports about its own temperature. */
     val thermalStateLiveData: LiveData<com.dimadesu.lifestreamer.power.ThermalState> =
         _thermalStateLiveData
+
+    /**
+     * Android battery saver is actively dangerous for a long stream: with the screen off it lets
+     * the system restrict background work and kill services. Warn rather than silently lose the
+     * stream, and point at the setting that does what the operator actually wants.
+     *
+     * Built lazily rather than in an initializer: a MediatorLiveData needs its source to already
+     * exist, and property initializers run top to bottom, so an eager one here is a hostage to
+     * declaration order.
+     */
+    val powerSaveWarningLiveData: LiveData<String?> by lazy {
+        MediatorLiveData<String?>().apply {
+            addSource(thermalStateLiveData) { state ->
+                value = if (state.isPowerSaveMode) {
+                    "Battery saver is on. If the screen turns off Android may interrupt the " +
+                            "stream - use Sustained performance instead."
+                } else {
+                    null
+                }
+            }
+        }
+    }
 
     private val _thermalActionsLiveData = MutableLiveData<List<String>>(emptyList())
 
@@ -4780,7 +4805,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * rate even while streaming.
      */
     fun updateCompositionLayerRect(layerId: String, rect: LayerRect) {
-        activeComposite()?.updateLayer(layerId) { it.copy(rect = rect) }
+        compositionController?.setLayerRect(layerId, rect)
     }
 
     /**
@@ -4788,35 +4813,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * line up.
      */
     fun commitCompositionLayerGeometry(layerId: String) {
-        val composite = activeComposite() ?: return
-        composite.updateLayer(layerId) { layer -> layer.copy(rect = snapped(layer.rect)) }
-        scheduleCompositionSave()
+        compositionController?.commitLayerGeometry(layerId)
     }
 
-    private fun snapped(rect: LayerRect): LayerRect {
-        val width = rect.width
-        val height = rect.height
-        var left = rect.left
-        var top = rect.top
-
-        if (left < SNAP_THRESHOLD) left = 0f
-        if (top < SNAP_THRESHOLD) top = 0f
-        if (left + width > 1f - SNAP_THRESHOLD) left = 1f - width
-        if (top + height > 1f - SNAP_THRESHOLD) top = 1f - height
-        if (kotlin.math.abs(left + width / 2f - 0.5f) < SNAP_THRESHOLD) left = 0.5f - width / 2f
-        if (kotlin.math.abs(top + height / 2f - 0.5f) < SNAP_THRESHOLD) top = 0.5f - height / 2f
-
-        return LayerRect(left, top, left + width, top + height)
-    }
 
     val compositionPresets: List<LayoutPreset> get() = CompositionPresets.ALL
 
     fun applyCompositionPreset(presetId: String) {
-        val composite = activeComposite() ?: return
-        val preset = CompositionPresets.ALL.firstOrNull { it.id == presetId } ?: return
-        composite.updateLayout(composite.layoutFlow.value.applyPreset(preset))
-        scheduleCompositionSave()
-        Log.i(TAG, "Applied layout ${preset.name}")
+        compositionController?.applyPreset(presetId)
     }
 
     /**
@@ -4824,23 +4828,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * and safe on air.
      */
     fun swapCompositionLayers() {
-        val composite = activeComposite() ?: return
-        val layers = composite.layoutFlow.value.layers.sortedBy { it.z }
-        if (layers.size < 2) {
-            _toastMessageLiveData.postValue("Nothing to swap yet")
-            return
-        }
-        val bottom = layers.first()
-        val top = layers.last()
-        composite.updateLayout(
-            composite.layoutFlow.value.swapLayerOrder(bottom.id, top.id)
-        )
-        Log.i(TAG, "Swapped ${bottom.id} and ${top.id}")
+        compositionController?.swapLayers()
     }
 
     fun toggleCompositionLayerVisibility(layerId: String) {
-        activeComposite()?.updateLayer(layerId) { it.copy(visible = !it.visible) }
-        scheduleCompositionSave()
+        val visible = activeComposite()?.layoutFlow?.value?.get(layerId)?.visible ?: true
+        compositionController?.setLayerVisible(layerId, !visible)
     }
 
     /**
@@ -4901,70 +4894,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * "use this camera" when two are already on screen.
      */
     fun setCompositionLayerCamera(cameraId: String) {
-        val composite = activeComposite() ?: return
+        val controller = compositionController ?: return
+        val layout = activeComposite()?.layoutFlow?.value ?: return
+        val layerId = _selectedCompositionLayerId.value?.takeIf { layout[it] != null }
+            ?: layout.primaryLayer?.id
+            ?: return
 
         viewModelScope.launch {
-            try {
-                val layout = composite.layoutFlow.value
-                val layerId = _selectedCompositionLayerId.value?.takeIf { layout[it] != null }
-                    ?: layout.primaryLayer?.id
-                    ?: return@launch
-                val layer = layout[layerId] ?: return@launch
-
-                if (compositionCameraIds().contains(cameraId) &&
-                    (composite.childSource(layerId) as? ICameraSource)?.cameraId != cameraId
-                ) {
-                    _toastMessageLiveData.postValue("That camera is already used by another layer")
-                    return@launch
+            controller.setLayerCamera(layerId, cameraId)
+                .onSuccess {
+                    if (layerId == COMPOSITION_LAYER_MAIN) {
+                        lastUsedCameraId = cameraId
+                    }
+                    _compositionCameraIds.postValue(compositionCameraIds())
+                    publishCompositionLayers(controller.layout ?: return@onSuccess)
                 }
-
-                // Refuse a pairing the hardware cannot honour, rather than letting camera2 fail
-                // to open and leaving the composition half-built.
-                val otherCameraIds = layout.layers
-                    .filter { it.id != layerId }
-                    .mapNotNull { (composite.childSource(it.id) as? ICameraSource)?.cameraId }
-
-                val clash = otherCameraIds.firstOrNull {
-                    !compositionCapabilities.canRunTogether(cameraId, it)
-                }
-                if (clash != null) {
-                    val name = cameraDisplayName(cameraId)
-                    val otherName = cameraDisplayName(clash)
-                    _toastMessageLiveData.postValue(
-                        "$name cannot run at the same time as $otherName on this device"
-                    )
-                    Log.w(TAG, "Refused camera $cameraId: clashes with $clash")
-                    return@launch
-                }
-
-                val captureResolution = if (otherCameraIds.isNotEmpty()) {
-                    compositionCapabilities.report().concurrentCameraMaxSize
-                } else {
-                    null
-                }
-
-                composite.replaceLayerSource(
-                    layerId,
-                    // The existing layer is reused, so its rectangle and depth survive the swap.
-                    LayerSpec(
-                        layer = layer,
-                        childFactory = CameraSourceFactory(cameraId),
-                        captureResolution = captureResolution
-                    )
-                )
-                if (layerId == COMPOSITION_LAYER_MAIN) {
-                    lastUsedCameraId = cameraId
-                }
-                publishCompositionLayers(composite.layoutFlow.value)
-                // With two cameras on screen it is not obvious which one a tap moved, so say so.
-                _toastMessageLiveData.postValue(
-                    "${cameraDisplayName(cameraId)} → ${layerPositionName(layerId)}"
-                )
-                Log.i(TAG, "Layer $layerId now uses camera $cameraId")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to change the layer camera: ${e.message}", e)
-                _streamerErrorLiveData.postValue("Could not switch that layer's camera: ${e.message}")
-            }
         }
     }
 

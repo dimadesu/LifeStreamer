@@ -104,6 +104,11 @@ dependencies {
     implementation("com.dimadesu.bondbunny:srtla-lib")
     implementation("com.google.code.gson:gson:2.11.0")
 
+    // QR code for the remote control address. Pure Java, no Android dependency; the code has
+    // to be drawn on the phone for another device to scan, so generating it in the page is not
+    // an option.
+    implementation("com.google.zxing:core:3.5.3")
+
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
     implementation("androidx.media3:media3-datasource-rtmp:1.8.0") {

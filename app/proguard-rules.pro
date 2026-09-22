@@ -62,3 +62,7 @@
 # Composition layout persistence: flat DTOs serialized with Gson. Without this, R8 renames the
 # fields and a saved layout silently fails to load in release builds.
 -keep class com.dimadesu.lifestreamer.composition.CompositionStore$* { *; }
+
+# Remote control wire format: flat DTOs serialized with Gson. Without this, R8 renames the fields
+# and the JSON quietly becomes {"a":1,"b":2} with no error anywhere.
+-keep class com.dimadesu.lifestreamer.remote.RemoteDto$* { *; }

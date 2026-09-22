@@ -290,6 +290,36 @@ class DataStoreRepository(
         )
     }.distinctUntilChanged()
 
+    /**
+     * Remote control settings, or null when it is switched off.
+     *
+     * Unlike Moblink's, this is not gated on the endpoint type — the remote control is useful
+     * whatever you are streaming to.
+     */
+    data class RemoteControlConfig(val port: Int, val pin: String)
+
+    val remoteControlConfigFlow: Flow<RemoteControlConfig?> = dataStore.data.map { preferences ->
+        val enabled =
+            preferences[booleanPreferencesKey(context.getString(R.string.remote_control_enabled_key))]
+                ?: false
+        if (!enabled) {
+            return@map null
+        }
+        RemoteControlConfig(
+            port = preferences[stringPreferencesKey(context.getString(R.string.remote_control_port_key))]
+                ?.toIntOrNull()
+                ?: context.getString(R.string.default_remote_control_port).toInt(),
+            pin = preferences[stringPreferencesKey(context.getString(R.string.remote_control_pin_key))]
+                ?: ""
+        )
+    }.distinctUntilChanged()
+
+    suspend fun setRemoteControlPin(pin: String) {
+        dataStore.edit {
+            it[stringPreferencesKey(context.getString(R.string.remote_control_pin_key))] = pin
+        }
+    }
+
     /** The SRT MTU, already brought into the range the UI offers. */
     val srtMtuFlow: Flow<Int> = dataStore.data.map { preferences ->
         SrtMtu.coerceMtu(
