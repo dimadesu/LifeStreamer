@@ -58,3 +58,7 @@
 # --- Readable release stack traces ---
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# Composition layout persistence: flat DTOs serialized with Gson. Without this, R8 renames the
+# fields and a saved layout silently fails to load in release builds.
+-keep class com.dimadesu.lifestreamer.composition.CompositionStore$* { *; }

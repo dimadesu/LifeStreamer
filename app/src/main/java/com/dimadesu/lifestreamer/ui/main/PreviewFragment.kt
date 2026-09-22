@@ -23,7 +23,11 @@ import android.util.SizeF
 import kotlin.math.atan
 import kotlin.math.sqrt
 import kotlin.math.PI
+import android.widget.Button
 import androidx.appcompat.app.AlertDialog
+import com.dimadesu.lifestreamer.R
+import com.dimadesu.lifestreamer.ui.components.CompositionOverlayView
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerRect
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraSettings
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
@@ -49,7 +53,6 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.dimadesu.lifestreamer.ApplicationConstants
-import com.dimadesu.lifestreamer.R
 import com.dimadesu.lifestreamer.databinding.MainFragmentBinding
 import com.dimadesu.lifestreamer.models.StreamOrientation
 import com.dimadesu.lifestreamer.models.StreamStatus
@@ -189,6 +192,22 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         binding.toggleScreenButton.setOnClickListener {
             previewViewModel.toggleScreenSource(mediaProjectionLauncher)
         }
+
+        binding.toggleCompositeButton.setOnClickListener {
+            previewViewModel.toggleCompositeSource()
+        }
+
+        // With a composition running, long press steps through the built-in layouts and then
+        // removes and re-adds the picture-in-picture; all safe on air. With it stopped, long
+        // press chooses what the second layer will be.
+        binding.toggleCompositeButton.setOnLongClickListener {
+            if (previewViewModel.isCompositeSource.value != true) {
+                showCompositionSourcePicker()
+            }
+            true
+        }
+
+        setUpCompositionBar()
 
         binding.uvcTestButton.setOnClickListener {
             val intent = android.content.Intent(requireContext(), com.dimadesu.lifestreamer.uvc.UvcTestActivity::class.java)
@@ -706,12 +725,26 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         val targetW = if (isPortrait) height else width
         val targetH = if (isPortrait) width else height
 
-        // Set the layout size so StreamPack selects the correct camera resolution
-        val lp = binding.preview.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        applyScaleTo(binding.preview, targetW, targetH)
+
+        // The editor must land on exactly the same pixels as the preview, otherwise a layer
+        // rectangle would be drawn where the layer is not. Giving it identical layout params,
+        // pivot and scale makes that true by construction rather than by arithmetic.
+        applyScaleTo(binding.compositionOverlay, targetW, targetH)
+    }
+
+    /**
+     * Lays [view] out at exactly [targetW] x [targetH] and then scales it down to fit the screen.
+     *
+     * Scaling instead of resizing is deliberate: resizing a SurfaceView destroys its surface,
+     * which crashes the Samsung camera HAL during an active stream.
+     */
+    private fun applyScaleTo(view: android.view.View, targetW: Int, targetH: Int) {
+        val lp = view.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         lp.dimensionRatio = null
         lp.width = targetW
         lp.height = targetH
-        binding.preview.layoutParams = lp
+        view.layoutParams = lp
 
         // After the layout pass, scale the view down to fit the visible area
         binding.root.post {
@@ -722,10 +755,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     availableWidth / targetW.toFloat(),
                     availableHeight / targetH.toFloat()
                 )
-                binding.preview.pivotX = targetW / 2f
-                binding.preview.pivotY = targetH / 2f
-                binding.preview.scaleX = scale
-                binding.preview.scaleY = scale
+                view.pivotX = targetW / 2f
+                view.pivotY = targetH / 2f
+                view.scaleX = scale
+                view.scaleY = scale
             }
         }
     }
@@ -775,6 +808,12 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     override fun onPause() {
         super.onPause()
         previewViewModel.onUiPaused()
+
+        // Never leave the layout editor armed: coming back to a live stream with the overlay
+        // still listening is how a layer gets moved by accident.
+        binding.compositionBar.editLayoutToggle.isChecked = false
+        previewViewModel.setCompositionEditMode(false)
+        cancelEditModeTimeout()
         binding.srtlaStatsView.stopStatsUpdates()
         // DO NOT stop streaming when going to background - the service should continue streaming
         // DO NOT stop preview either when the camera is being used for streaming -
@@ -1296,6 +1335,9 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     companion object {
+        /** Edit mode disarms itself after this long without a gesture. */
+        private const val EDIT_MODE_TIMEOUT_MS = 30_000L
+
         private const val TAG = "PreviewFragment"
     }
 
@@ -1307,4 +1349,193 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     }
 
+
+    /**
+     * Picks what feeds the second layer. Replaced by the layer picker once the composition UI
+     * exists; for now it is the only way to choose something other than the test image.
+     */
+    private fun showCompositionSourcePicker() {
+        val options = PreviewViewModel.CompositionPipSource.entries.toTypedArray()
+        val current = previewViewModel.compositionPipSource.value
+        val checked = options.indexOf(current).coerceAtLeast(0)
+
+        // Unavailable options stay on the list, labelled with the reason. Hiding them would leave
+        // the operator with no answer to "why can't I?".
+        val reasons = options.map { previewViewModel.reasonPipSourceUnavailable(it) }
+        val labels = options.mapIndexed { index, option ->
+            reasons[index]?.let { "${option.label} — $it" } ?: option.label
+        }.toTypedArray()
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Second layer source")
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                val chosen = options[which]
+                val reason = reasons[which]
+                if (reason != null) {
+                    Toast.makeText(requireContext(), reason, Toast.LENGTH_LONG).show()
+                    return@setSingleChoiceItems
+                }
+                previewViewModel.setCompositionPipSource(chosen)
+                when (chosen) {
+                    PreviewViewModel.CompositionPipSource.SCREEN ->
+                        previewViewModel.ensureMediaProjectionForComposition(mediaProjectionLauncher)
+
+                    PreviewViewModel.CompositionPipSource.USB ->
+                        previewViewModel.prepareUvcForComposition()
+
+                    else -> Unit
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private var editModeTimeoutRunnable: Runnable? = null
+    private var previewZoomDefault = true
+    private var previewFocusDefault = true
+    private var hasCapturedPreviewGestureDefaults = false
+
+    private fun setUpCompositionBar() {
+        val bar = binding.compositionBar
+
+        bar.addLayerButton.setOnClickListener { showCompositionSourcePicker() }
+        bar.layoutsButton.setOnClickListener { showLayoutPicker() }
+        bar.swapLayersButton.setOnClickListener { previewViewModel.swapCompositionLayers() }
+
+        bar.editLayoutToggle.setOnCheckedChangeListener { _, isChecked ->
+            previewViewModel.setCompositionEditMode(isChecked)
+        }
+
+        binding.compositionOverlay.listener =
+            object : CompositionOverlayView.Listener {
+                override fun onLayerSelected(layerId: String?) {
+                    previewViewModel.selectCompositionLayer(layerId)
+                    restartEditModeTimeout()
+                }
+
+                override fun onLayerGeometryChanged(layerId: String, rect: LayerRect) {
+                    previewViewModel.updateCompositionLayerRect(layerId, rect)
+                }
+
+                override fun onLayerGeometryCommitted(layerId: String) {
+                    previewViewModel.commitCompositionLayerGeometry(layerId)
+                    restartEditModeTimeout()
+                }
+            }
+
+        previewViewModel.isCompositeSource.observe(viewLifecycleOwner) { active ->
+            binding.compositionBar.root.visibility = if (active) View.VISIBLE else View.GONE
+            if (!active) {
+                bar.editLayoutToggle.isChecked = false
+            }
+        }
+
+        previewViewModel.compositionLayers.observe(viewLifecycleOwner) { layers ->
+            binding.compositionOverlay.setLayers(
+                layers.filter { it.visible }.map {
+                    CompositionOverlayView.OverlayLayer(it.id, it.label, it.rect)
+                }
+            )
+            rebuildLayerChips(layers)
+        }
+
+        previewViewModel.selectedCompositionLayerId.observe(viewLifecycleOwner) { id ->
+            binding.compositionOverlay.setSelectedLayer(id)
+        }
+
+        previewViewModel.isCompositionEditMode.observe(viewLifecycleOwner) { editing ->
+            applyEditMode(editing)
+        }
+    }
+
+    /**
+     * Edit mode has to take the gestures away from the preview, which already consumes pinch for
+     * camera zoom and single taps for focus. Both are plain properties on PreviewView, so this
+     * needs no fork of StreamPack — but the previous values are captured rather than assumed, so a
+     * change to the layout defaults cannot silently break them.
+     */
+    private fun applyEditMode(editing: Boolean) {
+        if (editing && !hasCapturedPreviewGestureDefaults) {
+            previewZoomDefault = binding.preview.enableZoomOnPinch
+            previewFocusDefault = binding.preview.enableTapToFocus
+            hasCapturedPreviewGestureDefaults = true
+        }
+
+        binding.preview.enableZoomOnPinch = if (editing) false else previewZoomDefault
+        binding.preview.enableTapToFocus = if (editing) false else previewFocusDefault
+        binding.compositionOverlay.visibility = if (editing) View.VISIBLE else View.GONE
+
+        if (editing) {
+            restartEditModeTimeout()
+        } else {
+            cancelEditModeTimeout()
+        }
+    }
+
+    /**
+     * Edit mode disarms itself after a while, so it can never be left on by accident with a live
+     * stream running and a thumb resting on the screen.
+     */
+    private fun restartEditModeTimeout() {
+        cancelEditModeTimeout()
+        val runnable = Runnable {
+            if (previewViewModel.isCompositionEditMode.value == true) {
+                binding.compositionBar.editLayoutToggle.isChecked = false
+                previewViewModel.setCompositionEditMode(false)
+            }
+        }
+        editModeTimeoutRunnable = runnable
+        binding.root.postDelayed(runnable, EDIT_MODE_TIMEOUT_MS)
+    }
+
+    private fun cancelEditModeTimeout() {
+        editModeTimeoutRunnable?.let { binding.root.removeCallbacks(it) }
+        editModeTimeoutRunnable = null
+    }
+
+    private fun rebuildLayerChips(layers: List<PreviewViewModel.CompositionLayerUi>) {
+        val container = binding.compositionBar.layerChipContainer
+        container.removeAllViews()
+
+        layers.forEach { layer ->
+            val chip = Button(requireContext()).apply {
+                text = buildString {
+                    if (layer.isPrimary) append("🔊 ")
+                    append(layer.label)
+                    if (!layer.visible) append(" (off)")
+                }
+                textSize = 11f
+                minWidth = 0
+                minimumWidth = 0
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    resources.getColor(
+                        if (layer.id == previewViewModel.selectedCompositionLayerId.value) {
+                            R.color.active_button_green
+                        } else {
+                            R.color.button_gray
+                        },
+                        null
+                    )
+                )
+                setOnClickListener { previewViewModel.selectCompositionLayer(layer.id) }
+                setOnLongClickListener {
+                    previewViewModel.toggleCompositionLayerVisibility(layer.id)
+                    true
+                }
+            }
+            container.addView(chip)
+        }
+    }
+
+    private fun showLayoutPicker() {
+        val presets = previewViewModel.compositionPresets
+        AlertDialog.Builder(requireContext())
+            .setTitle("Layout")
+            .setItems(presets.map { it.name }.toTypedArray()) { _, which ->
+                previewViewModel.applyCompositionPreset(presets[which].id)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
 }

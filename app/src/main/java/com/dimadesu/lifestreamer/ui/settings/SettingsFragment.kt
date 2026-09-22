@@ -219,6 +219,26 @@ class SettingsFragment : PreferenceFragmentCompat() {
         return (value / step) * step
     }
 
+    /**
+     * Fills in whether this device can run two of its own cameras at once.
+     *
+     * Read-only on purpose: it is a device fact, and its whole job is to answer "why can't I add
+     * a second camera?" somewhere the operator can find it without asking.
+     */
+    private fun loadCompositionSettings() {
+        val preference = findPreference<Preference>(
+            getString(R.string.composition_capabilities_key)
+        ) ?: return
+
+        preference.summary = try {
+            com.dimadesu.lifestreamer.composition.CompositionCapabilities(requireContext())
+                .report()
+                .describe()
+        } catch (t: Throwable) {
+            "Could not determine this device's camera capabilities"
+        }
+    }
+
     private fun loadRtmpSourceSettings() {
         rtmpSourceBufferForPlaybackMsPreference.setOnPreferenceChangeListener { _, newValue ->
             val rounded = roundBitrate(newValue as Int, step = 500)
@@ -829,6 +849,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun loadPreferences() {
         loadRtmpSourceSettings()
+        loadCompositionSettings()
         loadEndpoint()
     }
 }

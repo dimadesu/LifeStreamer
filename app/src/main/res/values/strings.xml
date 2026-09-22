@@ -398,4 +398,8 @@
     <string name="stream_orientation_entry_portrait_reversed">Portrait (reversed)</string>
     <string name="stream_orientation_entry_landscape_reversed">Landscape (reversed)</string>
 
+    <string name="composition_key">composition_key</string>
+    <string name="composition_capabilities_key">composition_capabilities_key</string>
+    <string name="composition_category_title">Composition</string>
+    <string name="composition_capabilities_title">Two cameras at once</string>
 </resources>

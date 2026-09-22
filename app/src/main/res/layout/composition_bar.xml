@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The on-air composition controls. Anchored just above the LIVE button so every action is within
+  thumb reach in landscape, and so the destructive one (LIVE) is never next to the layout ones.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#A0000000"
+    android:elevation="10dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="4dp"
+    android:paddingTop="2dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="2dp">
+
+    <HorizontalScrollView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/layerChipContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+
+    </HorizontalScrollView>
+
+    <Button
+        android:id="@+id/addLayerButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:backgroundTint="@color/button_gray"
+        android:minWidth="48dp"
+        android:text="+ SRC"
+        android:textSize="11sp" />
+
+    <Button
+        android:id="@+id/layoutsButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:backgroundTint="@color/button_gray"
+        android:minWidth="48dp"
+        android:text="LAYOUT"
+        android:textSize="11sp" />
+
+    <Button
+        android:id="@+id/swapLayersButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:backgroundTint="@color/button_gray"
+        android:minWidth="40dp"
+        android:text="⇄"
+        android:textSize="13sp" />
+
+    <ToggleButton
+        android:id="@+id/editLayoutToggle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:backgroundTint="@color/button_gray"
+        android:minWidth="48dp"
+        android:textOff="EDIT"
+        android:textOn="DONE"
+        android:textSize="11sp" />
+
+</LinearLayout>

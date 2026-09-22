@@ -38,6 +38,17 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory
+        app:key="@string/composition_key"
+        app:title="@string/composition_category_title">
+
+        <Preference
+            app:key="@string/composition_capabilities_key"
+            app:selectable="false"
+            app:title="@string/composition_capabilities_title" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/video">
 
         <PreferenceCategory

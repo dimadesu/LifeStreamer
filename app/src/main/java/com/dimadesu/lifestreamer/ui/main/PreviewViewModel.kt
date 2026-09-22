@@ -81,6 +81,16 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.Camer
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.IBitmapSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.bitmap.BitmapSourceFactory
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.CompositionPresets
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerRect
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayoutPreset
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.swapLayerOrder
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.LayerScaleMode
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.VideoLayer
+import io.github.thibaultbee.streampack.core.elements.processing.video.composition.applyPreset
+import io.github.thibaultbee.streampack.core.elements.sources.video.composite.CompositeVideoSourceFactory
+import io.github.thibaultbee.streampack.core.elements.sources.video.composite.ICompositeVideoSource
+import io.github.thibaultbee.streampack.core.elements.sources.video.composite.LayerSpec
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import com.dimadesu.lifestreamer.services.CameraStreamerService
@@ -340,6 +350,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private val _activeRtmpIndex = MutableLiveData<Int?>(null)
     private val _userToggledUvc = MutableLiveData<Boolean>(false)
     private val _isScreenSource = MutableLiveData<Boolean>(false)
+    private val _isCompositeSource = MutableLiveData<Boolean>(false)
 
     /**
      * Camera settings.
@@ -3987,6 +3998,672 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     val isScreenSource: LiveData<Boolean> = _isScreenSource
 
+    val isCompositeSource: LiveData<Boolean> = _isCompositeSource
+
+    /**
+     * Toggles a two-layer composition: the current camera full frame, with a picture-in-picture
+     * in the bottom-right corner.
+     *
+     * This is the milestone-1 wiring for the compositor: a bitmap second layer cannot fail, which
+     * makes it the cheapest way to prove on a real device that a composited frame reaches both the
+     * preview and the encoder. Real second sources (USB, screen, network, a second camera) and the
+     * layout UI come later; the engine underneath is the same.
+     */
+    fun toggleCompositeSource() {
+        val currentStreamer = serviceStreamer
+        if (currentStreamer == null) {
+            _streamerErrorLiveData.postValue("Service not available")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                removeBitrateRegulatorIfNeeded()
+                // Let the previous source release before the new one opens the camera.
+                delay(300)
+
+                val cameraId = lastUsedCameraId
+                    ?: application.cameraManager.cameras.firstOrNull()
+                    ?: "0"
+
+                if (_isCompositeSource.value == true) {
+                    layerFailureJob?.cancel()
+                    layerFailureJob = null
+                    layoutObserverJob?.cancel()
+                    layoutObserverJob = null
+                    _compositionLayers.postValue(emptyList())
+                    _isCompositionEditMode.postValue(false)
+                    currentStreamer.setVideoSource(CameraSourceFactory(cameraId))
+                    _isCompositeSource.postValue(false)
+                    Log.i(TAG, "Composition off, back to camera $cameraId")
+                } else {
+                    currentStreamer.setVideoSource(
+                        CompositeVideoSourceFactory(
+                            listOf(mainLayerSpec(cameraId), pipLayerSpec())
+                        )
+                    )
+                    layoutCycleStep = 0
+                    (currentStreamer.videoInput?.sourceFlow?.value as? ICompositeVideoSource)
+                        ?.let {
+                            observeCompositionFailures(it)
+                            observeCompositionLayout(it)
+                            restoreSavedComposition(it)
+                        }
+                    _isCompositeSource.postValue(true)
+                    Log.i(TAG, "Composition on: camera $cameraId + bitmap picture-in-picture")
+                }
+
+                readdBitrateRegulatorIfNeeded()
+                if (_isMonitorAudioOn.value == true) {
+                    applyMonitorAudioState()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to toggle composition: ${e.message}", e)
+                _streamerErrorLiveData.postValue("Composition failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * What feeds the second layer of the composition.
+     */
+    enum class CompositionPipSource(val label: String) {
+        TEST_IMAGE("Test image"),
+        CAMERA("Second camera"),
+        USB("USB camera"),
+        SCREEN("Screen"),
+        RTMP("RTMP / SRT source")
+    }
+
+    /**
+     * Whether this device can actually run two of its own cameras at once. Probed once, lazily,
+     * because the answer is a device fact that never changes at runtime.
+     */
+    val compositionCapabilities by lazy {
+        com.dimadesu.lifestreamer.composition.CompositionCapabilities(application)
+    }
+
+    /**
+     * Why a given second-layer source cannot be used right now, or null when it can.
+     *
+     * The picker shows unavailable options disabled with this reason rather than hiding them:
+     * the question an operator actually has is "why can't I?", and a missing row never answers it.
+     */
+    fun reasonPipSourceUnavailable(source: CompositionPipSource): String? = when (source) {
+        CompositionPipSource.CAMERA ->
+            compositionCapabilities.reasonSecondCameraUnavailable(currentCameraIdOrDefault())
+
+        CompositionPipSource.USB ->
+            if (uvcCameraHelper?.deviceList.isNullOrEmpty() &&
+                (application.getSystemService(android.content.Context.USB_SERVICE)
+                        as android.hardware.usb.UsbManager).deviceList.isEmpty()
+            ) {
+                "No USB camera connected"
+            } else {
+                null
+            }
+
+        // The test image always works; screen and network sources report their own problems when
+        // the layer is built, because permission and connectivity can change between now and then.
+        CompositionPipSource.TEST_IMAGE,
+        CompositionPipSource.SCREEN,
+        CompositionPipSource.RTMP -> null
+    }
+
+    private fun currentCameraIdOrDefault(): String =
+        lastUsedCameraId
+            ?: application.cameraManager.cameras.firstOrNull()
+            ?: "0"
+
+    private val _compositionPipSource = MutableLiveData(CompositionPipSource.TEST_IMAGE)
+    val compositionPipSource: LiveData<CompositionPipSource> = _compositionPipSource
+
+    /**
+     * True while the picture-in-picture is showing the placeholder because its real source died.
+     * Stops the failure handler from replacing a placeholder with another placeholder.
+     */
+    private var isPipOnPlaceholder = false
+
+    fun setCompositionPipSource(source: CompositionPipSource) {
+        _compositionPipSource.postValue(source)
+        scheduleCompositionSave()
+        Log.i(TAG, "Composition picture-in-picture source set to ${source.label}")
+    }
+
+    /**
+     * Makes sure a usable [MediaProjection] exists before a screen layer is built.
+     *
+     * A token whose virtual display has already been created and released cannot be reused, so an
+     * exhausted one is discarded and a new grant requested.
+     */
+    fun ensureMediaProjectionForComposition(
+        mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
+    ) {
+        val existing = startupMediaProjection
+            ?: streamingMediaProjection
+            ?: mediaProjectionHelper.getMediaProjection()
+
+        if (existing != null &&
+            !MediaProjectionVideoSourceFactory.isProjectionExhaustedForVideo(existing)
+        ) {
+            Log.i(TAG, "Reusing the existing MediaProjection for the screen layer")
+            return
+        }
+
+        mediaProjectionHelper.requestProjection(mediaProjectionLauncher) { projection ->
+            if (projection != null) {
+                startupMediaProjection = projection
+                Log.i(TAG, "MediaProjection granted for the screen layer")
+            } else {
+                Log.w(TAG, "MediaProjection denied for the screen layer")
+                _streamerErrorLiveData.postValue("Screen permission denied - layer not available")
+            }
+        }
+    }
+
+    private fun mainLayerSpec(cameraId: String) = LayerSpec(
+        layer = VideoLayer(
+            id = COMPOSITION_LAYER_MAIN,
+            z = 0,
+            rect = LayerRect.FULL,
+            scaleMode = LayerScaleMode.FILL
+        ),
+        childFactory = CameraSourceFactory(cameraId),
+        /**
+         * With a second camera on screen both devices must stay inside the concurrent-pair
+         * configuration, so the main camera is capped too — capping only the small one would
+         * still fail to open.
+         */
+        captureResolution = if (_compositionPipSource.value == CompositionPipSource.CAMERA) {
+            compositionCapabilities.report().concurrentCameraMaxSize
+        } else {
+            null
+        }
+    )
+
+    private fun pipLayer() = VideoLayer(
+        id = COMPOSITION_LAYER_PIP,
+        z = 1,
+        rect = LayerRect.PIP_BOTTOM_RIGHT,
+        scaleMode = LayerScaleMode.FIT
+    )
+
+    /**
+     * The placeholder a dead layer falls back to. A bitmap source cannot itself fail, which is
+     * what makes it a safe terminal state.
+     */
+    private fun placeholderPipSpec() = LayerSpec(
+        layer = pipLayer(),
+        childFactory = BitmapSourceFactory(testBitmap)
+    )
+
+    /**
+     * Builds the second layer from the currently selected source.
+     *
+     * A source that cannot be built right now (no screen permission, no RTMP URL) degrades to the
+     * placeholder instead of failing the whole composition.
+     */
+    private suspend fun pipLayerSpec(): LayerSpec {
+        val requested = _compositionPipSource.value ?: CompositionPipSource.TEST_IMAGE
+        isPipOnPlaceholder = false
+
+        return when (requested) {
+            CompositionPipSource.TEST_IMAGE -> {
+                isPipOnPlaceholder = true
+                placeholderPipSpec()
+            }
+
+            CompositionPipSource.CAMERA -> {
+                val primaryId = currentCameraIdOrDefault()
+                val secondId = compositionCapabilities.secondCameraFor(primaryId)
+                if (secondId == null) {
+                    Log.w(TAG, "No camera can run alongside $primaryId")
+                    _rtmpStatusLiveData.postValue(
+                        compositionCapabilities.reasonSecondCameraUnavailable(primaryId)
+                    )
+                    isPipOnPlaceholder = true
+                    placeholderPipSpec()
+                } else {
+                    LayerSpec(
+                        layer = pipLayer(),
+                        childFactory = CameraSourceFactory(secondId),
+                        // Both cameras of a concurrent pair have to stay inside the guaranteed
+                        // configuration, so the capture size is capped rather than inherited.
+                        captureResolution = compositionCapabilities.report().concurrentCameraMaxSize
+                    )
+                }
+            }
+
+            CompositionPipSource.USB -> {
+                val helper = uvcCameraHelper
+                if (helper == null || helper.deviceList.isNullOrEmpty()) {
+                    Log.w(TAG, "No USB camera ready, using the placeholder for now")
+                    _rtmpStatusLiveData.postValue("Waiting for the USB camera")
+                    isPipOnPlaceholder = true
+                    placeholderPipSpec()
+                } else {
+                    LayerSpec(
+                        layer = pipLayer(),
+                        childFactory = UvcVideoSource.Factory(helper)
+                    )
+                }
+            }
+
+            CompositionPipSource.SCREEN -> {
+                val projection = startupMediaProjection
+                    ?: streamingMediaProjection
+                    ?: mediaProjectionHelper.getMediaProjection()
+                if (projection == null) {
+                    Log.w(TAG, "No MediaProjection for the screen layer, using the placeholder")
+                    _rtmpStatusLiveData.postValue("Screen permission missing - showing placeholder")
+                    isPipOnPlaceholder = true
+                    placeholderPipSpec()
+                } else {
+                    val fps = videoConfigLiveData.value?.fps ?: 30
+                    LayerSpec(
+                        layer = pipLayer(),
+                        childFactory = MediaProjectionVideoSourceFactory(projection, fps)
+                    )
+                }
+            }
+
+            CompositionPipSource.RTMP -> {
+                try {
+                    val url = storageRepository.rtmpSourceUrlFlow(1).first()
+                    require(url.isNotBlank()) { "RTMP source 1 has no URL" }
+
+                    val bufferMs = storageRepository.rtmpSourceBufferForPlaybackMsFlow.first()
+                    val player = RtmpSourceSwitchHelper.createExoPlayer(application, url, bufferMs)
+                    LayerSpec(
+                        layer = pipLayer(),
+                        childFactory = RTMPVideoSource.Factory(player)
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not build the RTMP layer: ${e.message}")
+                    _rtmpStatusLiveData.postValue("RTMP source unavailable - showing placeholder")
+                    isPipOnPlaceholder = true
+                    placeholderPipSpec()
+                }
+            }
+        }
+    }
+
+    /**
+     * Opens a USB camera for the composition's second layer.
+     *
+     * Deliberately separate from [toggleUvcSource]: that one's callbacks replace the *whole* video
+     * source, which is exactly wrong here. These only ever swap the picture-in-picture layer, so
+     * the main camera is never interrupted by a cable being plugged or pulled. The
+     * [com.herohan.uvcapp.CameraHelper] instance is still shared through [uvcCameraHelper],
+     * because two helpers on one USB device fight each other.
+     */
+    fun prepareUvcForComposition() {
+        val existing = uvcCameraHelper
+        if (existing != null) {
+            val devices = existing.deviceList
+            if (!devices.isNullOrEmpty()) {
+                Log.i(TAG, "Reusing the existing USB helper for the composition")
+                existing.selectDevice(devices[0])
+            } else {
+                _streamerErrorLiveData.postValue("No USB camera connected")
+            }
+            return
+        }
+
+        val helper = com.herohan.uvcapp.CameraHelper().apply {
+            setStateCallback(object : com.herohan.uvcapp.ICameraHelper.StateCallback {
+                override fun onAttach(device: android.hardware.usb.UsbDevice) {
+                    Log.i(TAG, "USB camera attached for the composition: ${device.deviceName}")
+                    if (isCompositionUsbLayerWanted()) {
+                        selectDevice(device)
+                    }
+                }
+
+                override fun onDeviceOpen(
+                    device: android.hardware.usb.UsbDevice,
+                    isFirstOpen: Boolean
+                ) {
+                    Log.i(TAG, "USB device opened for the composition (first=$isFirstOpen)")
+                    if (!isCompositionUsbLayerWanted()) {
+                        return
+                    }
+                    val composite = activeComposite() ?: return
+                    viewModelScope.launch {
+                        try {
+                            isPipOnPlaceholder = false
+                            composite.replaceLayerSource(
+                                COMPOSITION_LAYER_PIP,
+                                LayerSpec(
+                                    layer = pipLayer(),
+                                    childFactory = UvcVideoSource.Factory(this@apply)
+                                )
+                            )
+                            _rtmpStatusLiveData.postValue(null)
+                            Log.i(TAG, "USB camera is now the picture-in-picture")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to put the USB camera in the layer: ${e.message}", e)
+                        }
+                    }
+                }
+
+                override fun onCameraOpen(device: android.hardware.usb.UsbDevice) {
+                    // The source has to re-add its surfaces once the device is really ready.
+                    val layerSource = activeComposite()?.childSource(COMPOSITION_LAYER_PIP)
+                    if (layerSource is UvcVideoSource) {
+                        layerSource.onCameraReady()
+                    }
+                }
+
+                override fun onCameraClose(device: android.hardware.usb.UsbDevice) = Unit
+
+                override fun onDeviceClose(device: android.hardware.usb.UsbDevice) = Unit
+
+                override fun onCancel(device: android.hardware.usb.UsbDevice) {
+                    // The USB permission dialog was dismissed or denied.
+                    Log.w(TAG, "USB permission refused for the composition layer")
+                    _streamerErrorLiveData.postValue("USB permission denied - layer not available")
+                }
+
+                override fun onDetach(device: android.hardware.usb.UsbDevice) {
+                    Log.w(TAG, "USB camera detached from the composition")
+                    if (!isCompositionUsbLayerWanted() || isPipOnPlaceholder) {
+                        return
+                    }
+                    val composite = activeComposite() ?: return
+                    viewModelScope.launch {
+                        try {
+                            isPipOnPlaceholder = true
+                            composite.replaceLayerSource(
+                                COMPOSITION_LAYER_PIP,
+                                placeholderPipSpec()
+                            )
+                            _rtmpStatusLiveData.postValue("USB camera unplugged - showing placeholder")
+                            Log.i(TAG, "USB layer degraded to the placeholder; the stream continues")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to degrade the USB layer: ${e.message}", e)
+                        }
+                    }
+                }
+            })
+        }
+        uvcCameraHelper = helper
+
+        val devices = helper.deviceList
+        if (devices.isNullOrEmpty()) {
+            _streamerErrorLiveData.postValue("No USB camera connected")
+            Log.w(TAG, "No USB device found for the composition")
+            return
+        }
+
+        Log.i(TAG, "Selecting USB device for the composition: ${devices[0].deviceName}")
+        // Triggers the permission dialog when needed; onDeviceOpen follows either way.
+        helper.selectDevice(devices[0])
+    }
+
+    private fun isCompositionUsbLayerWanted(): Boolean =
+        _isCompositeSource.value == true &&
+                _compositionPipSource.value == CompositionPipSource.USB
+
+    private fun activeComposite(): ICompositeVideoSource? =
+        serviceStreamer?.videoInput?.sourceFlow?.value as? ICompositeVideoSource
+
+    /**
+     * One layer, as the composition bar and the layout editor need it.
+     */
+    data class CompositionLayerUi(
+        val id: String,
+        val label: String,
+        val rect: LayerRect,
+        val visible: Boolean,
+        val isPrimary: Boolean
+    )
+
+    private val compositionStore by lazy {
+        com.dimadesu.lifestreamer.composition.CompositionStore(application)
+    }
+
+    private var compositionSaveJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Persists the arranged layout, debounced so a drag does not hammer storage.
+     */
+    private fun scheduleCompositionSave() {
+        compositionSaveJob?.cancel()
+        compositionSaveJob = viewModelScope.launch {
+            delay(COMPOSITION_SAVE_DEBOUNCE_MS)
+            val layout = activeComposite()?.layoutFlow?.value ?: return@launch
+            compositionStore.save(
+                pipSourceName = (_compositionPipSource.value ?: CompositionPipSource.TEST_IMAGE).name,
+                rects = layout.layers.associate { it.id to it.rect },
+                hidden = layout.layers.filterNot { it.visible }.map { it.id }.toSet()
+            )
+        }
+    }
+
+    /**
+     * Puts a previously arranged layout back, if there is one and it still matches the layers.
+     */
+    private fun restoreSavedComposition(composite: ICompositeVideoSource) {
+        val saved = compositionStore.load() ?: return
+        var layout = composite.layoutFlow.value
+        var changed = false
+
+        layout.layers.forEach { layer ->
+            saved.rects[layer.id]?.let { rect ->
+                layout = layout.mapLayer(layer.id) {
+                    it.copy(rect = rect, visible = !saved.hidden.contains(layer.id))
+                }
+                changed = true
+            }
+        }
+
+        if (changed) {
+            composite.updateLayout(layout)
+            Log.i(TAG, "Restored the saved layout")
+        }
+    }
+
+    private val _compositionLayers = MutableLiveData<List<CompositionLayerUi>>(emptyList())
+    val compositionLayers: LiveData<List<CompositionLayerUi>> = _compositionLayers
+
+    private val _selectedCompositionLayerId = MutableLiveData<String?>(null)
+    val selectedCompositionLayerId: LiveData<String?> = _selectedCompositionLayerId
+
+    private val _isCompositionEditMode = MutableLiveData(false)
+    val isCompositionEditMode: LiveData<Boolean> = _isCompositionEditMode
+
+    private var layoutObserverJob: kotlinx.coroutines.Job? = null
+
+    fun setCompositionEditMode(enabled: Boolean) {
+        _isCompositionEditMode.postValue(enabled)
+    }
+
+    fun selectCompositionLayer(layerId: String?) {
+        _selectedCompositionLayerId.postValue(layerId)
+    }
+
+    private fun observeCompositionLayout(composite: ICompositeVideoSource) {
+        layoutObserverJob?.cancel()
+        layoutObserverJob = viewModelScope.launch {
+            composite.layoutFlow.collect { layout ->
+                _compositionLayers.postValue(
+                    layout.layers.sortedBy { it.z }.map { layer ->
+                        CompositionLayerUi(
+                            id = layer.id,
+                            label = layerLabel(layer.id),
+                            rect = layer.rect,
+                            visible = layer.visible,
+                            isPrimary = layer.id == layout.primaryLayer?.id
+                        )
+                    }
+                )
+            }
+        }
+    }
+
+    private fun layerLabel(layerId: String): String = when (layerId) {
+        COMPOSITION_LAYER_MAIN -> "Camera"
+        COMPOSITION_LAYER_PIP ->
+            _compositionPipSource.value?.label ?: "Layer 2"
+
+        else -> layerId
+    }
+
+    /**
+     * The hot path of a drag.
+     *
+     * Not a suspend function and it allocates nothing beyond the new layout: it is a single
+     * atomic store that the compositor picks up on its next frame, so it stays smooth at gesture
+     * rate even while streaming.
+     */
+    fun updateCompositionLayerRect(layerId: String, rect: LayerRect) {
+        activeComposite()?.updateLayer(layerId) { it.copy(rect = rect) }
+    }
+
+    /**
+     * Called once a drag ends. Snaps to the canvas edges and centre so hand-placed layers still
+     * line up.
+     */
+    fun commitCompositionLayerGeometry(layerId: String) {
+        val composite = activeComposite() ?: return
+        composite.updateLayer(layerId) { layer -> layer.copy(rect = snapped(layer.rect)) }
+        scheduleCompositionSave()
+    }
+
+    private fun snapped(rect: LayerRect): LayerRect {
+        val width = rect.width
+        val height = rect.height
+        var left = rect.left
+        var top = rect.top
+
+        if (left < SNAP_THRESHOLD) left = 0f
+        if (top < SNAP_THRESHOLD) top = 0f
+        if (left + width > 1f - SNAP_THRESHOLD) left = 1f - width
+        if (top + height > 1f - SNAP_THRESHOLD) top = 1f - height
+        if (kotlin.math.abs(left + width / 2f - 0.5f) < SNAP_THRESHOLD) left = 0.5f - width / 2f
+        if (kotlin.math.abs(top + height / 2f - 0.5f) < SNAP_THRESHOLD) top = 0.5f - height / 2f
+
+        return LayerRect(left, top, left + width, top + height)
+    }
+
+    val compositionPresets: List<LayoutPreset> get() = CompositionPresets.ALL
+
+    fun applyCompositionPreset(presetId: String) {
+        val composite = activeComposite() ?: return
+        val preset = CompositionPresets.ALL.firstOrNull { it.id == presetId } ?: return
+        composite.updateLayout(composite.layoutFlow.value.applyPreset(preset))
+        scheduleCompositionSave()
+        Log.i(TAG, "Applied layout ${preset.name}")
+    }
+
+    /**
+     * Makes the second layer the full-frame one and vice versa. Geometry only, so it is one tap
+     * and safe on air.
+     */
+    fun swapCompositionLayers() {
+        val composite = activeComposite() ?: return
+        val layers = composite.layoutFlow.value.layers.sortedBy { it.z }
+        if (layers.size < 2) {
+            _toastMessageLiveData.postValue("Nothing to swap yet")
+            return
+        }
+        val bottom = layers.first()
+        val top = layers.last()
+        composite.updateLayout(
+            composite.layoutFlow.value.swapLayerOrder(bottom.id, top.id)
+        )
+        Log.i(TAG, "Swapped ${bottom.id} and ${top.id}")
+    }
+
+    fun toggleCompositionLayerVisibility(layerId: String) {
+        activeComposite()?.updateLayer(layerId) { it.copy(visible = !it.visible) }
+        scheduleCompositionSave()
+    }
+
+    private var layerFailureJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Degrades a dead layer to the placeholder instead of dropping the stream.
+     *
+     * This is the per-layer version of [switchToUvcBitmapFallback]. Today a USB unplug or an RTMP
+     * drop sends the whole programme to the test card; under a composition only that one
+     * rectangle changes and the main camera keeps streaming.
+     */
+    private fun observeCompositionFailures(composite: ICompositeVideoSource) {
+        layerFailureJob?.cancel()
+        layerFailureJob = viewModelScope.launch {
+            composite.layerFailureFlow.collect { failure ->
+                Log.w(TAG, "Layer ${failure.layerId} failed: ${failure.reason}")
+
+                if (failure.layerId != COMPOSITION_LAYER_PIP || isPipOnPlaceholder) {
+                    return@collect
+                }
+
+                _rtmpStatusLiveData.postValue("${'$'}{_compositionPipSource.value?.label} lost - showing placeholder")
+                try {
+                    isPipOnPlaceholder = true
+                    composite.replaceLayerSource(COMPOSITION_LAYER_PIP, placeholderPipSpec())
+                    Log.i(TAG, "Picture-in-picture degraded to the placeholder")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to degrade the picture-in-picture: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    private var layoutCycleStep = 0
+
+    /**
+     * Steps through every built-in layout, then removes and re-adds the picture-in-picture layer.
+     *
+     * Temporary scaffolding until the layout UI exists, but it covers both kinds of live change on
+     * purpose. The preset steps are **geometry only**: no source restarts, no encoder
+     * reconfiguration, no surface reallocation — the compositor just reads the new layout on its
+     * next frame, which is why they are safe to tap on air. The last two steps are **structural**:
+     * they create and destroy a source and its GL input while the rest of the composition keeps
+     * streaming.
+     */
+    fun cycleLayout() {
+        val composite = activeComposite()
+        if (composite == null) {
+            Log.w(TAG, "cycleLayout: no composition active")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val presets = CompositionPresets.ALL
+                val step = layoutCycleStep
+                layoutCycleStep = (step + 1) % (presets.size + 2)
+
+                when {
+                    step < presets.size -> {
+                        val preset = presets[step]
+                        composite.updateLayout(composite.layoutFlow.value.applyPreset(preset))
+                        Log.i(TAG, "Layout preset: ${preset.name}")
+                    }
+
+                    step == presets.size -> {
+                        composite.removeLayer(COMPOSITION_LAYER_PIP)
+                        Log.i(TAG, "Removed the picture-in-picture layer")
+                    }
+
+                    else -> {
+                        composite.addLayer(pipLayerSpec())
+                        composite.updateLayout(
+                            composite.layoutFlow.value
+                                .applyPreset(CompositionPresets.PIP_BOTTOM_RIGHT)
+                        )
+                        Log.i(TAG, "Re-added the picture-in-picture layer")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to cycle layout: ${e.message}", e)
+                _streamerErrorLiveData.postValue("Layout change failed: ${e.message}")
+            }
+        }
+    }
+
     fun toggleScreenSource(mediaProjectionLauncher: androidx.activity.result.ActivityResultLauncher<Intent>? = null) {
         val currentStreamer = serviceStreamer
         if (currentStreamer == null) {
@@ -4766,6 +5443,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     companion object {
         private const val TAG = "PreviewViewModel"
+
+        /** Layer ids of the composition built by [toggleCompositeSource]. */
+        private const val COMPOSITION_LAYER_MAIN = "main"
+        private const val COMPOSITION_LAYER_PIP = "pip"
+
+        /** How close to an edge or the centre a dragged layer snaps, in canvas fractions. */
+        private const val SNAP_THRESHOLD = 0.02f
+
+        private const val COMPOSITION_SAVE_DEBOUNCE_MS = 500L
         
         /**
          * Helper to convert audio source int to readable name

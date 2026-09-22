@@ -28,6 +28,22 @@
             app:position="center"
             app:scaleMode="fit" />
 
+        <!--
+          The layout editor. Sized, pivoted and scaled exactly like the preview above, so a
+          normalized layer rectangle maps to a pixel by a plain multiply. GONE unless editing, so
+          it cannot swallow a touch meant for the preview.
+        -->
+        <com.dimadesu.lifestreamer.ui.components.CompositionOverlayView
+            android:id="@+id/compositionOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:elevation="5dp"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
         <!-- RTMP status message (centered) -->
         <TextView
             android:id="@+id/rtmpStatusText"
@@ -246,6 +262,15 @@
                     app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource}" />
 
                 <Button
+                    android:id="@+id/toggleCompositeButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="COMPOSE"
+                    android:minWidth="50dp"
+                    android:backgroundTint='@{viewmodel.isCompositeSource ? @color/active_button_green : @color/button_gray}'
+                    app:goneUnless="@{!viewmodel.isRtmpSource &amp;&amp; !viewmodel.isUvcSource &amp;&amp; !viewmodel.isScreenSource}" />
+
+                <Button
                     android:id="@+id/monitorAudioButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -426,6 +451,16 @@
                 android:paddingBottom="5dp" />
 
         </ScrollView>
+
+        <include
+            android:id="@+id/compositionBar"
+            layout="@layout/composition_bar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:layout_constraintBottom_toTopOf="@+id/liveButton"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent" />
 
         <ToggleButton
             android:id="@+id/liveButton"
