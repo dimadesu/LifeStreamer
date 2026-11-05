@@ -20,9 +20,18 @@ LifeStreamer is an Android app designed for IRL live streaming based on [StreamP
 
 ![LifeStreamer screenshot](docs/LifeStreamer-screenshot.png)
 
-Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create Git issues.
+Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create [Git issues](https://github.com/dimadesu/LifeStreamer/issues/).
 
-## Sources
+## LifeStreamerV2 features
+
+There are more features available in [LifeStreamerV2](https://github.com/dimadesu/LifeStreamerV2), which is a separate Git project for unstable experimental releases (GitHub releases only).
+
+- Dual camera support with picture-in-picture (PIP) and split view layouts.
+- Extra options for Android camera video source:
+  - Stabilisation: OIS/EIS/OFF.
+  - Noise reduction.
+
+## LifeStreamer sources
 
 ### Video
 
@@ -73,20 +82,6 @@ GitHub and Play Store releases are signed with different keys, which means they 
 My original motiviation for this project was to improve live streaming for action cameras like DJI Osmo Action 4 or GoPro.
 As of now (September 2025) they can only stream RTMP which usually diconnects a lot on unstable internet.
 I want to restream RTMP as SRT HEVC with great dynamic bitrate algorithm. That should fix it.
-
-## Why StreamPack
-
-Main features StreamPack provides out of the box that make sense to have as a base for this project:
-
-- Ability to stream via SRT or RTMP.
-- H.265 (aka HEVC) or H.264.
-- Basic dynamic bitrate algorithm for SRT (it calls it "bitrate regulator").
-- Foundation for implementing service to allow continue streaming in background with phone locked and screen off.
-- It's designed to be extendable with custom video and audio sources.
-
-### Demo apps
-
-StreamPack includes 2 great demo apps that can use phone cameras or screen recorder for live streaming.
 
 ## Recommended solutions to most issues
 
