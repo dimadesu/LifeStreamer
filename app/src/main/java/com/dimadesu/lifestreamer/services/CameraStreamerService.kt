@@ -608,8 +608,14 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         try { _currentBitrateFlow.tryEmit(null) } catch (_: Throwable) {}
         // Clear encoder stats flow so UI shows cleared state immediately
         try { _encoderStatsFlow.tryEmit(null) } catch (_: Throwable) {}
-        // Update service-side status
-        try { _serviceStreamStatus.tryEmit(StreamStatus.NOT_STREAMING) } catch (_: Throwable) {}
+        // Update service-side status (keep CONNECTING if reconnecting)
+        try {
+            if (_isReconnecting.value) {
+                _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING)
+            } else {
+                _serviceStreamStatus.tryEmit(StreamStatus.NOT_STREAMING)
+            }
+        } catch (_: Throwable) {}
         // Intentionally NOT calling stopSelf() here - let the service stay alive
     }
     
@@ -666,10 +672,22 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             try { _uptimeFlow.emit(formatUptime(uptimeMillis)) } catch (_: Throwable) {}
                             getString(R.string.status_streaming)
                         }
-                        StreamStatus.STARTING -> getString(R.string.status_starting)
-                        StreamStatus.CONNECTING -> getString(R.string.status_connecting)
-                        StreamStatus.ERROR -> getString(R.string.status_error)
-                        else -> getString(R.string.status_not_streaming)
+                        StreamStatus.STARTING -> {
+                            try { _uptimeFlow.emit(null) } catch (_: Throwable) {}
+                            getString(R.string.status_starting)
+                        }
+                        StreamStatus.CONNECTING -> {
+                            try { _uptimeFlow.emit(null) } catch (_: Throwable) {}
+                            getString(R.string.status_connecting)
+                        }
+                        StreamStatus.ERROR -> {
+                            try { _uptimeFlow.emit(null) } catch (_: Throwable) {}
+                            getString(R.string.status_error)
+                        }
+                        else -> {
+                            try { _uptimeFlow.emit(null) } catch (_: Throwable) {}
+                            getString(R.string.status_not_streaming)
+                        }
                     }
 
                     // Use the same label as the base content for notifications to avoid
@@ -837,13 +855,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             val reconnecting = _isReconnecting.value
             val streamingNow = streamer.isStreamingFlow.value
             
-            // If we're actively streaming, return STREAMING
-            if (streamingNow) return StreamStatus.STREAMING
-            
-            // If reconnecting, always show CONNECTING status
+            // If reconnecting, always show CONNECTING status until completeReconnection() clears it
             if (reconnecting) {
                 return StreamStatus.CONNECTING
             }
+            
+            // If we're actively streaming, return STREAMING
+            if (streamingNow) return StreamStatus.STREAMING
             
             // If not streaming but service status is CONNECTING, STARTING, or ERROR,
             // respect the service status (e.g., during reconnection attempts)
@@ -930,7 +948,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             Log.i(TAG, "Foreground service reinforced with all required service types")
-            try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
+            if (!_isReconnecting.value) {
+                try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
+            } else {
+                Log.d(TAG, "onStreamingStart: keeping CONNECTING status while reconnecting")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
             try { _serviceStreamStatus.tryEmit(StreamStatus.ERROR) } catch (_: Throwable) {}
@@ -1182,7 +1204,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
                 // Use NonCancellable for camera configuration to prevent "Broken pipe" errors
                 // if coroutine is cancelled during camera setup
-                withTimeout(5000) { // 5s open timeout
+                withTimeout(10000) { // 10s open timeout
                     // withContext(NonCancellable) {
                         currentStreamer.open(descriptor)
                     // }
@@ -1661,13 +1683,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     fun completeReconnection() {
         Log.i(TAG, "Reconnection completed successfully")
+        streamingStartTime = System.currentTimeMillis()
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = "Reconnected successfully!"
         
         // Clear success message after 3 seconds
         serviceScope.launch {
             delay(3000)
-            _reconnectionStatusMessage.value = null
+            if (!_isReconnecting.value) {
+                _reconnectionStatusMessage.value = null
+            }
         }
     }
     

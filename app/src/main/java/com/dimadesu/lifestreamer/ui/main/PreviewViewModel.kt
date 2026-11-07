@@ -820,7 +820,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
             // Add timeout to prevent hanging
             // Run on IO dispatcher to prevent blocking UI thread
-            withTimeout(5000) { // 5 second timeout
+            withTimeout(10000) { // 10 second timeout
                 withContext(kotlinx.coroutines.Dispatchers.IO) {
                     currentStreamer.open(descriptor)
                 }
