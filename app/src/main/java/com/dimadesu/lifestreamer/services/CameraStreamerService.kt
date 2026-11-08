@@ -21,7 +21,7 @@ import com.dimadesu.lifestreamer.R
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer
 import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
-import io.github.thibaultbee.streampack.core.pipelines.StreamerPipeline
+import io.github.thibaultbee.streampack.core.pipelines.AudioInputMode
 import io.github.thibaultbee.streampack.services.StreamerService
 import io.github.thibaultbee.streampack.services.utils.StreamerFactory
 import android.content.pm.ServiceInfo
@@ -64,7 +64,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         override fun create(context: Context): ISingleStreamer {
             return SingleStreamer(
                 context,
-                audioInputMode = StreamerPipeline.AudioInputMode.PUSH
+                audioInputMode = AudioInputMode.PUSH
             )
         }
     },

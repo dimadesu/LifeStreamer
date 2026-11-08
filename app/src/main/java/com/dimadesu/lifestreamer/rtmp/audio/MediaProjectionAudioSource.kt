@@ -11,8 +11,10 @@ import android.os.Process
 import androidx.annotation.RequiresApi
 import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
 import io.github.thibaultbee.streampack.core.elements.interfaces.Releasable
+import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSource
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
+import io.github.thibaultbee.streampack.core.utils.InternalStreamPackApi
 
 /**
  * App-local MediaProjection-based audio source.
@@ -58,11 +60,12 @@ class MediaProjectionAudioSource(
     // Behavior (configure/start/stop/fill/get) is provided by AudioRecordSource.
 }
 
+@OptIn(InternalStreamPackApi::class)
 @RequiresApi(Build.VERSION_CODES.Q)
 class MediaProjectionAudioSourceFactory(
     private val mediaProjection: MediaProjection,
     private val captureFullPhone: Boolean = false
-) : IAudioSourceInternal.Factory {
+) : IAudioSource.Factory {
     override suspend fun create(context: Context): IAudioSourceInternal {
         return MediaProjectionAudioSource(mediaProjection, captureFullPhone)
     }
