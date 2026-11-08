@@ -111,21 +111,35 @@ dependencies {
 afterEvaluate {
     tasks.named("assembleRelease").configure {
         doLast {
-            val originalApk = file("${layout.buildDirectory.get()}/outputs/apk/release/app-release.apk")
-            if (originalApk.exists()) {
-                val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.apk"
-                val newFile = File(originalApk.parent, newName)
-                Files.copy(originalApk.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.apk"
+            val injectedDir = project.findProperty("android.injected.apk.location")?.toString()
+            listOfNotNull(
+                injectedDir?.let { file("$it/release/app-release.apk") },
+                injectedDir?.let { file("$it/app-release.apk") },
+                file("${projectDir}/release/app-release.apk"),
+                file("${layout.buildDirectory.get()}/outputs/apk/release/app-release.apk"),
+            ).distinct().forEach { originalApk ->
+                if (originalApk.exists()) {
+                    val newFile = File(originalApk.parent, newName)
+                    Files.copy(originalApk.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         }
     }
     tasks.named("bundleRelease").configure {
         doLast {
-            val originalBundle = file("${projectDir}/release/app-release.aab")
-            if (originalBundle.exists()) {
-                val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.aab"
-                val newFile = File(originalBundle.parent, newName)
-                Files.copy(originalBundle.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.aab"
+            val injectedDir = project.findProperty("android.injected.apk.location")?.toString()
+            listOfNotNull(
+                injectedDir?.let { file("$it/release/app-release.aab") },
+                injectedDir?.let { file("$it/app-release.aab") },
+                file("${projectDir}/release/app-release.aab"),
+                file("${layout.buildDirectory.get()}/outputs/bundle/release/app-release.aab"),
+            ).distinct().forEach { originalBundle ->
+                if (originalBundle.exists()) {
+                    val newFile = File(originalBundle.parent, newName)
+                    Files.copy(originalBundle.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         }
     }
