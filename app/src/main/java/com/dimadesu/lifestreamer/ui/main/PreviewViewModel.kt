@@ -317,9 +317,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
 
     /**
      * Test bitmap for [BitmapSource].
+     * Decoded with inScaled = false so Android doesn't upscale the 1920x1080 resource
+     * by 3x-4x based on screen density.
      */
     private val testBitmap =
-        BitmapFactory.decodeResource(application.resources, R.drawable.img_test)
+        BitmapFactory.decodeResource(
+            application.resources,
+            R.drawable.img_test,
+            BitmapFactory.Options().apply { inScaled = false }
+        )
 
     /**
      * UVC Camera helper for USB camera access
