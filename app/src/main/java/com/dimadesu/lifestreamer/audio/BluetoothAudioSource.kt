@@ -14,11 +14,13 @@ import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.utils.dataStore
 import kotlinx.coroutines.flow.first
 import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
+import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSource
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.audio.IAudioFrameSourceInternal
 import io.github.thibaultbee.streampack.core.elements.interfaces.SuspendConfigurable
 import io.github.thibaultbee.streampack.core.elements.interfaces.SuspendStreamable
 import io.github.thibaultbee.streampack.core.elements.interfaces.Releasable
+import io.github.thibaultbee.streampack.core.utils.InternalStreamPackApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -35,6 +37,7 @@ import kotlin.coroutines.resume
  * when building `AudioRecord` by using reflection to call `setPreferredDevice` on the builder
  * when supported.
  */
+@OptIn(InternalStreamPackApi::class)
 class BluetoothAudioSource(
     private val context: Context,
     private val preferredDevice: AudioDeviceInfo?,
@@ -243,7 +246,8 @@ class BluetoothAudioSource(
  * Factory for `BluetoothAudioSource` that matches `IAudioSourceInternal.Factory`.
  * Reads audio source type from DataStore settings.
  */
-class BluetoothAudioSourceFactory(private val device: AudioDeviceInfo?) : IAudioSourceInternal.Factory {
+@OptIn(InternalStreamPackApi::class)
+class BluetoothAudioSourceFactory(private val device: AudioDeviceInfo?) : IAudioSource.Factory {
     
     companion object {
         private const val TAG = "BluetoothAudioSourceFactory"

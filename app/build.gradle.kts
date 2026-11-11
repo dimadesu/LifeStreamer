@@ -5,8 +5,7 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    id("kotlin-kapt")
+    alias(libs.plugins.legacy.kapt)
 }
 
 android {
@@ -17,7 +16,7 @@ android {
 
         minSdk = 24
         targetSdk = 36
-        compileSdk = 36
+        compileSdk = 37
 
         versionCode = 45
         versionName = "1.46.4"
@@ -56,19 +55,9 @@ android {
         }
     }
     
-    applicationVariants.all {
-        outputs.all {
-            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
-                "LifeStreamer-v${versionName}-${name}.apk"
-        }
-    }
-    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
     }
     buildFeatures {
         viewBinding = true
@@ -118,15 +107,39 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 }
 
-// Custom AAB output names - create copy so Android Studio can still locate original
+// Custom APK and AAB output names - create copy so Android Studio can still locate original
 afterEvaluate {
+    tasks.named("assembleRelease").configure {
+        doLast {
+            val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.apk"
+            val injectedDir = project.findProperty("android.injected.apk.location")?.toString()
+            listOfNotNull(
+                injectedDir?.let { file("$it/release/app-release.apk") },
+                injectedDir?.let { file("$it/app-release.apk") },
+                file("${projectDir}/release/app-release.apk"),
+                file("${layout.buildDirectory.get()}/outputs/apk/release/app-release.apk"),
+            ).distinct().forEach { originalApk ->
+                if (originalApk.exists()) {
+                    val newFile = File(originalApk.parent, newName)
+                    Files.copy(originalApk.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+        }
+    }
     tasks.named("bundleRelease").configure {
         doLast {
-            val originalBundle = file("${projectDir}/release/app-release.aab")
-            if (originalBundle.exists()) {
-                val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.aab"
-                val newFile = File(originalBundle.parent, newName)
-                Files.copy(originalBundle.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            val newName = "LifeStreamer-v${android.defaultConfig.versionName}-release.aab"
+            val injectedDir = project.findProperty("android.injected.apk.location")?.toString()
+            listOfNotNull(
+                injectedDir?.let { file("$it/release/app-release.aab") },
+                injectedDir?.let { file("$it/app-release.aab") },
+                file("${projectDir}/release/app-release.aab"),
+                file("${layout.buildDirectory.get()}/outputs/bundle/release/app-release.aab"),
+            ).distinct().forEach { originalBundle ->
+                if (originalBundle.exists()) {
+                    val newFile = File(originalBundle.parent, newName)
+                    Files.copy(originalBundle.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         }
     }

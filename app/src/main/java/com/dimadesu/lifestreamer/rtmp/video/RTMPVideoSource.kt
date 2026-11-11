@@ -10,8 +10,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.thibaultbee.streampack.core.elements.processing.video.source.ISourceInfoProvider
+import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.VideoSourceConfig
+import io.github.thibaultbee.streampack.core.utils.InternalStreamPackApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -26,7 +28,9 @@ import io.github.thibaultbee.streampack.core.elements.processing.video.outputs.S
 import io.github.thibaultbee.streampack.core.elements.utils.av.video.DynamicRangeProfile
 import io.github.thibaultbee.streampack.core.elements.utils.time.Timebase
 
+@OptIn(InternalStreamPackApi::class)
 class RTMPVideoSource (
+    private val context: Context,
     private val exoPlayer: ExoPlayer,
     private val dispatcherProvider: io.github.thibaultbee.streampack.core.pipelines.IVideoDispatcherProvider
 ) : AbstractPreviewableSource(), IVideoSourceInternal {
@@ -599,7 +603,7 @@ class RTMPVideoSource (
 
                 // Create surface processor with SDR profile (most RTMP streams are SDR)
                 val processorFactory = DefaultSurfaceProcessorFactory()
-                surfaceProcessor = processorFactory.create(DynamicRangeProfile.sdr, dispatcherProvider)
+                surfaceProcessor = processorFactory.create(context, DynamicRangeProfile.sdr, dispatcherProvider)
 
                 // Create input surface that ExoPlayer will render to
                 val width = cachedFormatWidth.get().takeIf { it > 0 } ?: 1920
@@ -726,14 +730,15 @@ class RTMPVideoSource (
         }
     }
 
+    @OptIn(InternalStreamPackApi::class)
     class Factory(
         private val exoPlayer: ExoPlayer,
-    ) : IVideoSourceInternal.Factory {
+    ) : IVideoSource.Factory {
         override suspend fun create(
             context: Context,
             dispatcherProvider: io.github.thibaultbee.streampack.core.pipelines.IVideoDispatcherProvider
         ): IVideoSourceInternal {
-            val customSrc = RTMPVideoSource(exoPlayer, dispatcherProvider)
+            val customSrc = RTMPVideoSource(context, exoPlayer, dispatcherProvider)
             return customSrc
         }
 
