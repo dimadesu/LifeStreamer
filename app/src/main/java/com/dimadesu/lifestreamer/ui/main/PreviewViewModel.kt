@@ -977,7 +977,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             val currentAudioSource = currentStreamer.audioInput.sourceFlow.value
             val isMicBasedAudio = currentAudioSource != null && currentAudioSource !is IMediaProjectionSource
             if (isMicBasedAudio) {
-                Log.i(TAG, "doStartStream: Mic-based audio detected (${currentAudioSource?.javaClass?.simpleName}), triggering BT activation")
+                Log.i(TAG, "doStartStream: Mic-based audio detected (${currentAudioSource.javaClass.simpleName}), triggering BT activation")
                 service?.triggerBluetoothMicActivation()
             } else {
                 Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
