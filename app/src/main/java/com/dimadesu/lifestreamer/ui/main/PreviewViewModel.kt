@@ -974,10 +974,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             // Trigger BT mic activation if using mic-based audio (not MediaProjection)
             // This covers Camera, UVC, and any fallback to mic scenarios
             // Use type checking instead of class name to avoid R8 obfuscation
-            val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val currentAudioSource = currentStreamer.audioInput.sourceFlow.value
             val isMicBasedAudio = currentAudioSource != null && currentAudioSource !is IMediaProjectionSource
             if (isMicBasedAudio) {
-                Log.i(TAG, "doStartStream: Mic-based audio detected (${currentAudioSource?.javaClass?.simpleName}), triggering BT activation")
+                Log.i(TAG, "doStartStream: Mic-based audio detected (${currentAudioSource.javaClass.simpleName}), triggering BT activation")
                 service?.triggerBluetoothMicActivation()
             } else {
                 Log.i(TAG, "doStartStream: MediaProjection audio detected, skipping BT activation")
@@ -1042,8 +1042,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * @return Pair of (isValid, errorMessage). If valid, errorMessage is null.
      */
     private fun validateSourcesConfigured(streamer: SingleStreamer): Pair<Boolean, String?> {
-        val videoSource = streamer.videoInput?.sourceFlow?.value
-        val audioSource = streamer.audioInput?.sourceFlow?.value
+        val videoSource = streamer.videoInput.sourceFlow.value
+        val audioSource = streamer.audioInput.sourceFlow.value
         
         return if (videoSource == null || audioSource == null) {
             val errorMsg = "video source=${videoSource != null}, audio source=${audioSource != null}"
@@ -1064,7 +1064,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private suspend fun setAudioSourceBasedOnVideoSource() {
         val currentStreamer = serviceStreamer ?: return
-        val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val currentVideoSource = currentStreamer.videoInput.sourceFlow.value
         // UVC bitmap fallback keeps mic audio — only RTMP (live or its bitmap fallback) uses MediaProjection.
         val isUvcBitmapFallback = currentVideoSource is IBitmapSource && (_userToggledUvc.value == true)
         val isRtmpOrBitmap = currentVideoSource is RTMPVideoSource || (currentVideoSource is IBitmapSource && !isUvcBitmapFallback)
@@ -1353,7 +1353,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "Streamer is already streaming - skipping source initialization to avoid conflicts")
             observeStreamerFlows()
             // Set initial audio source indicator based on current source
-            val initialAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val initialAudioSource = currentStreamer.audioInput.sourceFlow.value
             val audioSourceLabel = getAudioSourceLabel(initialAudioSource)
             _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
             Log.i(TAG, "Initial audio source (already streaming): $audioSourceLabel (${initialAudioSource?.javaClass?.simpleName})")
@@ -1389,7 +1389,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         observeStreamerFlows()
 
         // Set initial audio source indicator based on current source
-        val initialAudioSource = currentStreamer.audioInput?.sourceFlow?.value
+        val initialAudioSource = currentStreamer.audioInput.sourceFlow.value
         val audioSourceLabel = getAudioSourceLabel(initialAudioSource)
         _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
         Log.i(TAG, "Initial audio source: $audioSourceLabel (${initialAudioSource?.javaClass?.simpleName})")
@@ -1402,14 +1402,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val currentStreamer = serviceStreamer ?: return
 
         viewModelScope.launch {
-            currentStreamer.videoInput?.sourceFlow?.collect {
+            currentStreamer.videoInput.sourceFlow.collect {
                 notifySourceChanged()
             }
         }
 
         // Observe audio source changes to update the audio source indicator
         viewModelScope.launch {
-            currentStreamer.audioInput?.sourceFlow?.collect { audioSource ->
+            currentStreamer.audioInput.sourceFlow.collect { audioSource ->
                 val audioSourceLabel = getAudioSourceLabel(audioSource)
                 _audioSourceIndicatorLiveData.postValue(audioSourceLabel)
                 Log.i(TAG, "Audio source changed: $audioSourceLabel (${audioSource?.javaClass?.simpleName})")
@@ -1792,10 +1792,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
 
             // Check if sources are configured
-            val hasVideoSource = currentStreamer.videoInput?.sourceFlow?.value != null
-            val hasAudioSource = currentStreamer.audioInput?.sourceFlow?.value != null
-            val videoSource = currentStreamer.videoInput?.sourceFlow?.value
-            val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+            val hasVideoSource = currentStreamer.videoInput.sourceFlow.value != null
+            val hasAudioSource = currentStreamer.audioInput.sourceFlow.value != null
+            val videoSource = currentStreamer.videoInput.sourceFlow.value
+            val audioSource = currentStreamer.audioInput.sourceFlow.value
 
             Log.i(TAG, "Source check before stream start:")
             Log.i(TAG, "  hasVideoSource: $hasVideoSource (${videoSource?.javaClass?.simpleName})")
@@ -1817,8 +1817,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 kotlinx.coroutines.delay(500)
                 
                 // Re-check after initialization
-                val videoAfterInit = currentStreamer.videoInput?.sourceFlow?.value
-                val audioAfterInit = currentStreamer.audioInput?.sourceFlow?.value
+                val videoAfterInit = currentStreamer.videoInput.sourceFlow.value
+                val audioAfterInit = currentStreamer.audioInput.sourceFlow.value
                 Log.i(TAG, "After initialization - Video: ${videoAfterInit?.javaClass?.simpleName}, Audio: ${audioAfterInit?.javaClass?.simpleName}")
                 
                 if (videoAfterInit == null || audioAfterInit == null) {
@@ -2507,8 +2507,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 
                 // During reconnection, DON'T reset audio source - it may invalidate MediaProjection token
                 // The audio source is already correctly configured from before the disconnection
-                val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value!!
-                val currentAudioSource = currentStreamer.audioInput?.sourceFlow?.value!!
+                val currentVideoSource = currentStreamer.videoInput.sourceFlow.value!!
+                val currentAudioSource = currentStreamer.audioInput.sourceFlow.value!!
                 
                 Log.d(TAG, "Reconnection video source: ${currentVideoSource.javaClass.simpleName}")
                 Log.d(TAG, "Reconnection audio source: ${currentAudioSource.javaClass.simpleName} (keeping existing)")
@@ -2588,7 +2588,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * This allows RTMP playback to recover in parallel with SRT publishing reconnection.
      */
     private suspend fun ensureRtmpRetryRunning(currentStreamer: SingleStreamer) {
-        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val videoSource = currentStreamer.videoInput.sourceFlow.value
         val activeIndex = _activeRtmpIndex.value
         if (videoSource is IBitmapSource && activeIndex != null && rtmpRetryJob?.isActive != true) {
             Log.i(TAG, "Starting RTMP source retry in parallel with SRT reconnection (index=$activeIndex)")
@@ -2632,10 +2632,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
         val streamer = serviceStreamer ?: return
-        val audioProcessor = streamer.audioInput?.processor ?: run {
-            Log.w(TAG, "Audio processor not available for level monitoring")
-            return
-        }
+        val audioProcessor = streamer.audioInput.processor
         
         // Remove any previous effect
         vuMeterEffect?.let { audioProcessor.remove(it) }
@@ -2695,7 +2692,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         startCaptureJob?.cancel()
         startCaptureJob = viewModelScope.launch {
             try {
-                val audioInput = streamer.audioInput ?: return@launch
+                val audioInput = streamer.audioInput
                 audioInput.sourceFlow.filterNotNull().first()     // source is set
                 streamer.audioConfigFlow.filterNotNull().first()   // configure() has been called on source
                 audioInput.startCapture()
@@ -2823,7 +2820,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
 
-        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val videoSource = currentStreamer.videoInput.sourceFlow.value
         if (videoSource is ICameraSource) {
             viewModelScope.launch(defaultDispatcher) {
                 videoSourceMutex.withLock {
@@ -3326,12 +3323,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Get FOV info
                         val focalArr = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                        val physicalSize = characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) as? android.util.SizeF
+                        val physicalSize = characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
                         val fovLabel = if (focalArr != null && focalArr.isNotEmpty()) {
                             val firstFocal = focalArr.first()
                             if (physicalSize != null) {
                                 val sensorDiag = kotlin.math.sqrt(physicalSize.width * physicalSize.width + physicalSize.height * physicalSize.height)
-                                val fovRad = 2.0 * kotlin.math.atan((sensorDiag / (2.0 * firstFocal)).toDouble())
+                                val fovRad = 2.0 * kotlin.math.atan(sensorDiag / (2.0 * firstFocal))
                                 val fovDeg = (fovRad * 180.0 / kotlin.math.PI).toInt()
                                 "${fovDeg}°"
                             } else {
@@ -3367,7 +3364,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
 
-        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val videoSource = currentStreamer.videoInput.sourceFlow.value
         // Prefer the streamer's own state flow for an up-to-date streaming state.
         val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
         val currentActiveIndex = _activeRtmpIndex.value
@@ -3646,7 +3643,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             return
         }
 
-        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val videoSource = currentStreamer.videoInput.sourceFlow.value
 
         viewModelScope.launch {
             try {
@@ -3720,7 +3717,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     
                                     // Check if we should auto-reconnect to UVC after a disconnect
                                     val isUvcToggleOn = _userToggledUvc.value ?: false
-                                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val currentVideoSource = currentStreamer.videoInput.sourceFlow.value
                                     val isOnBitmapFallback = currentVideoSource is IBitmapSource
                                     
                                     if (isUvcToggleOn && isOnBitmapFallback && !uvcReconnectionInProgress) {
@@ -3739,7 +3736,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     Log.d(TAG, "UVC device opened (isFirstOpen=$isFirstOpen, alreadySwitched=$alreadySwitched, reconnecting=$uvcReconnectionInProgress)")
                                     
                                     // Check if we're reconnecting after a disconnect (on bitmap fallback)
-                                    val currentVideoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val currentVideoSource = currentStreamer.videoInput.sourceFlow.value
                                     val isOnBitmapFallback = currentVideoSource is IBitmapSource
                                     val isUvcToggleOn = _userToggledUvc.value ?: false
                                     
@@ -3820,7 +3817,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                     Log.i(TAG, "UVC camera opened and ready")
                                     // Camera is now ready - notify the UvcVideoSource so it can
                                     // re-add surfaces and start preview properly
-                                    val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+                                    val videoSource = currentStreamer.videoInput.sourceFlow.value
                                     if (videoSource is UvcVideoSource) {
                                         videoSource.onCameraReady()
                                     } else {
@@ -3975,11 +3972,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         get() = serviceReadyFlow.flatMapLatest { ready ->
             if (ready && serviceStreamer != null) {
                 Log.d(TAG, "isCameraSource: serviceStreamer available, checking video source")
-                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                serviceStreamer!!.videoInput.sourceFlow.map { source ->
                     val isCam = source is ICameraSource
                     Log.d(TAG, "isCameraSource: video source = $source, isCameraSource = $isCam")
                     isCam
-                } ?: kotlinx.coroutines.flow.flowOf(false)
+                }
             } else {
                 Log.d(TAG, "isCameraSource: service not ready or serviceStreamer null, returning false")
                 kotlinx.coroutines.flow.flowOf(false)
@@ -4086,7 +4083,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     
     private suspend fun switchToMediaProjectionVideoSource(currentStreamer: SingleStreamer, projection: MediaProjection) {
         removeBitrateRegulatorIfNeeded()
-        val videoSource = currentStreamer.videoInput?.sourceFlow?.value
+        val videoSource = currentStreamer.videoInput.sourceFlow.value
         if (videoSource is ICameraSource) {
             lastUsedCameraId = videoSource.cameraId
         }
@@ -4185,11 +4182,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         get() = serviceReadyFlow.flatMapLatest { ready ->
             if (ready && serviceStreamer != null) {
                 Log.d(TAG, "isRtmpOrBitmapSource: serviceStreamer available, checking video source")
-                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                serviceStreamer!!.videoInput.sourceFlow.map { source ->
                     val isNotCamera = source !is ICameraSource && source != null
                     Log.d(TAG, "isRtmpOrBitmapSource: video source = $source, isRtmpOrBitmapSource = $isNotCamera")
                     isNotCamera
-                } ?: kotlinx.coroutines.flow.flowOf(false)
+                }
             } else {
                 Log.d(TAG, "isRtmpOrBitmapSource: service not ready or serviceStreamer null, returning false")
                 kotlinx.coroutines.flow.flowOf(false)
@@ -4203,9 +4200,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     val isActualRtmpSource: LiveData<Boolean>
         get() = serviceReadyFlow.flatMapLatest { ready ->
             if (ready && serviceStreamer != null) {
-                serviceStreamer!!.videoInput?.sourceFlow?.map { source ->
+                serviceStreamer!!.videoInput.sourceFlow.map { source ->
                     source is RTMPVideoSource
-                } ?: kotlinx.coroutines.flow.flowOf(false)
+                }
             } else {
                 kotlinx.coroutines.flow.flowOf(false)
             }
@@ -4629,7 +4626,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
 
                 // Determine audio source type using type checking instead of class names
-                val audioSource = currentStreamer.audioInput?.sourceFlow?.value
+                val audioSource = currentStreamer.audioInput.sourceFlow.value
                 val audioSourceType = when {
                     audioSource is com.dimadesu.lifestreamer.audio.BluetoothAudioSource -> "BLUETOOTH"
                     audioSource is IMediaProjectionSource -> "MEDIA PROJECTION"
