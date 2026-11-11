@@ -3323,12 +3323,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         // Get FOV info
                         val focalArr = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                        val physicalSize = characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) as? android.util.SizeF
+                        val physicalSize = characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
                         val fovLabel = if (focalArr != null && focalArr.isNotEmpty()) {
                             val firstFocal = focalArr.first()
                             if (physicalSize != null) {
                                 val sensorDiag = kotlin.math.sqrt(physicalSize.width * physicalSize.width + physicalSize.height * physicalSize.height)
-                                val fovRad = 2.0 * kotlin.math.atan((sensorDiag / (2.0 * firstFocal)).toDouble())
+                                val fovRad = 2.0 * kotlin.math.atan(sensorDiag / (2.0 * firstFocal))
                                 val fovDeg = (fovRad * 180.0 / kotlin.math.PI).toInt()
                                 "${fovDeg}°"
                             } else {
