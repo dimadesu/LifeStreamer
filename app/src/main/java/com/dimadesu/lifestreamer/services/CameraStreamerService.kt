@@ -535,7 +535,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             // This allows ViewModel to cancel reconnection timer immediately
                             _userStoppedFromNotification.emit(Unit)
                             
-                            streamer?.stopStream()
+                            streamer.stopStream()
 
                             // Stop embedded SRTLA proxy if it was running for this stream
                             val srtlaConfig = storageRepository.srtlaConfigFlow.first()
@@ -549,7 +549,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             // Close the endpoint to allow fresh connection on next start
                             try {
                                 withTimeout(3000) {
-                                    streamer?.close()
+                                    streamer.close()
                                 }
                                 Log.i(TAG, "Endpoint closed after stop from notification")
                             } catch (e: Exception) {
@@ -1372,7 +1372,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      *        before the ViewModel switches the stream source to MediaProjection.
      */
     fun applyBluetoothPolicy(enabled: Boolean, skipPassthroughRestart: Boolean = false, forcePassthroughRestart: Boolean = false) {
-        val isStreaming = streamer?.isStreamingFlow?.value == true
+        val isStreaming = streamer.isStreamingFlow.value
         val passthroughWasRunning = _isPassthroughRunning.value
         
         // Check if using mic-based audio (not MediaProjection) - BT mic only applies to mic-based audio
