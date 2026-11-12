@@ -54,12 +54,12 @@ private inline fun <reified T> key(key: String, isCache: Boolean = true): Prefer
 @Suppress("UNCHECKED_CAST")
 private fun <T> key(key: String, typeClass: Class<T>, isCache: Boolean = true): Preferences.Key<T> =
     (keyMap[key] ?: when (typeClass) {
-        Integer::class.java, Int::class.java -> intPreferencesKey(key)
+        Int::class.javaObjectType, Int::class.java -> intPreferencesKey(key)
         Long::class.java -> longPreferencesKey(key)
         Float::class.java -> floatPreferencesKey(key)
         Double::class.java -> doublePreferencesKey(key)
         String::class.java -> stringPreferencesKey(key)
-        Boolean::class.java, java.lang.Boolean::class.java -> booleanPreferencesKey(key)
+        Boolean::class.java, Boolean::class.javaObjectType -> booleanPreferencesKey(key)
         else -> throw RuntimeException("Unknown class：${typeClass.name}")
     }.also {
         if (isCache) keyMap[key] = it
