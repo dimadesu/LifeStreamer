@@ -157,7 +157,7 @@ class BelaboxSrtBelaRegulator(
         updateSendBufferSizeAverage(sendBufferSize)
         updateSendBufferSizeJitter(sendBufferSize)
 
-        val rtt = rttMs.toDouble()
+        val rtt = rttMs
         updateRttAverage(rtt)
         val deltaRtt = updateAverageRttDelta(rtt)
         updateRttMin(rtt)

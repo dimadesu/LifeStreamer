@@ -374,11 +374,9 @@ class DataStoreRepository(
                         when (endpointType) {
                             EndpointType.SRT, EndpointType.SRTLA -> R.string.srt_server_video_min_bitrate_key
                             EndpointType.RTMP -> R.string.rtmp_server_video_min_bitrate_key
-                            else -> return@map null
                         }
                     )
-                )]?.toInt()
-                    ?.times(1000)
+                )]?.times(1000)
                     ?: 300000
             val videoMaxBitrate =
                 preferences[intPreferencesKey(
@@ -386,11 +384,9 @@ class DataStoreRepository(
                         when (endpointType) {
                             EndpointType.SRT, EndpointType.SRTLA -> R.string.srt_server_video_target_bitrate_key
                             EndpointType.RTMP -> R.string.rtmp_server_video_target_bitrate_key
-                            else -> return@map null
                         }
                     )
-                )]?.toInt()
-                    ?.times(1000)
+                )]?.times(1000)
                     ?: 10000000
             BitrateRegulatorConfig(
                 videoBitrateRange = Range(videoMinBitrate, videoMaxBitrate)

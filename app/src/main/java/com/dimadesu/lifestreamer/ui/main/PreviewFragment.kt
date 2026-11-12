@@ -19,7 +19,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraCharacteristics
-import android.util.SizeF
 import kotlin.math.atan
 import kotlin.math.sqrt
 import kotlin.math.PI
@@ -593,7 +592,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         val rotation = if (fixedRotation != null) {
             fixedRotation
         } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            requireContext().display?.rotation ?: android.view.Surface.ROTATION_0
+            requireContext().display.rotation
         } else {
             @Suppress("DEPRECATION")
             requireActivity().windowManager.defaultDisplay.rotation
@@ -748,11 +747,11 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         // the Activity from rotating when returning from background during streaming.
         // Use the Service's saved orientation as the source of truth, since Fragment member
         // variables can be reset during lifecycle transitions.
-        val isInStreamingProcess = previewViewModel.streamStatus.value?.let { status ->
+        val isInStreamingProcess = previewViewModel.streamStatus.value.let { status ->
             status == com.dimadesu.lifestreamer.models.StreamStatus.STARTING ||
             status == com.dimadesu.lifestreamer.models.StreamStatus.CONNECTING ||
             status == com.dimadesu.lifestreamer.models.StreamStatus.STREAMING
-        } ?: false
+        }
         
         if (isInStreamingProcess) {
             // Get saved orientation from Service (source of truth)
@@ -994,7 +993,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                 // provided on all devices, and focal length values alone are often
                 // the most consistently available data we can show.
                 val focalArr = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                val physicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) as? SizeF
+                val physicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
                 val fovLabel = if (focalArr != null && focalArr.isNotEmpty()) {
                     // Prefer showing diagonal FOV when sensor physical size is available.
                     val firstFocal = focalArr.first()
@@ -1002,7 +1001,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
                     if (physicalSize != null) {
                         val sensorDiag = sqrt(physicalSize.width * physicalSize.width + physicalSize.height * physicalSize.height)
                         // diagonal FOV in degrees = 2 * atan(sensorDiag / (2 * focal))
-                        val fovRad = 2.0 * atan((sensorDiag / (2.0 * firstFocal)).toDouble())
+                        val fovRad = 2.0 * atan(sensorDiag / (2.0 * firstFocal))
                         val fovDeg = (fovRad * 180.0 / PI).toInt()
                         "${fovDeg}°"
                     } else {

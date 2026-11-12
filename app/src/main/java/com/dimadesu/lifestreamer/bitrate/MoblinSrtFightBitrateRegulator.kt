@@ -95,7 +95,7 @@ class MoblinSrtFightBitrateRegulator(
             return
         }
 
-        val rttMs = stats.msRTT.toDouble()
+        val rttMs = stats.msRTT
         val packetsInFlight = stats.pktFlightSize.toDouble()
         updateTransportBitrate(stats.byteSentTotal)
         
