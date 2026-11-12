@@ -318,20 +318,27 @@ public class UvcTestActivity extends AppCompatActivity {
         public void onDeviceOpen(UsbDevice device, boolean isFirstOpen) {
             if (DEBUG) Log.v(TAG, "onDeviceOpen:device=" + device.getDeviceName());
 
-            mCameraHelper.openCamera(getSavedPreviewSize());
+            if (mCameraHelper != null) {
+                mCameraHelper.openCamera(getSavedPreviewSize());
 
-            mCameraHelper.setButtonCallback(new IButtonCallback() {
-                @Override
-                public void onButton(int button, int state) {
-                    Toast.makeText(UvcTestActivity.this, "onButton(button=" + button + "; " +
-                            "state=" + state + ")", Toast.LENGTH_SHORT).show();
-                }
-            });
+                mCameraHelper.setButtonCallback(new IButtonCallback() {
+                    @Override
+                    public void onButton(int button, int state) {
+                        Toast.makeText(UvcTestActivity.this, "onButton(button=" + button + "; " +
+                                "state=" + state + ")", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
         }
 
         @Override
         public void onCameraOpen(UsbDevice device) {
             if (DEBUG) Log.v(TAG, "onCameraOpen:device=" + device.getDeviceName());
+
+            if (mCameraHelper == null) {
+                return;
+            }
+
             mCameraHelper.startPreview();
 
             // After connecting to the camera, you can get preview size of the camera
