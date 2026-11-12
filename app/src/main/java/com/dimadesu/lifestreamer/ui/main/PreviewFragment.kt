@@ -592,7 +592,7 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
         val rotation = if (fixedRotation != null) {
             fixedRotation
         } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            requireContext().display.rotation
+            requireActivity().display?.rotation ?: android.view.Surface.ROTATION_0
         } else {
             @Suppress("DEPRECATION")
             requireActivity().windowManager.defaultDisplay.rotation
