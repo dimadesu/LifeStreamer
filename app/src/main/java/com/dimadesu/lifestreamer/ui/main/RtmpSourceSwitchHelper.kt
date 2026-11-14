@@ -1,12 +1,16 @@
 package com.dimadesu.lifestreamer.ui.main
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.extractor.DefaultExtractorsFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -19,12 +23,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
-import android.media.projection.MediaProjection
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
-import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionAudioSourceFactory
+import com.dimadesu.lifestreamer.rtmp.audio.ExoPlayerAudioSourceFactory
+import com.dimadesu.lifestreamer.rtmp.audio.RtmpAudioBridge
 import com.dimadesu.lifestreamer.rtmp.video.RTMPVideoSource
 import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
-import com.dimadesu.lifestreamer.rtmp.audio.MediaProjectionHelper
 import com.dimadesu.lifestreamer.player.SrtDataSourceFactory
 import com.dimadesu.lifestreamer.player.TsOnlyExtractorFactory
 import kotlinx.coroutines.isActive
@@ -52,7 +55,22 @@ internal object RtmpSourceSwitchHelper {
                 )
                 .build()
 
+            val renderersFactory = object : DefaultRenderersFactory(application) {
+                override fun buildAudioSink(
+                    context: Context,
+                    enableFloatOutput: Boolean,
+                    enableAudioTrackPlaybackParams: Boolean
+                ): AudioSink {
+                    return DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(enableFloatOutput)
+                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .setAudioProcessors(arrayOf(RtmpAudioBridge.createTapAudioProcessor()))
+                        .build()
+                }
+            }
+
             val exoPlayer = ExoPlayer.Builder(application)
+                .setRenderersFactory(renderersFactory)
                 .setLoadControl(loadControl)
                 .build()
 
@@ -124,13 +142,11 @@ internal object RtmpSourceSwitchHelper {
 
     /**
      * Switch to bitmap fallback for RTMP source.
-     * Uses MediaProjection audio to capture RTMP player audio.
+     * Uses ExoPlayerAudioSource to pull/pad RTMP audio while retrying.
      */
     suspend fun switchToBitmapFallback(
         streamer: SingleStreamer,
-        bitmap: Bitmap,
-        mediaProjection: MediaProjection? = null,
-        mediaProjectionHelper: MediaProjectionHelper? = null
+        bitmap: Bitmap
     ) {
         try {
             // Add delay before switching sources to allow previous sources to fully release
@@ -139,23 +155,8 @@ internal object RtmpSourceSwitchHelper {
             
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
-            
-            // Audio follows video: For RTMP/Bitmap, prefer MediaProjection, fallback to mic
-            val projection = mediaProjection ?: mediaProjectionHelper?.getMediaProjection()
-            if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                try {
-                    streamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                    Log.i(TAG, "Switched to bitmap fallback with MediaProjection audio")
-                } catch (e: Exception) {
-                    Log.w(TAG, "MediaProjection audio failed, using microphone: ${e.message}")
-                    streamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                    Log.i(TAG, "Switched to bitmap fallback with microphone audio")
-                }
-            } else {
-                // No MediaProjection available - use microphone
-                streamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                Log.i(TAG, "Switched to bitmap fallback with microphone audio (no MediaProjection)")
-            }
+            streamer.setAudioSource(ExoPlayerAudioSourceFactory())
+            Log.i(TAG, "Switched to bitmap fallback with ExoPlayerAudioSource")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
         }
@@ -167,7 +168,7 @@ internal object RtmpSourceSwitchHelper {
      * - switch to bitmap fallback immediately (so UI doesn't freeze)
      * - prepare ExoPlayer for RTMP preview
      * - wait until ready (with timeout)
-     * - attach RTMP video and appropriate audio source
+     * - attach RTMP video and ExoPlayer audio source
      * - retry every 5 seconds if connection fails
      * - call onRtmpConnected with ExoPlayer instance when successfully connected
      * Returns the Job for the retry loop so it can be cancelled if needed.
@@ -178,8 +179,6 @@ internal object RtmpSourceSwitchHelper {
         testBitmap: Bitmap,
         videoSourceUrl: String,
         storageRepository: DataStoreRepository,
-        mediaProjectionHelper: MediaProjectionHelper,
-        streamingMediaProjection: MediaProjection?,
         postError: (String) -> Unit,
         postRtmpStatus: (String?) -> Unit,
         onRtmpConnected: ((ExoPlayer) -> Unit)? = null
@@ -229,7 +228,7 @@ internal object RtmpSourceSwitchHelper {
                     if (exoPlayerInstance == null) {
                         // Set bitmap fallback on first attempt only
                         if (isFirstAttempt) {
-                            switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
+                            switchToBitmapFallback(currentStreamer, testBitmap)
                         }
                         if (isActive) {
                             postRtmpStatus("Couldn't play RTMP stream. Retrying in 5 seconds")
@@ -267,7 +266,7 @@ internal object RtmpSourceSwitchHelper {
                                 Log.w(TAG, "ExoPlayer has no audio tracks — RTMP server likely not sending audio yet. Retrying.")
                                 try { exoPlayerInstance.release() } catch (_: Exception) {}
                                 if (isFirstAttempt) {
-                                    switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
+                                    switchToBitmapFallback(currentStreamer, testBitmap)
                                 }
                                 if (isActive) {
                                     postRtmpStatus("No audio track detected. Retrying in 5 seconds")
@@ -287,34 +286,11 @@ internal object RtmpSourceSwitchHelper {
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
                             // Switch audio source immediately after video.
-                            // Use MediaProjection whenever it's available (streaming or not), since
-                            // startupMediaProjection is now acquired when the user toggles RTMP source.
-                            val projection = streamingMediaProjection ?: mediaProjectionHelper.getMediaProjection()
-
-                            if (projection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                // Always recreate MediaProjection audio when switching to RTMP.
-                                // After ExoPlayer replacement, Android's AudioPlaybackCapture routing
-                                // may not update for an existing AudioRecord, causing silent audio.
-                                // Force-recreating the AudioRecord guarantees fresh capture routing.
-                                try {
-                                    currentStreamer.setAudioSource(MediaProjectionAudioSourceFactory(projection))
-                                    Log.i(TAG, "Set MediaProjection audio for RTMP (fresh AudioRecord)")
-                                } catch (ae: Exception) {
-                                    Log.w(TAG, "MediaProjection audio failed, using conditional source: ${ae.message}")
-                                    try {
-                                        currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                                    } catch (micEx: Exception) {
-                                        Log.w(TAG, "Conditional source fallback failed: ${micEx.message}")
-                                    }
-                                }
-                            } else {
-                                // No MediaProjection available — fall back to mic
-                                try {
-                                    currentStreamer.setAudioSource(com.dimadesu.lifestreamer.audio.ConditionalAudioSourceFactory())
-                                    Log.i(TAG, "No MediaProjection available for RTMP, using microphone")
-                                } catch (ae: Exception) {
-                                    Log.w(TAG, "Failed to set conditional audio source: ${ae.message}")
-                                }
+                            try {
+                                currentStreamer.setAudioSource(ExoPlayerAudioSourceFactory())
+                                Log.i(TAG, "Set ExoPlayerAudioSource for RTMP")
+                            } catch (ae: Exception) {
+                                Log.w(TAG, "Failed to set ExoPlayerAudioSource for RTMP: ${ae.message}")
                             }
                             
                             // Clear status message and notify caller after both video and audio are set
@@ -337,7 +313,7 @@ internal object RtmpSourceSwitchHelper {
                             try { exoPlayerInstance.release() } catch (_: Exception) {}
                             
                             if (isFirstAttempt) {
-                                switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
+                                switchToBitmapFallback(currentStreamer, testBitmap)
                             }
                             // Wait and retry
                             if (isActive) {
@@ -355,7 +331,7 @@ internal object RtmpSourceSwitchHelper {
                         try { exoPlayerInstance.release() } catch (_: Exception) {}
                         
                         if (isFirstAttempt) {
-                            switchToBitmapFallback(currentStreamer, testBitmap, streamingMediaProjection, mediaProjectionHelper)
+                            switchToBitmapFallback(currentStreamer, testBitmap)
                         }
                         // Wait and retry
                         if (isActive) {
