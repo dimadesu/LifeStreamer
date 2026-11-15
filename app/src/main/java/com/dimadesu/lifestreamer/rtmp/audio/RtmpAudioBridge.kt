@@ -8,6 +8,8 @@ import androidx.media3.common.Format
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.AudioProcessor.AudioFormat as Media3AudioFormat
 import androidx.media3.common.audio.BaseAudioProcessor
+import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.audio.ToInt16PcmAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,8 +21,9 @@ import kotlin.math.min
  * audio processor chain and [ExoPlayerAudioSource].
  *
  * Captures decoded PCM before AudioTrack volume/mute is applied, converts sample format,
- * channel layout, and sample rate in a single pass outside the ring-buffer lock to match
- * StreamPack's configured [AudioSourceConfig], and buffers into a low-latency circular buffer.
+ * channel layout, and sample rate via Media3's audio processors outside the ring-buffer lock
+ * to match StreamPack's configured [AudioSourceConfig], and buffers into a low-latency
+ * circular buffer.
  */
 @OptIn(UnstableApi::class)
 open class RtmpAudioBridgeCore {
@@ -39,6 +42,13 @@ open class RtmpAudioBridgeCore {
         private fun logW(msg: String) {
             try {
                 Log.w(TAG, msg)
+            } catch (_: Throwable) {
+            }
+        }
+
+        private fun logE(msg: String, t: Throwable? = null) {
+            try {
+                if (t != null) Log.e(TAG, msg, t) else Log.e(TAG, msg)
             } catch (_: Throwable) {
             }
         }
@@ -72,12 +82,9 @@ open class RtmpAudioBridgeCore {
     var hasActiveInput: Boolean = false
         private set
 
-    // Single-pass converter / resampler state (protected exclusively by conversionLock)
+    // Conversion processor chain (protected exclusively by conversionLock)
     private var lastConversionGeneration: Long = -1L
-    private var inFramesScratch: ShortArray = ShortArray(4096)
-    private var outBytesScratch: ByteArray = ByteArray(16384)
-    private var resamplePos: Double = 1.0
-    private var hasPrevFrame: Boolean = false
+    private var activeProcessors: List<AudioProcessor> = emptyList()
 
     // Ring buffer state (protected by lock)
     private var ringBuffer: ByteArray = ByteArray(((48000L * RING_CAPACITY_MS) / 1000L).toInt() * 4)
@@ -194,19 +201,19 @@ open class RtmpAudioBridgeCore {
 
         if (inRate <= 0 || inChannels <= 0 || inEnc == Format.NO_VALUE) return
 
-        val producedBytes: Int
         synchronized(conversionLock) {
             if (lastConversionGeneration != generation) {
-                hasPrevFrame = false
-                resamplePos = 1.0
+                rebuildConversionPipelineLocked(
+                    inRate = inRate,
+                    inChannels = inChannels,
+                    inEnc = inEnc,
+                    outRate = outRate,
+                    outChannels = outChannels
+                )
                 lastConversionGeneration = generation
             }
-            producedBytes = convertAndResampleLocked(slice, inRate, inChannels, inEnc, outRate, outChannels)
-            if (producedBytes <= 0) return
-
-            synchronized(lock) {
-                if (formatGeneration != generation) return
-                writeBytesToRingLocked(outBytesScratch, 0, producedBytes)
+            if (activeProcessors.isNotEmpty()) {
+                processThroughChainLocked(slice, 0, generation)
             }
         }
     }
@@ -216,7 +223,7 @@ open class RtmpAudioBridgeCore {
             val isPassthrough = inputEncoding == C.ENCODING_PCM_16BIT &&
                 inputChannelCount == targetChannelCount &&
                 inputSampleRate == targetSampleRate
-            val mode = if (isPassthrough) "passthrough" else "single-pass convert/resample"
+            val mode = if (isPassthrough) "passthrough" else "Media3 AudioProcessor pipeline"
             logI(
                 "Configured audio bridge ($mode): in=${inputSampleRate}Hz/${inputChannelCount}ch/enc=$inputEncoding -> " +
                     "out=${targetSampleRate}Hz/${targetChannelCount}ch (maxBuffer=${MAX_BUFFER_MS}ms)"
@@ -224,241 +231,111 @@ open class RtmpAudioBridgeCore {
         }
     }
 
-    private fun convertAndResampleLocked(
-        src: ByteBuffer,
+    private fun rebuildConversionPipelineLocked(
         inRate: Int,
         inChannels: Int,
         inEnc: Int,
         outRate: Int,
         outChannels: Int
-    ): Int {
-        val bps = bytesPerSampleForEncoding(inEnc)
-        if (bps == 0) {
-            logW("Unsupported PCM encoding: $inEnc")
-            return 0
-        }
-
-        val inFrameBytes = inChannels * bps
-        val frameCount = src.remaining() / inFrameBytes
-        if (frameCount <= 0) return 0
-
-        val needsResample = inRate != outRate
-        val dstFrameOffset = if (needsResample) 1 else 0
-        val requiredInShorts = (dstFrameOffset + frameCount) * outChannels
-        if (inFramesScratch.size < requiredInShorts) {
-            inFramesScratch = inFramesScratch.copyOf(requiredInShorts)
-        }
-
-        decodeAndMixFrames(src, frameCount, inChannels, inEnc, bps, outChannels, inFramesScratch, dstFrameOffset)
-
-        if (!needsResample) {
-            val totalSamples = frameCount * outChannels
-            val outByteCount = totalSamples * 2
-            if (outBytesScratch.size < outByteCount) {
-                outBytesScratch = ByteArray(outByteCount)
-            }
-            var outIdx = 0
-            for (i in 0 until totalSamples) {
-                val s = inFramesScratch[i].toInt()
-                outBytesScratch[outIdx++] = (s and 0xFF).toByte()
-                outBytesScratch[outIdx++] = ((s ushr 8) and 0xFF).toByte()
-            }
-            return outByteCount
-        }
-
-        if (!hasPrevFrame) {
-            val firstFrameBase = outChannels
-            for (ch in 0 until outChannels) {
-                inFramesScratch[ch] = inFramesScratch[firstFrameBase + ch]
-            }
-            hasPrevFrame = true
-            resamplePos = 1.0
-        }
-
-        val maxOutFrames = ((frameCount.toLong() * outRate) / inRate).toInt() + 8
-        val requiredOutBytes = maxOutFrames * outChannels * 2
-        if (outBytesScratch.size < requiredOutBytes) {
-            outBytesScratch = ByteArray(requiredOutBytes)
-        }
-
-        val step = inRate.toDouble() / outRate.toDouble()
-        val endPos = frameCount.toDouble()
-        var pos = resamplePos.coerceAtLeast(0.0)
-        var outIdx = 0
-        val frameOutBytes = outChannels * 2
-
-        while (pos < endPos && outIdx + frameOutBytes <= outBytesScratch.size) {
-            val idx = pos.toInt().coerceIn(0, frameCount - 1)
-            // Q15 fixed-point keeps (s1 - s0) * frac within signed 32-bit Int bounds
-            val frac = ((pos - idx) * 32768.0).toInt().coerceIn(0, 32767)
-            val base0 = idx * outChannels
-            val base1 = base0 + outChannels
-            for (ch in 0 until outChannels) {
-                val s0 = inFramesScratch[base0 + ch].toInt()
-                val s1 = inFramesScratch[base1 + ch].toInt()
-                val sample = (s0 + (((s1 - s0) * frac) shr 15))
-                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                outBytesScratch[outIdx++] = (sample and 0xFF).toByte()
-                outBytesScratch[outIdx++] = ((sample ushr 8) and 0xFF).toByte()
-            }
-            pos += step
-        }
-
-        // Preserve the last frame at index 0 for seamless interpolation across the next chunk
-        val lastFrameBase = frameCount * outChannels
-        for (ch in 0 until outChannels) {
-            inFramesScratch[ch] = inFramesScratch[lastFrameBase + ch]
-        }
-        resamplePos = (pos - endPos).coerceAtLeast(0.0)
-
-        return outIdx
-    }
-
-    private fun decodeAndMixFrames(
-        src: ByteBuffer,
-        frameCount: Int,
-        inChannels: Int,
-        inEnc: Int,
-        bps: Int,
-        outChannels: Int,
-        dst: ShortArray,
-        dstFrameOffset: Int
     ) {
-        var srcOffset = src.position()
-        var dstIdx = dstFrameOffset * outChannels
+        activeProcessors.forEach {
+            try {
+                it.reset()
+            } catch (_: Exception) {
+            }
+        }
+        activeProcessors = emptyList()
 
-        when {
-            outChannels == 1 && inChannels == 1 -> {
-                for (f in 0 until frameCount) {
-                    dst[dstIdx++] = readSampleAsInt(src, srcOffset, inEnc).toShort()
-                    srcOffset += bps
+        if (inRate <= 0 || inChannels <= 0 || inEnc == Format.NO_VALUE || outRate <= 0 || outChannels <= 0) {
+            return
+        }
+
+        try {
+            var currentFormat = Media3AudioFormat(inRate, inChannels, inEnc)
+            val chain = mutableListOf<AudioProcessor>()
+
+            // 1. Convert non-16-bit PCM (float, 24-bit, 32-bit, 8-bit) to 16-bit PCM
+            if (currentFormat.encoding != C.ENCODING_PCM_16BIT) {
+                val toInt16 = ToInt16PcmAudioProcessor()
+                currentFormat = toInt16.configure(currentFormat)
+                toInt16.flush()
+                if (toInt16.isActive()) {
+                    chain.add(toInt16)
                 }
             }
-            outChannels == 2 && inChannels == 1 -> {
-                for (f in 0 until frameCount) {
-                    val s = readSampleAsInt(src, srcOffset, inEnc).toShort()
-                    dst[dstIdx++] = s
-                    dst[dstIdx++] = s
-                    srcOffset += bps
+
+            // 2. Mix channels if input channel count differs from target
+            if (currentFormat.channelCount != outChannels) {
+                val channelMixer = Pcm16ChannelMixingProcessor(outChannels)
+                currentFormat = channelMixer.configure(currentFormat)
+                channelMixer.flush()
+                if (channelMixer.isActive()) {
+                    chain.add(channelMixer)
                 }
             }
-            outChannels == 2 && inChannels == 2 -> {
-                val stride2 = bps * 2
-                for (f in 0 until frameCount) {
-                    dst[dstIdx++] = readSampleAsInt(src, srcOffset, inEnc).toShort()
-                    dst[dstIdx++] = readSampleAsInt(src, srcOffset + bps, inEnc).toShort()
-                    srcOffset += stride2
+
+            // 3. Resample if sample rate differs from target
+            if (currentFormat.sampleRate != outRate) {
+                val sonic = SonicAudioProcessor()
+                sonic.setOutputSampleRateHz(outRate)
+                currentFormat = sonic.configure(currentFormat)
+                sonic.flush()
+                if (sonic.isActive()) {
+                    chain.add(sonic)
                 }
             }
-            outChannels == 1 && inChannels == 2 -> {
-                val stride2 = bps * 2
-                for (f in 0 until frameCount) {
-                    val left = readSampleAsInt(src, srcOffset, inEnc)
-                    val right = readSampleAsInt(src, srcOffset + bps, inEnc)
-                    dst[dstIdx++] = ((left + right) / 2)
-                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                        .toShort()
-                    srcOffset += stride2
-                }
-            }
-            outChannels == 1 -> {
-                for (f in 0 until frameCount) {
-                    var sum = 0
-                    for (ch in 0 until inChannels) {
-                        sum += readSampleAsInt(src, srcOffset, inEnc)
-                        srcOffset += bps
-                    }
-                    dst[dstIdx++] = (sum / inChannels)
-                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                        .toShort()
-                }
-            }
-            else -> {
-                // Multi-channel (>= 3) downmix to stereo
-                for (f in 0 until frameCount) {
-                    val ch0 = readSampleAsInt(src, srcOffset, inEnc)
-                    val ch1 = readSampleAsInt(src, srcOffset + bps, inEnc)
-                    srcOffset += bps * 2
-                    var extraSum = 0
-                    for (ch in 2 until inChannels) {
-                        extraSum += readSampleAsInt(src, srcOffset, inEnc)
-                        srcOffset += bps
-                    }
-                    val extra = extraSum / (inChannels - 1)
-                    dst[dstIdx++] = ((ch0 + extra) / 2)
-                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                        .toShort()
-                    dst[dstIdx++] = ((ch1 + extra) / 2)
-                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                        .toShort()
-                }
-            }
+
+            activeProcessors = chain
+        } catch (e: AudioProcessor.UnhandledAudioFormatException) {
+            logW("Unsupported audio format for conversion: in=${inRate}Hz/${inChannels}ch/enc=$inEnc -> out=${outRate}Hz/${outChannels}ch: ${e.message}")
+            activeProcessors = emptyList()
+        } catch (e: Exception) {
+            logE("Failed to configure audio conversion pipeline", e)
+            activeProcessors = emptyList()
         }
     }
 
-    private fun bytesPerSampleForEncoding(encoding: Int): Int = when (encoding) {
-        C.ENCODING_PCM_8BIT -> 1
-        C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 2
-        C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> 3
-        C.ENCODING_PCM_32BIT, C.ENCODING_PCM_32BIT_BIG_ENDIAN, C.ENCODING_PCM_FLOAT -> 4
-        else -> 0
-    }
-
-    private fun readSampleAsInt(buf: ByteBuffer, byteIndex: Int, encoding: Int): Int =
-        when (encoding) {
-            C.ENCODING_PCM_16BIT -> buf.getShort(byteIndex).toInt()
-            C.ENCODING_PCM_16BIT_BIG_ENDIAN,
-            C.ENCODING_PCM_24BIT_BIG_ENDIAN,
-            C.ENCODING_PCM_32BIT_BIG_ENDIAN ->
-                (buf.get(byteIndex).toInt() shl 8) or (buf.get(byteIndex + 1).toInt() and 0xFF)
-            C.ENCODING_PCM_FLOAT ->
-                (buf.getFloat(byteIndex).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt()
-            C.ENCODING_PCM_8BIT ->
-                ((buf.get(byteIndex).toInt() and 0xFF) - 128) shl 8
-            C.ENCODING_PCM_24BIT ->
-                (buf.get(byteIndex + 2).toInt() shl 8) or (buf.get(byteIndex + 1).toInt() and 0xFF)
-            C.ENCODING_PCM_32BIT ->
-                (buf.get(byteIndex + 3).toInt() shl 8) or (buf.get(byteIndex + 2).toInt() and 0xFF)
-            else -> 0
+    private fun processThroughChainLocked(buffer: ByteBuffer, index: Int, generation: Long) {
+        if (!buffer.hasRemaining()) return
+        if (index >= activeProcessors.size) {
+            synchronized(lock) {
+                if (formatGeneration == generation) {
+                    writeToRingLocked(buffer)
+                }
+            }
+            return
         }
 
-    private fun writeBytesToRingLocked(src: ByteArray, offset: Int, length: Int) {
-        writeWithOverflowControlLocked(length) { skip, firstChunk, secondChunk ->
-            val srcOffset = offset + skip
-            System.arraycopy(src, srcOffset, ringBuffer, writePos, firstChunk)
-            if (secondChunk > 0) {
-                System.arraycopy(src, srcOffset + firstChunk, ringBuffer, 0, secondChunk)
+        val processor = activeProcessors[index]
+        var inIterations = 0
+        while (buffer.hasRemaining() && inIterations++ < 64) {
+            val prevPos = buffer.position()
+            processor.queueInput(buffer)
+            var outIterations = 0
+            while (outIterations++ < 64) {
+                val out = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+                if (!out.hasRemaining()) break
+                processThroughChainLocked(out, index + 1, generation)
+            }
+            if (buffer.position() == prevPos && buffer.hasRemaining()) {
+                logW("AudioProcessor ${processor.javaClass.simpleName} did not advance input buffer; breaking to avoid loop")
+                break
             }
         }
     }
 
     private fun writeToRingLocked(src: ByteBuffer) {
-        writeWithOverflowControlLocked(src.remaining()) { skip, firstChunk, secondChunk ->
-            if (skip > 0) {
-                src.position(src.position() + skip)
-            }
-            src.get(ringBuffer, writePos, firstChunk)
-            if (secondChunk > 0) {
-                src.get(ringBuffer, 0, secondChunk)
-            }
-        }
-    }
-
-    private inline fun writeWithOverflowControlLocked(
-        availableSourceBytes: Int,
-        copyChunks: (skipBytes: Int, firstChunk: Int, secondChunk: Int) -> Unit
-    ) {
         val frameSize = targetBytesPerFrame.coerceAtLeast(2)
-        val totalBytes = (availableSourceBytes / frameSize) * frameSize
+        val totalBytes = (src.remaining() / frameSize) * frameSize
         if (totalBytes <= 0) return
 
         val capacity = ringBuffer.size
         if (capacity <= 0) return
 
-        var skip = 0
         var bytesToWrite = totalBytes
         if (bytesToWrite > maxFillBytes) {
-            skip = ((bytesToWrite - maxFillBytes) / frameSize) * frameSize
+            val skip = ((bytesToWrite - maxFillBytes) / frameSize) * frameSize
+            src.position(src.position() + skip)
             bytesToWrite -= skip
         }
 
@@ -471,10 +348,99 @@ open class RtmpAudioBridgeCore {
         }
 
         val firstChunk = min(bytesToWrite, capacity - writePos)
+        src.get(ringBuffer, writePos, firstChunk)
         val secondChunk = bytesToWrite - firstChunk
-        copyChunks(skip, firstChunk, secondChunk)
+        if (secondChunk > 0) {
+            src.get(ringBuffer, 0, secondChunk)
+        }
         writePos = (writePos + bytesToWrite) % capacity
         availableBytes += bytesToWrite
+    }
+
+    /**
+     * Pure-Kotlin 16-bit PCM channel mixer (Mono <-> Stereo and multi-channel downmix)
+     * with zero Android framework dependencies so it runs identically on device and in JVM unit tests.
+     */
+    private class Pcm16ChannelMixingProcessor(
+        private val targetChannels: Int
+    ) : BaseAudioProcessor() {
+
+        override fun onConfigure(inputAudioFormat: Media3AudioFormat): Media3AudioFormat {
+            if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT ||
+                targetChannels <= 0 ||
+                inputAudioFormat.channelCount <= 0
+            ) {
+                throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+            }
+            if (inputAudioFormat.channelCount == targetChannels) {
+                return Media3AudioFormat.NOT_SET
+            }
+            return Media3AudioFormat(
+                inputAudioFormat.sampleRate,
+                targetChannels,
+                C.ENCODING_PCM_16BIT
+            )
+        }
+
+        override fun queueInput(inputBuffer: ByteBuffer) {
+            val inChannels = inputAudioFormat.channelCount
+            val outChannels = outputAudioFormat.channelCount
+            val inBytesPerFrame = inChannels * 2
+            val outBytesPerFrame = outChannels * 2
+            val frames = inputBuffer.remaining() / inBytesPerFrame
+            if (frames <= 0) {
+                inputBuffer.position(inputBuffer.limit())
+                return
+            }
+
+            inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
+            val outBuf = replaceOutputBuffer(frames * outBytesPerFrame).order(ByteOrder.LITTLE_ENDIAN)
+
+            if (inChannels == 1 && outChannels == 2) {
+                for (i in 0 until frames) {
+                    val sample = inputBuffer.short
+                    outBuf.putShort(sample)
+                    outBuf.putShort(sample)
+                }
+            } else if (inChannels == 2 && outChannels == 1) {
+                for (i in 0 until frames) {
+                    val left = inputBuffer.short.toInt()
+                    val right = inputBuffer.short.toInt()
+                    val mono = ((left + right) / 2).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                    outBuf.putShort(mono)
+                }
+            } else if (outChannels == 1) {
+                for (i in 0 until frames) {
+                    var sum = 0
+                    for (ch in 0 until inChannels) {
+                        sum += inputBuffer.short.toInt()
+                    }
+                    val mono = (sum / inChannels).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                    outBuf.putShort(mono)
+                }
+            } else {
+                // Multi-channel (>=3) to Stereo
+                for (i in 0 until frames) {
+                    val ch0 = inputBuffer.short.toInt()
+                    val ch1 = inputBuffer.short.toInt()
+                    var extraSum = 0
+                    for (ch in 2 until inChannels) {
+                        extraSum += inputBuffer.short.toInt()
+                    }
+                    val extra = extraSum / (inChannels - 1)
+                    val left = ((ch0 + extra) / 2).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                    val right = ((ch1 + extra) / 2).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                    outBuf.putShort(left)
+                    outBuf.putShort(right)
+                }
+            }
+
+            // Consume any trailing partial frame bytes if present
+            if (inputBuffer.hasRemaining()) {
+                inputBuffer.position(inputBuffer.limit())
+            }
+            outBuf.flip()
+        }
     }
 
     /**

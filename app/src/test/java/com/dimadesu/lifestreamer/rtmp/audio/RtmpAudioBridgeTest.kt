@@ -113,14 +113,14 @@ class RtmpAudioBridgeTest {
     }
 
     @Test
-    fun sampleRateConversion44100To48000ProducesNonZeroOutputAndImmediateAudio() {
+    fun sampleRateConversion44100To48000ProducesNonZeroOutput() {
         val bridge = RtmpAudioBridgeCore()
         bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(44100, 2, C.ENCODING_PCM_16BIT))
 
-        // Feed 6 chunks of 20ms (120ms total, stays under 160ms cap) of 44.1 kHz stereo 440Hz sine wave
+        // Feed 8 chunks of 20ms (160ms total, stays within 160ms cap) of 44.1 kHz stereo 440Hz sine wave
         val framesPerChunk = 882 // 20ms at 44100Hz
-        val totalChunks = 6
+        val totalChunks = 8
         var sampleIdx = 0
         for (chunk in 0 until totalChunks) {
             val buf = ByteBuffer.allocateDirect(framesPerChunk * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -133,16 +133,16 @@ class RtmpAudioBridgeTest {
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
 
-            // Verify immediate low-latency output right after the first 20ms chunk (no initial buffering stall)
-            if (chunk == 0) {
+            // SonicAudioProcessor has a ~30ms internal WSOLA window, so output starts by the second 20ms chunk
+            if (chunk == 1) {
                 assertTrue(
-                    "First chunk should produce immediate buffered output, was ${bridge.availableDurationMs()}ms",
-                    bridge.availableDurationMs() >= 18
+                    "Resampled output should start once Sonic's ~30ms window fills, was ${bridge.availableDurationMs()}ms",
+                    bridge.availableDurationMs() >= 10
                 )
             }
         }
 
-        // Expect ~120ms at 48kHz stereo; read 100ms (19,200 bytes)
+        // Read 100ms at 48kHz stereo 16-bit (19,200 bytes)
         val readBuf = ByteBuffer.allocateDirect(3840 * 5)
         val bytesRead = bridge.readPcm(readBuf, readBuf.capacity())
         assertEquals(readBuf.capacity(), bytesRead)
@@ -169,13 +169,13 @@ class RtmpAudioBridgeTest {
     }
 
     @Test
-    fun downsamplingFloatMono48000ToStereo44100PreservesContinuityAndImmediateOutput() {
+    fun downsamplingFloatMono48000ToStereo44100ProducesConvertedOutput() {
         val bridge = RtmpAudioBridgeCore()
         bridge.setTargetConfig(44100, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(48000, 1, C.ENCODING_PCM_FLOAT))
 
         val framesPerChunk = 960 // 20ms at 48kHz
-        val totalChunks = 6 // 120ms
+        val totalChunks = 8 // 160ms
         var sampleIdx = 0
         for (chunk in 0 until totalChunks) {
             val buf = ByteBuffer.allocateDirect(framesPerChunk * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -187,10 +187,10 @@ class RtmpAudioBridgeTest {
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
 
-            if (chunk == 0) {
+            if (chunk == 1) {
                 assertTrue(
-                    "First float chunk should immediately populate ring buffer, was ${bridge.availableDurationMs()}ms",
-                    bridge.availableDurationMs() >= 18
+                    "Converted float output should start once Sonic's ~30ms window fills, was ${bridge.availableDurationMs()}ms",
+                    bridge.availableDurationMs() >= 10
                 )
             }
         }
