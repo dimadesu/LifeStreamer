@@ -3100,11 +3100,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         currentRtmpPlayer = null
         RtmpAudioBridge.clear()
         
-        // Stop the SRT stream
-        Log.i(TAG, "Stopping SRT stream...")
+        // Stop the published stream
+        Log.i(TAG, "Stopping published stream...")
         try {
             currentStreamer.stopStream()
-            currentStreamer.close()
+            try {
+                currentStreamer.bitrateRegulatorControllerFactory = null
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not remove bitrate regulator before restart: ${e.message}")
+            }
+            withTimeout(3000) {
+                currentStreamer.close()
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping stream: ${e.message}")
         }
@@ -3147,13 +3154,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.w(TAG, "Failed to apply rotation before RTMP restart: ${e.message}")
         }
         
-        // Restart the stream
-        Log.i(TAG, "Restarting SRT stream...")
-        try {
-            val descriptor = storageRepository.endpointDescriptorFlow.first()
-            currentStreamer.open(descriptor)
-            currentStreamer.startStream()
-            
+        // Restart the published stream (SRT, SRTLA, or RTMP) using shared start logic
+        Log.i(TAG, "Restarting published stream...")
+        val restartSuccess = doStartStream(shouldAutoRetry = true)
+        if (restartSuccess) {
             // Clear reconnecting state now that stream is back up
             if (reconnecting) {
                 service?.completeReconnection()
@@ -3163,8 +3167,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             
             Log.i(TAG, "Stream restarted with bitmap source (orientation preserved)")
             _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to restart stream after RTMP disconnect: ${e.message}", e)
+        } else {
+            Log.e(TAG, "Failed to restart stream after RTMP disconnect")
             // Cancel current reconnecting state so handleDisconnection can begin fresh
             if (reconnecting) {
                 service?.cancelReconnection()
@@ -3172,8 +3176,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             isHandlingDisconnection = false
             // Delegate to standard reconnection handler - will retry with 5-second intervals
             // Sources (bitmap video + audio) are already configured, so attemptReconnection
-            // will just retry open() + startStream()
-            handleDisconnection("RTMP restart failed: ${e.message}")
+            // will just retry doStartStream()
+            handleDisconnection("RTMP restart failed")
             return
         }
         
