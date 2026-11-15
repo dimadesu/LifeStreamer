@@ -29,8 +29,9 @@ import kotlin.math.min
 open class RtmpAudioBridgeCore {
     companion object {
         private const val TAG = "RtmpAudioBridge"
-        private const val RING_CAPACITY_MS = 500
-        private const val MAX_BUFFER_MS = 160
+        private const val RING_CAPACITY_MS = 600
+        private const val TARGET_BUFFER_MS = 160
+        private const val MAX_BUFFER_MS = 220
 
         private fun logI(msg: String) {
             try {
@@ -88,6 +89,7 @@ open class RtmpAudioBridgeCore {
 
     // Ring buffer state (protected by lock)
     private var ringBuffer: ByteArray = ByteArray(((48000L * RING_CAPACITY_MS) / 1000L).toInt() * 4)
+    private var targetFillBytes: Int = ((48000L * TARGET_BUFFER_MS) / 1000L).toInt() * 4
     private var maxFillBytes: Int = ((48000L * MAX_BUFFER_MS) / 1000L).toInt() * 4
     private var readPos: Int = 0
     private var writePos: Int = 0
@@ -120,8 +122,10 @@ open class RtmpAudioBridgeCore {
                 val capacityFrames = ((sampleRate.toLong() * RING_CAPACITY_MS) / 1000L).toInt().coerceAtLeast(1024)
                 val capacityBytes = capacityFrames * bytesPerFrame
                 val maxFrames = ((sampleRate.toLong() * MAX_BUFFER_MS) / 1000L).toInt().coerceAtLeast(256)
+                val targetFrames = ((sampleRate.toLong() * TARGET_BUFFER_MS) / 1000L).toInt().coerceAtLeast(256)
                 ringBuffer = ByteArray(capacityBytes)
                 maxFillBytes = (maxFrames * bytesPerFrame).coerceAtMost(capacityBytes)
+                targetFillBytes = (targetFrames * bytesPerFrame).coerceAtMost(maxFillBytes)
                 readPos = 0
                 writePos = 0
                 availableBytes = 0
@@ -143,13 +147,37 @@ open class RtmpAudioBridgeCore {
 
     /**
      * Discards buffered audio without clearing format metadata or active input state.
-     * Used when attaching the video surface or starting audio streaming to drop pre-buffered backlog.
      */
     fun flushRingBuffer() {
         synchronized(lock) {
             readPos = 0
             writePos = 0
             availableBytes = 0
+        }
+    }
+
+    /**
+     * Target ring buffer fill level in milliseconds used to stay aligned with AudioTrack playback.
+     */
+    fun targetBufferDurationMs(): Int = TARGET_BUFFER_MS
+
+    /**
+     * Trims any buffered audio older than [TARGET_BUFFER_MS] while keeping the newest
+     * [TARGET_BUFFER_MS] of audio intact so RtmpAudioBridge stays aligned with the
+     * audio currently in-flight inside ExoPlayer's AudioTrack.
+     */
+    fun trimToTargetBuffer() {
+        synchronized(lock) {
+            val frameSize = targetBytesPerFrame.coerceAtLeast(2)
+            val excess = availableBytes - targetFillBytes
+            if (excess > 0) {
+                val dropBytes = ((excess / frameSize) * frameSize).coerceAtMost(availableBytes)
+                val capacity = ringBuffer.size
+                if (capacity > 0 && dropBytes > 0) {
+                    readPos = (readPos + dropBytes) % capacity
+                    availableBytes -= dropBytes
+                }
+            }
         }
     }
 
@@ -476,12 +504,7 @@ open class RtmpAudioBridgeCore {
 
             val remainingSilence = bytesToFill - copyBytes
             if (remainingSilence > 0) {
-                if (zeroScratch.size < remainingSilence) {
-                    zeroScratch = ByteArray(remainingSilence)
-                } else {
-                    Arrays.fill(zeroScratch, 0, remainingSilence, 0.toByte())
-                }
-                dest.put(zeroScratch, 0, remainingSilence)
+                putSilenceLocked(dest, remainingSilence)
             }
         }
 
@@ -489,6 +512,38 @@ open class RtmpAudioBridgeCore {
         dest.position(0)
         dest.limit(bytesToFill)
         return bytesToFill
+    }
+
+    /**
+     * Fills [dest] with [requestedBytes] (frame-aligned) of silence without consuming from the ring buffer.
+     */
+    fun fillSilence(dest: ByteBuffer, requestedBytes: Int): Int {
+        val frameSize = targetBytesPerFrame.coerceAtLeast(2)
+        val maxDestBytes = dest.capacity()
+        val bytesToFill = (min(requestedBytes, maxDestBytes) / frameSize) * frameSize
+        if (bytesToFill <= 0) {
+            dest.position(0)
+            dest.limit(0)
+            return 0
+        }
+
+        dest.clear()
+        dest.order(ByteOrder.LITTLE_ENDIAN)
+        synchronized(lock) {
+            putSilenceLocked(dest, bytesToFill)
+        }
+        dest.position(0)
+        dest.limit(bytesToFill)
+        return bytesToFill
+    }
+
+    private fun putSilenceLocked(dest: ByteBuffer, silenceBytes: Int) {
+        if (zeroScratch.size < silenceBytes) {
+            zeroScratch = ByteArray(silenceBytes)
+        } else {
+            Arrays.fill(zeroScratch, 0, silenceBytes, 0.toByte())
+        }
+        dest.put(zeroScratch, 0, silenceBytes)
     }
 
     fun createTapAudioProcessor(): AudioProcessor = TapAudioProcessor(this)

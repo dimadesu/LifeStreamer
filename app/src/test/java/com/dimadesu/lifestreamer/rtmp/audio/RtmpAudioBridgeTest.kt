@@ -228,9 +228,9 @@ class RtmpAudioBridgeTest {
         bridge.setTargetConfig(sampleRate, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
 
-        // maxFillBytes = 160ms at 48kHz stereo 16-bit = (48000 * 160 / 1000) * 4 = 30,720 bytes (7,680 frames)
-        // Push 320ms (15,360 frames) in 6 blocks of 2,560 frames (53.33ms, 10,240 bytes each) tagged by block index
-        val framesPerBlock = 2560
+        // maxFillBytes = 220ms at 48kHz stereo 16-bit = (48000 * 220 / 1000) * 4 = 42,240 bytes (10,560 frames)
+        // Push 440ms (21,120 frames) in 6 blocks of 3,520 frames (73.33ms, 14,080 bytes each) tagged by block index
+        val framesPerBlock = 3520
         for (block in 1..6) {
             val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
             val marker = (block * 1000).toShort()
@@ -242,8 +242,26 @@ class RtmpAudioBridgeTest {
             bridge.onExoPlayerAudioInput(buf)
         }
 
-        // First 160ms read should contain blocks 4, 5, 6 (newest 7,680 frames) without corruption
-        val blockBytes = framesPerBlock * 4 // 10,240 bytes
+        // Verify trimToTargetBuffer() trims buffered audio down to 160ms while keeping the newest samples
+        assertEquals(220, bridge.availableDurationMs())
+        bridge.trimToTargetBuffer()
+        assertEquals(160, bridge.availableDurationMs())
+
+        // Flush and re-push 6 blocks to test full 220ms overflow cap
+        bridge.flushRingBuffer()
+        for (block in 1..6) {
+            val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
+            val marker = (block * 1000).toShort()
+            for (f in 0 until framesPerBlock) {
+                buf.putShort(marker)
+                buf.putShort((-block * 1000).toShort())
+            }
+            buf.flip()
+            bridge.onExoPlayerAudioInput(buf)
+        }
+
+        // First 220ms read should contain blocks 4, 5, 6 (newest 10,560 frames) without corruption
+        val blockBytes = framesPerBlock * 4 // 14,080 bytes
         val expectedMarkers = intArrayOf(4, 5, 6)
         for (expectedBlock in expectedMarkers) {
             val readBuf = ByteBuffer.allocateDirect(blockBytes)
@@ -255,7 +273,7 @@ class RtmpAudioBridgeTest {
             assertEquals((-expectedBlock * 1000).toShort(), readBuf.getShort(blockBytes - 2))
         }
 
-        // Next read after draining 160ms should be silence (0)
+        // Next read after draining 220ms should be silence (0)
         val silenceBuf = ByteBuffer.allocateDirect(1920)
         val silenceBytes = bridge.readPcm(silenceBuf, 1920)
         assertEquals(1920, silenceBytes)

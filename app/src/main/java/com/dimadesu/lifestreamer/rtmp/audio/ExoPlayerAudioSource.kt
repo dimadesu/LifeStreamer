@@ -31,7 +31,6 @@ class ExoPlayerAudioSource(
     companion object {
         private const val TAG = "ExoPlayerAudioSource"
         private const val MAX_DRIFT_NS = 200_000_000L // 200 ms resync threshold
-        private const val CATCH_UP_HIGH_WATERMARK_MS = 100
     }
 
     private var _bufferSize: Int = 3840 // default 20ms at 48kHz stereo 16-bit
@@ -48,6 +47,8 @@ class ExoPlayerAudioSource(
     private var bytesPerFrame: Int = 4
     private val isRunning = AtomicBoolean(false)
     private var nextReadTimeNs: Long = 0L
+    @Volatile
+    private var isPrebuffering: Boolean = true
 
     override suspend fun configure(config: AudioSourceConfig) {
         configuredConfig = config
@@ -80,6 +81,7 @@ class ExoPlayerAudioSource(
             bytesPer20Ms
         }
 
+        isPrebuffering = true
         bridge.setTargetConfig(config.sampleRate, config.channelConfig, config.byteFormat)
         try {
             Log.i(
@@ -93,11 +95,12 @@ class ExoPlayerAudioSource(
 
     override suspend fun startStream() {
         if (isRunning.getAndSet(true)) return
-        bridge.flushRingBuffer()
+        bridge.trimToTargetBuffer()
+        isPrebuffering = bridge.availableDurationMs() < bridge.targetBufferDurationMs()
         nextReadTimeNs = System.nanoTime()
         _isStreamingFlow.tryEmit(true)
         try {
-            Log.i(TAG, "ExoPlayerAudioSource started")
+            Log.i(TAG, "ExoPlayerAudioSource started (prebuffering=$isPrebuffering, bufferedMs=${bridge.availableDurationMs()})")
         } catch (_: Throwable) {
         }
     }
@@ -129,14 +132,7 @@ class ExoPlayerAudioSource(
         val maxWritable = buffer.remaining().let { if (it > 0) it else buffer.capacity() }
         val bytesToFill = (min(targetChunkBytes, maxWritable) / frameSize) * frameSize
         val framesToRead = (bytesToFill / frameSize).coerceAtLeast(1)
-        val baseFrameDurationNs = (framesToRead * 1_000_000_000L) / sampleRate
-        val bufferedMs = bridge.availableDurationMs()
-        val frameDurationNs = if (bufferedMs > CATCH_UP_HIGH_WATERMARK_MS) {
-            // Pull ~5% faster when ring buffer creeps above high watermark to drain smoothly without drops
-            (baseFrameDurationNs * 95L) / 100L
-        } else {
-            baseFrameDurationNs
-        }
+        val frameDurationNs = (framesToRead * 1_000_000_000L) / sampleRate
 
         val nowNs = System.nanoTime()
         val scheduledNs = nextReadTimeNs
@@ -150,7 +146,21 @@ class ExoPlayerAudioSource(
             nextReadTimeNs = scheduledNs + frameDurationNs
         }
 
+        if (isPrebuffering) {
+            if (bridge.availableDurationMs() >= bridge.targetBufferDurationMs()) {
+                isPrebuffering = false
+            } else {
+                bridge.fillSilence(buffer, bytesToFill)
+                return TimeUtils.currentTime()
+            }
+        }
+
         bridge.readPcm(buffer, bytesToFill)
+        if (bridge.availableDurationMs() == 0) {
+            // Buffer ran completely dry (e.g. RTMP stall/rebuffer); re-establish the target
+            // sync cushion before resuming playback so audio matches AudioTrack's depth.
+            isPrebuffering = true
+        }
         return TimeUtils.currentTime()
     }
 }
