@@ -29,6 +29,7 @@ import android.hardware.camera2.CaptureResult
 import android.media.projection.MediaProjection
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import android.util.Range
 import android.util.Rational
@@ -118,6 +119,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.video.VideoFrameMetadataListener
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -483,6 +486,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     // Track current RTMP ExoPlayer for monitoring disconnections
     private var currentRtmpPlayer: androidx.media3.exoplayer.ExoPlayer? = null
     private var rtmpDisconnectListener: androidx.media3.common.Player.Listener? = null
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private var rtmpFrameMetadataListener: VideoFrameMetadataListener? = null
+    @Volatile private var lastRtmpVideoFrameTimeMs = 0L
     
     // Monitor audio toggle for RTMP sources (OFF by default)
     private val _isMonitorAudioOn: MutableLiveData<Boolean> = MutableLiveData(false)
@@ -2920,19 +2926,38 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
     
     /**
-     * Monitor RTMP ExoPlayer for disconnections and automatically fallback + retry
+     * Detach RTMP listeners and cancel the unified video frame watchdog coroutine
+     * before switching or releasing [currentRtmpPlayer].
      */
-    private fun monitorRtmpConnection(player: androidx.media3.exoplayer.ExoPlayer) {
-        // Remove any previous listener
-        rtmpDisconnectListener?.let { listener ->
-            try { currentRtmpPlayer?.removeListener(listener) } catch (_: Exception) {}
-        }
-        
-        // Cancel any pending buffering check
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private fun stopRtmpConnectionMonitoring() {
         bufferingCheckJob?.cancel()
         bufferingCheckJob = null
         rtmpBufferingStartTime = 0L
-        
+        lastRtmpVideoFrameTimeMs = 0L
+
+        rtmpDisconnectListener?.let { listener ->
+            try {
+                currentRtmpPlayer?.removeListener(listener)
+            } catch (_: Exception) {}
+        }
+        rtmpDisconnectListener = null
+
+        rtmpFrameMetadataListener?.let { listener ->
+            try {
+                currentRtmpPlayer?.clearVideoFrameMetadataListener(listener)
+            } catch (_: Exception) {}
+        }
+        rtmpFrameMetadataListener = null
+    }
+
+    /**
+     * Monitor RTMP ExoPlayer for disconnections and automatically fallback + retry
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private fun monitorRtmpConnection(player: androidx.media3.exoplayer.ExoPlayer) {
+        stopRtmpConnectionMonitoring()
+
         currentRtmpPlayer = player
         
         // Clear the suppress flag now that RTMP switch is complete
@@ -2944,7 +2969,14 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             applyMonitorAudioState()
         }
         
-        val maxBufferingDuration = 2_000L // 2 seconds of buffering = disconnection
+        val frameWatchdogTimeoutMs = 1_000L // 1 second without rendered video frames = disconnection
+        val watchdogPollIntervalMs = 200L
+        lastRtmpVideoFrameTimeMs = SystemClock.elapsedRealtime()
+
+        rtmpFrameMetadataListener = VideoFrameMetadataListener { _, _, _, _ ->
+            lastRtmpVideoFrameTimeMs = SystemClock.elapsedRealtime()
+        }
+        player.setVideoFrameMetadataListener(rtmpFrameMetadataListener!!)
         
         rtmpDisconnectListener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -2970,15 +3002,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         if (rtmpBufferingStartTime == 0L) {
                             rtmpBufferingStartTime = System.currentTimeMillis()
                             Log.d(TAG, "RTMP stream started buffering")
-                            
-                            // Check if buffering takes too long
-                            bufferingCheckJob = viewModelScope.launch {
-                                delay(maxBufferingDuration)
-                                if (rtmpBufferingStartTime > 0 && player.playbackState == androidx.media3.common.Player.STATE_BUFFERING) {
-                                    Log.w(TAG, "RTMP stream buffering for too long (${maxBufferingDuration}ms) - treating as disconnection")
-                                    handleRtmpDisconnection()
-                                }
-                            }
                         }
                     }
                     androidx.media3.common.Player.STATE_READY -> {
@@ -2986,7 +3009,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             val bufferingDuration = System.currentTimeMillis() - rtmpBufferingStartTime
                             Log.d(TAG, "RTMP stream recovered from buffering after ${bufferingDuration}ms")
                             rtmpBufferingStartTime = 0L
-                            bufferingCheckJob?.cancel()
                             RtmpAudioBridge.trimToTargetBuffer()
                         }
                     }
@@ -3003,7 +3025,29 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         
         player.addListener(rtmpDisconnectListener!!)
-        Log.i(TAG, "Started monitoring RTMP connection for disconnections (including buffering stalls)")
+
+        bufferingCheckJob = viewModelScope.launch {
+            while (isActive) {
+                delay(watchdogPollIntervalMs)
+                if (currentRtmpPlayer !== player || isHandlingDisconnection) break
+                val playbackState = player.playbackState
+                if (playbackState == androidx.media3.common.Player.STATE_READY ||
+                    playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                ) {
+                    val timeSinceLastFrameMs = SystemClock.elapsedRealtime() - lastRtmpVideoFrameTimeMs
+                    if (timeSinceLastFrameMs >= frameWatchdogTimeoutMs) {
+                        Log.w(
+                            TAG,
+                            "RTMP video frame watchdog: no video frame rendered for ${timeSinceLastFrameMs}ms (state=$playbackState) - treating as disconnection"
+                        )
+                        handleRtmpDisconnection()
+                        break
+                    }
+                }
+            }
+        }
+
+        Log.i(TAG, "Started monitoring RTMP connection for disconnections (with ${frameWatchdogTimeoutMs}ms video frame watchdog)")
     }
     
     /**
@@ -3074,18 +3118,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         rtmpRetryJob?.cancelAndJoin()
         rtmpRetryJob = null
         
-        // Cancel pending buffering check to prevent it from re-triggering
-        // handleRtmpDisconnection() during reconnection
-        bufferingCheckJob?.cancel()
-        bufferingCheckJob = null
-        rtmpBufferingStartTime = 0L
-        
-        // Remove disconnect listener before releasing ExoPlayer to prevent
-        // STATE_IDLE callbacks from re-triggering handleRtmpDisconnection()
-        rtmpDisconnectListener?.let { listener ->
-            try { currentRtmpPlayer?.removeListener(listener) } catch (_: Exception) {}
-        }
-        rtmpDisconnectListener = null
+        // Stop monitoring and detach listeners before releasing ExoPlayer to prevent
+        // STATE_IDLE or watchdog callbacks from re-triggering handleRtmpDisconnection()
+        stopRtmpConnectionMonitoring()
         
         // Release the old ExoPlayer
         currentRtmpPlayer?.let { player ->
@@ -3220,18 +3255,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         rtmpRetryJob?.cancelAndJoin()
         rtmpRetryJob = null
         
-        // Cancel pending buffering check to prevent it from re-triggering
-        // handleRtmpDisconnection() during reconnection
-        bufferingCheckJob?.cancel()
-        bufferingCheckJob = null
-        rtmpBufferingStartTime = 0L
-        
-        // Remove disconnect listener before releasing ExoPlayer to prevent
-        // STATE_IDLE callbacks from re-triggering handleRtmpDisconnection()
-        rtmpDisconnectListener?.let { listener ->
-            try { currentRtmpPlayer?.removeListener(listener) } catch (_: Exception) {}
-        }
-        rtmpDisconnectListener = null
+        // Stop monitoring and detach listeners before releasing ExoPlayer to prevent
+        // STATE_IDLE or watchdog callbacks from re-triggering handleRtmpDisconnection()
+        stopRtmpConnectionMonitoring()
         
         // Remove bitrate regulator if streaming with SRT
         if (isStreaming) {
@@ -3445,21 +3471,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     isHandlingDisconnection = false // Reset flag when cancelling retry
                     Log.i(TAG, "Cancelled RTMP retry loop and reset disconnection flag")
                     
-                    // Cancel buffering check
-                    bufferingCheckJob?.cancel()
-                    bufferingCheckJob = null
-                    rtmpBufferingStartTime = 0L
-                    
                     // Stop monitoring RTMP connection
-                    rtmpDisconnectListener?.let { listener ->
+                    stopRtmpConnectionMonitoring()
+                    currentRtmpPlayer?.let { player ->
                         try {
-                            currentRtmpPlayer?.removeListener(listener)
-                            Log.i(TAG, "Removed RTMP disconnect listener")
+                            player.stop()
+                            player.release()
+                            Log.i(TAG, "Released RTMP player when switching back to camera")
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to remove RTMP listener: ${e.message}")
+                            Log.w(TAG, "Failed to release RTMP player: ${e.message}")
                         }
                     }
-                    rtmpDisconnectListener = null
                     currentRtmpPlayer = null
                     RtmpAudioBridge.clear()
 
@@ -4439,24 +4461,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         rtmpRetryJob = null
         Log.i(TAG, "Cancelled RTMP retry loop in onCleared()")
         
-        // Cancel buffering check
-        bufferingCheckJob?.cancel()
-        bufferingCheckJob = null
-        rtmpBufferingStartTime = 0L
-        
-        // Reset disconnection handler guard flag
+        // Reset disconnection handler guard flag and clean up RTMP connection monitoring
         isHandlingDisconnection = false
-        
-        // Clean up RTMP disconnect listener
-        rtmpDisconnectListener?.let { listener ->
-            try {
-                currentRtmpPlayer?.removeListener(listener)
-                Log.i(TAG, "Removed RTMP disconnect listener in onCleared()")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to remove RTMP listener in onCleared(): ${e.message}")
-            }
-        }
-        rtmpDisconnectListener = null
+        stopRtmpConnectionMonitoring()
         currentRtmpPlayer = null
         
         // Clean up UVC camera helper
