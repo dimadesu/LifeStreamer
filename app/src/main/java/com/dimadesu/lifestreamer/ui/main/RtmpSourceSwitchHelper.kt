@@ -63,15 +63,15 @@ internal object RtmpSourceSwitchHelper {
                     enableAudioTrackPlaybackParams: Boolean
                 ): AudioSink {
                     val bufferSizeProvider = DefaultAudioTrackBufferSizeProvider.Builder()
-                        .setMinPcmBufferDurationUs(80_000)
-                        .setMaxPcmBufferDurationUs(150_000)
+                        .setMinPcmBufferDurationUs(150_000)
+                        .setMaxPcmBufferDurationUs(180_000)
                         .setPcmBufferMultiplicationFactor(2)
                         .build()
                     return DefaultAudioSink.Builder(context)
                         .setEnableFloatOutput(enableFloatOutput)
                         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                         .setAudioTrackBufferSizeProvider(bufferSizeProvider)
-                        .setAudioProcessors(arrayOf(RtmpAudioBridge.createTapAudioProcessor()))
+                        .setAudioProcessors(arrayOf(RtmpAudioBridge.createTapAudioProcessor(startStaged = true)))
                         .build()
                 }
             }
@@ -282,6 +282,9 @@ internal object RtmpSourceSwitchHelper {
                                 continue
                             }
                         }
+
+                        // Promote staged pre-fill audio only once ExoPlayer is ready to go live
+                        RtmpAudioBridge.promotePendingTap()
 
                         // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {

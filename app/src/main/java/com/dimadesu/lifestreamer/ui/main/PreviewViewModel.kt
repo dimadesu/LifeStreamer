@@ -2987,6 +2987,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             Log.d(TAG, "RTMP stream recovered from buffering after ${bufferingDuration}ms")
                             rtmpBufferingStartTime = 0L
                             bufferingCheckJob?.cancel()
+                            RtmpAudioBridge.trimToTargetBuffer()
                         }
                     }
                 }

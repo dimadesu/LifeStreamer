@@ -137,6 +137,9 @@ class ExoPlayerAudioSource(
         val nowNs = System.nanoTime()
         val scheduledNs = nextReadTimeNs
         if (scheduledNs == 0L || nowNs - scheduledNs > MAX_DRIFT_NS) {
+            if (scheduledNs != 0L) {
+                bridge.trimToTargetBuffer()
+            }
             nextReadTimeNs = nowNs + frameDurationNs
         } else {
             val waitNs = scheduledNs - nowNs

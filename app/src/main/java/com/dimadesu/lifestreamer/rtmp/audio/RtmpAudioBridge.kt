@@ -30,7 +30,7 @@ open class RtmpAudioBridgeCore {
     companion object {
         private const val TAG = "RtmpAudioBridge"
         private const val RING_CAPACITY_MS = 600
-        private const val TARGET_BUFFER_MS = 160
+        private const val TARGET_BUFFER_MS = 140
         private const val MAX_BUFFER_MS = 220
 
         private fun logI(msg: String) {
@@ -96,8 +96,13 @@ open class RtmpAudioBridgeCore {
     private var availableBytes: Int = 0
     private var zeroScratch: ByteArray = ByteArray(8192)
 
+    private val tapSelectionLock = Any()
+
     @Volatile
     private var activeTapProcessor: TapAudioProcessor? = null
+
+    @Volatile
+    private var pendingTapProcessor: TapAudioProcessor? = null
 
     fun setTargetConfig(sampleRate: Int, channelConfig: Int, byteFormat: Int) {
         val channelCount = when (channelConfig) {
@@ -142,6 +147,22 @@ open class RtmpAudioBridgeCore {
             availableBytes = 0
             hasActiveInput = false
             formatGeneration++
+        }
+    }
+
+    /**
+     * Promotes a staged [TapAudioProcessor] once the warming-up ExoPlayer reaches STATE_READY,
+     * atomically switching active ownership and replaying its buffered pre-fill without
+     * letting teardown frames from any previous player contaminate the bridge.
+     */
+    fun promotePendingTap() {
+        val pending = synchronized(tapSelectionLock) {
+            val current = pendingTapProcessor ?: return
+            pendingTapProcessor = null
+            current
+        }
+        if (pending.promoteToActive()) {
+            trimToTargetBuffer()
         }
     }
 
@@ -192,7 +213,15 @@ open class RtmpAudioBridgeCore {
     }
 
     fun onExoPlayerFormatChanged(inputFormat: Media3AudioFormat) {
+        onExoPlayerFormatChangedInternal(inputFormat, sourceTap = null)
+    }
+
+    private fun onExoPlayerFormatChangedInternal(
+        inputFormat: Media3AudioFormat,
+        sourceTap: TapAudioProcessor?
+    ) {
         synchronized(lock) {
+            if (sourceTap != null && activeTapProcessor !== sourceTap) return
             inputSampleRate = inputFormat.sampleRate
             inputChannelCount = inputFormat.channelCount
             inputEncoding = inputFormat.encoding
@@ -202,6 +231,13 @@ open class RtmpAudioBridgeCore {
     }
 
     fun onExoPlayerAudioInput(inputBuffer: ByteBuffer) {
+        onExoPlayerAudioInputInternal(inputBuffer, sourceTap = null)
+    }
+
+    private fun onExoPlayerAudioInputInternal(
+        inputBuffer: ByteBuffer,
+        sourceTap: TapAudioProcessor?
+    ) {
         if (!inputBuffer.hasRemaining()) return
         val slice = inputBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
 
@@ -213,6 +249,7 @@ open class RtmpAudioBridgeCore {
         val generation: Long
 
         synchronized(lock) {
+            if (sourceTap != null && activeTapProcessor !== sourceTap) return
             hasActiveInput = true
             inRate = inputSampleRate
             inChannels = inputChannelCount
@@ -369,7 +406,9 @@ open class RtmpAudioBridgeCore {
 
         val overflow = (availableBytes + bytesToWrite) - maxFillBytes
         if (overflow > 0) {
-            val dropBytes = (((overflow + frameSize - 1) / frameSize) * frameSize)
+            // Snap back to targetFillBytes on overflow to avoid continuous per-frame drops at the ceiling.
+            val excessOverTarget = (availableBytes + bytesToWrite) - targetFillBytes
+            val dropBytes = (((excessOverTarget + frameSize - 1) / frameSize) * frameSize)
                 .coerceAtMost(availableBytes)
             readPos = (readPos + dropBytes) % capacity
             availableBytes -= dropBytes
@@ -546,38 +585,156 @@ open class RtmpAudioBridgeCore {
         dest.put(zeroScratch, 0, silenceBytes)
     }
 
-    fun createTapAudioProcessor(): AudioProcessor = TapAudioProcessor(this)
+    fun createTapAudioProcessor(startStaged: Boolean = false): AudioProcessor {
+        val processor = TapAudioProcessor(this, startStaged)
+        if (startStaged) {
+            synchronized(tapSelectionLock) {
+                pendingTapProcessor?.markSuperseded()
+                pendingTapProcessor = processor
+            }
+        } else {
+            activeTapProcessor?.markSuperseded()
+            activeTapProcessor = processor
+        }
+        return processor
+    }
+
+    private fun clearPendingIfSame(tap: TapAudioProcessor) {
+        synchronized(tapSelectionLock) {
+            if (pendingTapProcessor === tap) {
+                pendingTapProcessor = null
+            }
+        }
+    }
 
     private class TapAudioProcessor(
-        private val bridge: RtmpAudioBridgeCore
+        private val bridge: RtmpAudioBridgeCore,
+        startStaged: Boolean
     ) : BaseAudioProcessor() {
 
+        private val stagingLock = Any()
+        @Volatile
+        private var isPromoted = !startStaged
+        @Volatile
+        private var isSuperseded = false
+        private var isDiscarded = false
+        private var stagedFormat: Media3AudioFormat? = null
+        private val stagedBuffers = kotlin.collections.ArrayDeque<ByteBuffer>()
+        private var stagedBytes = 0
+
+        fun markSuperseded() {
+            isSuperseded = true
+        }
+
+        fun promoteToActive(): Boolean {
+            synchronized(stagingLock) {
+                if (isPromoted || isDiscarded || isSuperseded) return false
+                isPromoted = true
+                bridge.activeTapProcessor?.let { previous ->
+                    if (previous !== this) {
+                        previous.markSuperseded()
+                    }
+                }
+                bridge.activeTapProcessor = this
+                bridge.clear()
+                stagedFormat?.let { bridge.onExoPlayerFormatChangedInternal(it, this) }
+                while (stagedBuffers.isNotEmpty()) {
+                    val chunk = stagedBuffers.removeFirst()
+                    bridge.onExoPlayerAudioInputInternal(chunk, this)
+                }
+                stagedBytes = 0
+                stagedFormat = null
+                return true
+            }
+        }
+
         override fun onConfigure(inputAudioFormat: Media3AudioFormat): Media3AudioFormat {
-            bridge.activeTapProcessor = this
-            bridge.onExoPlayerFormatChanged(inputAudioFormat)
+            synchronized(stagingLock) {
+                if (isSuperseded) return inputAudioFormat
+                isDiscarded = false
+                if (isPromoted) {
+                    bridge.activeTapProcessor = this
+                    bridge.onExoPlayerFormatChangedInternal(inputAudioFormat, this)
+                } else {
+                    stagedFormat = inputAudioFormat
+                    stagedBuffers.clear()
+                    stagedBytes = 0
+                }
+            }
             return inputAudioFormat
         }
 
         override fun queueInput(inputBuffer: ByteBuffer) {
             val remaining = inputBuffer.remaining()
             if (remaining == 0) return
-            bridge.activeTapProcessor = this
-            bridge.onExoPlayerAudioInput(inputBuffer)
+            synchronized(stagingLock) {
+                if (!isSuperseded) {
+                    if (isPromoted) {
+                        if (bridge.activeTapProcessor === this) {
+                            bridge.onExoPlayerAudioInputInternal(inputBuffer, this)
+                        }
+                    } else {
+                        stageInputLocked(inputBuffer)
+                    }
+                }
+            }
             replaceOutputBuffer(remaining).put(inputBuffer).flip()
         }
 
+        private fun stageInputLocked(inputBuffer: ByteBuffer) {
+            val remaining = inputBuffer.remaining()
+            val copy = ByteBuffer.allocate(remaining).order(inputBuffer.order())
+            copy.put(inputBuffer.duplicate())
+            copy.flip()
+            stagedBuffers.addLast(copy)
+            stagedBytes += remaining
+
+            val fmt = stagedFormat
+            val frameSize = (fmt?.bytesPerFrame ?: 0).takeIf { it > 0 } ?: 4
+            val rate = (fmt?.sampleRate ?: 0).takeIf { it > 0 } ?: 48000
+            val maxBytes = ((rate.toLong() * MAX_BUFFER_MS) / 1000L).toInt() * frameSize
+            var excess = stagedBytes - maxBytes
+            while (excess > 0 && stagedBuffers.isNotEmpty()) {
+                val head = stagedBuffers.first()
+                val headRemaining = head.remaining()
+                if (excess >= headRemaining) {
+                    stagedBuffers.removeFirst()
+                    stagedBytes -= headRemaining
+                    excess -= headRemaining
+                } else {
+                    val alignedDrop = (excess / frameSize) * frameSize
+                    if (alignedDrop > 0) {
+                        head.position(head.position() + alignedDrop)
+                        stagedBytes -= alignedDrop
+                    }
+                    break
+                }
+            }
+        }
+
         override fun onFlush() {
-            if (bridge.activeTapProcessor === this) {
-                // Keep target config and conversion pipeline; clear stale buffered samples on seek/flush
-                bridge.clear()
+            synchronized(stagingLock) {
+                stagedBuffers.clear()
+                stagedBytes = 0
+                if (isPromoted && !isSuperseded && bridge.activeTapProcessor === this) {
+                    // Keep target config and conversion pipeline; clear stale buffered samples on seek/flush
+                    bridge.clear()
+                }
             }
         }
 
         override fun onReset() {
-            if (bridge.activeTapProcessor === this) {
-                bridge.clear()
-                bridge.activeTapProcessor = null
+            synchronized(stagingLock) {
+                stagedBuffers.clear()
+                stagedBytes = 0
+                stagedFormat = null
+                isDiscarded = true
+                if (isPromoted && bridge.activeTapProcessor === this) {
+                    bridge.clear()
+                    bridge.activeTapProcessor = null
+                }
             }
+            bridge.clearPendingIfSame(this)
         }
     }
 }

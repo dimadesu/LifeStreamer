@@ -222,6 +222,82 @@ class RtmpAudioBridgeTest {
     }
 
     @Test
+    fun stagedTapAudioProcessorDoesNotDisturbActiveStreamUntilPromoted() {
+        val bridge = RtmpAudioBridgeCore()
+        val sampleRate = 48000
+        bridge.setTargetConfig(sampleRate, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+
+        // Active stream pushes 100ms of stereo PCM
+        val activeTap = bridge.createTapAudioProcessor(startStaged = false)
+        activeTap.configure(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
+        activeTap.flush()
+        val activeFrames = 4800 // 100ms
+        val activeBuf = ByteBuffer.allocateDirect(activeFrames * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (f in 0 until activeFrames) {
+            activeBuf.putShort(1111)
+            activeBuf.putShort(-1111)
+        }
+        activeBuf.flip()
+        activeTap.queueInput(activeBuf)
+        assertEquals(activeFrames * 4, activeTap.output.remaining())
+        assertEquals(100, bridge.availableDurationMs())
+
+        // Warming-up RTMP stream pushes 180ms of mono PCM while staged
+        val stagedTap = bridge.createTapAudioProcessor(startStaged = true)
+        stagedTap.configure(Media3AudioFormat(sampleRate, 1, C.ENCODING_PCM_16BIT))
+        stagedTap.flush()
+        val stagedFrames = 8640 // 180ms
+        val stagedBuf = ByteBuffer.allocateDirect(stagedFrames * 2).order(ByteOrder.LITTLE_ENDIAN)
+        for (f in 0 until stagedFrames) {
+            stagedBuf.putShort(2222)
+        }
+        stagedBuf.flip()
+        stagedTap.queueInput(stagedBuf)
+
+        // Downstream ExoPlayer AudioTrack receives the full buffer untouched, while live bridge stays at 100ms
+        assertEquals(stagedFrames * 2, stagedTap.output.remaining())
+        assertEquals(100, bridge.availableDurationMs())
+
+        val probeBytes = 960 * 4 // 20ms stereo
+        val prePromoteRead = ByteBuffer.allocateDirect(probeBytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(probeBytes, bridge.readPcm(prePromoteRead, probeBytes))
+        assertEquals(1111.toShort(), prePromoteRead.getShort(0))
+        assertEquals((-1111).toShort(), prePromoteRead.getShort(2))
+        assertEquals(80, bridge.availableDurationMs())
+
+        // Promoting replaces the active stream, mixes mono->stereo, and trims pre-fill to TARGET_BUFFER_MS (140ms)
+        bridge.promotePendingTap()
+        assertEquals(140, bridge.availableDurationMs())
+        val postPromoteRead = ByteBuffer.allocateDirect(probeBytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(probeBytes, bridge.readPcm(postPromoteRead, probeBytes))
+        assertEquals(2222.toShort(), postPromoteRead.getShort(0))
+        assertEquals(2222.toShort(), postPromoteRead.getShort(2))
+        assertEquals(120, bridge.availableDurationMs())
+
+        // Late frames or reset from the superseded active tap are ignored
+        val lateBuf = ByteBuffer.allocateDirect(1920 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (f in 0 until 1920) {
+            lateBuf.putShort(1111)
+            lateBuf.putShort(-1111)
+        }
+        lateBuf.flip()
+        activeTap.queueInput(lateBuf)
+        activeTap.reset()
+        assertEquals(120, bridge.availableDurationMs())
+
+        // Abandoned staged tap reset without promotion cannot disturb live stream or promote later
+        val abandonedTap = bridge.createTapAudioProcessor(startStaged = true)
+        abandonedTap.configure(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
+        abandonedTap.flush()
+        val abandonedBuf = ByteBuffer.allocateDirect(4800 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        abandonedBuf.limit(4800 * 4)
+        abandonedTap.queueInput(abandonedBuf)
+        abandonedTap.reset()
+        bridge.promotePendingTap()
+        assertEquals(120, bridge.availableDurationMs())
+    }
+
+    @Test
     fun ringBufferOverflowCapsFillLevelAndKeepsNewestFrameAlignedData() {
         val bridge = RtmpAudioBridgeCore()
         val sampleRate = 48000
@@ -229,9 +305,10 @@ class RtmpAudioBridgeTest {
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
 
         // maxFillBytes = 220ms at 48kHz stereo 16-bit = (48000 * 220 / 1000) * 4 = 42,240 bytes (10,560 frames)
-        // Push 440ms (21,120 frames) in 6 blocks of 3,520 frames (73.33ms, 14,080 bytes each) tagged by block index
+        // Push 3 blocks of 3,520 frames (220ms exact) to verify fill up to maxFillBytes without overflow,
+        // then verify trimToTargetBuffer() drops back to TARGET_BUFFER_MS (140ms).
         val framesPerBlock = 3520
-        for (block in 1..6) {
+        for (block in 1..3) {
             val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
             val marker = (block * 1000).toShort()
             for (f in 0 until framesPerBlock) {
@@ -241,13 +318,12 @@ class RtmpAudioBridgeTest {
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
         }
-
-        // Verify trimToTargetBuffer() trims buffered audio down to 160ms while keeping the newest samples
         assertEquals(220, bridge.availableDurationMs())
         bridge.trimToTargetBuffer()
-        assertEquals(160, bridge.availableDurationMs())
+        assertEquals(140, bridge.availableDurationMs())
 
-        // Flush and re-push 6 blocks to test full 220ms overflow cap
+        // Flush and push 6 blocks (440ms) to verify hysteresis overflow trim snaps >220ms back to 140ms
+        // keeping the newest 6,720 frames: 3,200 tail frames of block 5 + 3,520 frames of block 6.
         bridge.flushRingBuffer()
         for (block in 1..6) {
             val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -259,21 +335,25 @@ class RtmpAudioBridgeTest {
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
         }
+        assertEquals(140, bridge.availableDurationMs())
 
-        // First 220ms read should contain blocks 4, 5, 6 (newest 10,560 frames) without corruption
+        val block5TailBytes = 3200 * 4
+        val block5Buf = ByteBuffer.allocateDirect(block5TailBytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(block5TailBytes, bridge.readPcm(block5Buf, block5TailBytes))
+        assertEquals(5000.toShort(), block5Buf.getShort(0))
+        assertEquals((-5000).toShort(), block5Buf.getShort(2))
+        assertEquals(5000.toShort(), block5Buf.getShort(block5TailBytes - 4))
+        assertEquals((-5000).toShort(), block5Buf.getShort(block5TailBytes - 2))
+
         val blockBytes = framesPerBlock * 4 // 14,080 bytes
-        val expectedMarkers = intArrayOf(4, 5, 6)
-        for (expectedBlock in expectedMarkers) {
-            val readBuf = ByteBuffer.allocateDirect(blockBytes)
-            val bytesRead = bridge.readPcm(readBuf, blockBytes)
-            assertEquals(blockBytes, bytesRead)
-            assertEquals((expectedBlock * 1000).toShort(), readBuf.getShort(0))
-            assertEquals((-expectedBlock * 1000).toShort(), readBuf.getShort(2))
-            assertEquals((expectedBlock * 1000).toShort(), readBuf.getShort(blockBytes - 4))
-            assertEquals((-expectedBlock * 1000).toShort(), readBuf.getShort(blockBytes - 2))
-        }
+        val block6Buf = ByteBuffer.allocateDirect(blockBytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(blockBytes, bridge.readPcm(block6Buf, blockBytes))
+        assertEquals(6000.toShort(), block6Buf.getShort(0))
+        assertEquals((-6000).toShort(), block6Buf.getShort(2))
+        assertEquals(6000.toShort(), block6Buf.getShort(blockBytes - 4))
+        assertEquals((-6000).toShort(), block6Buf.getShort(blockBytes - 2))
 
-        // Next read after draining 220ms should be silence (0)
+        // Next read after draining 140ms should be silence (0)
         val silenceBuf = ByteBuffer.allocateDirect(1920)
         val silenceBytes = bridge.readPcm(silenceBuf, 1920)
         assertEquals(1920, silenceBytes)
