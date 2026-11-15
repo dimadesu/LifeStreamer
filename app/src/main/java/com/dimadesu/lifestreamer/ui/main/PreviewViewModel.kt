@@ -4397,15 +4397,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
-     * Get user-friendly label for audio source type.
-     * Only 2 sources are used in the app:
+     * Get user-friendly label for audio source type:
      * - MicrophoneSourceFactory: Phone Mic
-     * - MediaProjectionAudioSourceFactory: Media Projection Audio
+     * - IMediaProjectionSource: Media Projection Audio
+     * - ExoPlayerAudioSource: ExoPlayer Audio
+     * - BluetoothAudioSource: Bluetooth
      */
     private fun getAudioSourceLabel(audioSource: Any?): String {
         return when {
             audioSource == null -> application.getString(R.string.audio_source_none)
-            audioSource is IMediaProjectionSource || audioSource is ExoPlayerAudioSource ->
+            audioSource is ExoPlayerAudioSource ->
+                application.getString(R.string.audio_source_exoplayer)
+            audioSource is IMediaProjectionSource ->
                 application.getString(R.string.audio_source_rtmp)
             audioSource is com.dimadesu.lifestreamer.audio.BluetoothAudioSource ->
                 application.getString(R.string.audio_source_bluetooth)
