@@ -1687,6 +1687,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         streamingStartTime = System.currentTimeMillis()
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = "Reconnected successfully!"
+        _serviceStreamStatus.value = StreamStatus.STREAMING
         
         // Clear success message after 3 seconds
         serviceScope.launch {

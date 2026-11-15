@@ -3159,6 +3159,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 service?.completeReconnection()
                 Log.i(TAG, "Cleared reconnecting state after successful RTMP restart")
             }
+            service?.setStreamStatus(StreamStatus.STREAMING)
             
             Log.i(TAG, "Stream restarted with bitmap source (orientation preserved)")
             _rtmpStatusLiveData.postValue("RTMP disconnected - stream restarted with bitmap")
