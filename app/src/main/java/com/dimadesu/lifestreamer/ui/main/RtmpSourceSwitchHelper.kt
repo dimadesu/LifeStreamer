@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider
 import androidx.media3.extractor.DefaultExtractorsFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -61,9 +62,15 @@ internal object RtmpSourceSwitchHelper {
                     enableFloatOutput: Boolean,
                     enableAudioTrackPlaybackParams: Boolean
                 ): AudioSink {
+                    val bufferSizeProvider = DefaultAudioTrackBufferSizeProvider.Builder()
+                        .setMinPcmBufferDurationUs(80_000)
+                        .setMaxPcmBufferDurationUs(150_000)
+                        .setPcmBufferMultiplicationFactor(2)
+                        .build()
                     return DefaultAudioSink.Builder(context)
                         .setEnableFloatOutput(enableFloatOutput)
                         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .setAudioTrackBufferSizeProvider(bufferSizeProvider)
                         .setAudioProcessors(arrayOf(RtmpAudioBridge.createTapAudioProcessor()))
                         .build()
                 }
@@ -288,6 +295,7 @@ internal object RtmpSourceSwitchHelper {
                             // Switch audio source immediately after video.
                             try {
                                 currentStreamer.setAudioSource(ExoPlayerAudioSourceFactory())
+                                RtmpAudioBridge.flushRingBuffer()
                                 Log.i(TAG, "Set ExoPlayerAudioSource for RTMP")
                             } catch (ae: Exception) {
                                 Log.w(TAG, "Failed to set ExoPlayerAudioSource for RTMP: ${ae.message}")

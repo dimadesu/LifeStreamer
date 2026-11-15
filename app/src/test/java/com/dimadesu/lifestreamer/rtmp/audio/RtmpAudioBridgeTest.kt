@@ -113,14 +113,14 @@ class RtmpAudioBridgeTest {
     }
 
     @Test
-    fun sampleRateConversion44100To48000ProducesNonZeroOutput() {
+    fun sampleRateConversion44100To48000ProducesNonZeroOutputAndImmediateAudio() {
         val bridge = RtmpAudioBridgeCore()
         bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(44100, 2, C.ENCODING_PCM_16BIT))
 
-        // Feed ~200 ms of 44.1 kHz stereo 440Hz sine wave in 20ms chunks
+        // Feed 6 chunks of 20ms (120ms total, stays under 160ms cap) of 44.1 kHz stereo 440Hz sine wave
         val framesPerChunk = 882 // 20ms at 44100Hz
-        val totalChunks = 10
+        val totalChunks = 6
         var sampleIdx = 0
         for (chunk in 0 until totalChunks) {
             val buf = ByteBuffer.allocateDirect(framesPerChunk * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -132,19 +132,93 @@ class RtmpAudioBridgeTest {
             }
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
+
+            // Verify immediate low-latency output right after the first 20ms chunk (no initial buffering stall)
+            if (chunk == 0) {
+                assertTrue(
+                    "First chunk should produce immediate buffered output, was ${bridge.availableDurationMs()}ms",
+                    bridge.availableDurationMs() >= 18
+                )
+            }
         }
 
-        // Expect ~200ms at 48kHz stereo = 38400 bytes (allowing slight Sonic framing tail)
-        val readBuf = ByteBuffer.allocateDirect(3840 * 8) // 160ms read
+        // Expect ~120ms at 48kHz stereo; read 100ms (19,200 bytes)
+        val readBuf = ByteBuffer.allocateDirect(3840 * 5)
         val bytesRead = bridge.readPcm(readBuf, readBuf.capacity())
         assertEquals(readBuf.capacity(), bytesRead)
 
         var maxAbsSample = 0
-        while (readBuf.remaining() >= 2) {
-            val v = abs(readBuf.short.toInt())
+        var maxDelta = 0
+        var prevLeft = 0
+        var firstFrame = true
+        while (readBuf.remaining() >= 4) {
+            val left = readBuf.short.toInt()
+            val right = readBuf.short.toInt()
+            assertEquals("Stereo channels should match for identical L/R sine input", left, right)
+            val v = abs(left)
             if (v > maxAbsSample) maxAbsSample = v
+            if (!firstFrame) {
+                val delta = abs(left - prevLeft)
+                if (delta > maxDelta) maxDelta = delta
+            }
+            prevLeft = left
+            firstFrame = false
         }
-        assertTrue("Resampled audio should contain strong non-zero signal, max=$maxAbsSample", maxAbsSample > 5000)
+        assertTrue("Resampled audio should contain strong non-zero signal, max=$maxAbsSample", maxAbsSample > 10000)
+        assertTrue("Resampled signal should stay continuous across chunks, maxDelta=$maxDelta", maxDelta < 2500)
+    }
+
+    @Test
+    fun downsamplingFloatMono48000ToStereo44100PreservesContinuityAndImmediateOutput() {
+        val bridge = RtmpAudioBridgeCore()
+        bridge.setTargetConfig(44100, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+        bridge.onExoPlayerFormatChanged(Media3AudioFormat(48000, 1, C.ENCODING_PCM_FLOAT))
+
+        val framesPerChunk = 960 // 20ms at 48kHz
+        val totalChunks = 6 // 120ms
+        var sampleIdx = 0
+        for (chunk in 0 until totalChunks) {
+            val buf = ByteBuffer.allocateDirect(framesPerChunk * 4).order(ByteOrder.LITTLE_ENDIAN)
+            for (f in 0 until framesPerChunk) {
+                val sample = (sin(2.0 * PI * 440.0 * sampleIdx / 48000.0) * 0.5).toFloat()
+                buf.putFloat(sample)
+                sampleIdx++
+            }
+            buf.flip()
+            bridge.onExoPlayerAudioInput(buf)
+
+            if (chunk == 0) {
+                assertTrue(
+                    "First float chunk should immediately populate ring buffer, was ${bridge.availableDurationMs()}ms",
+                    bridge.availableDurationMs() >= 18
+                )
+            }
+        }
+
+        // Read 100ms at 44.1kHz stereo 16-bit = 4410 frames = 17,640 bytes
+        val readBuf = ByteBuffer.allocateDirect(4410 * 4)
+        val bytesRead = bridge.readPcm(readBuf, readBuf.capacity())
+        assertEquals(readBuf.capacity(), bytesRead)
+
+        var maxAbsSample = 0
+        var maxDelta = 0
+        var prevLeft = 0
+        var firstFrame = true
+        while (readBuf.remaining() >= 4) {
+            val left = readBuf.short.toInt()
+            val right = readBuf.short.toInt()
+            assertEquals("Mono float input should duplicate to L and R", left, right)
+            val v = abs(left)
+            if (v > maxAbsSample) maxAbsSample = v
+            if (!firstFrame) {
+                val delta = abs(left - prevLeft)
+                if (delta > maxDelta) maxDelta = delta
+            }
+            prevLeft = left
+            firstFrame = false
+        }
+        assertTrue("Downsampled float audio should contain strong signal, max=$maxAbsSample", maxAbsSample > 10000)
+        assertTrue("Downsampled signal should remain continuous across chunks, maxDelta=$maxDelta", maxDelta < 2500)
     }
 
     @Test
@@ -154,9 +228,9 @@ class RtmpAudioBridgeTest {
         bridge.setTargetConfig(sampleRate, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
 
-        // maxFillBytes = 750ms at 48kHz stereo 16-bit = 48000 * 4 * 3 / 4 = 144,000 bytes (36,000 frames)
-        // Push 1.5 seconds (72,000 frames) in 12,000-frame (250ms) blocks tagged by block index
-        val framesPerBlock = 12000
+        // maxFillBytes = 160ms at 48kHz stereo 16-bit = (48000 * 160 / 1000) * 4 = 30,720 bytes (7,680 frames)
+        // Push 320ms (15,360 frames) in 6 blocks of 2,560 frames (53.33ms, 10,240 bytes each) tagged by block index
+        val framesPerBlock = 2560
         for (block in 1..6) {
             val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
             val marker = (block * 1000).toShort()
@@ -168,8 +242,8 @@ class RtmpAudioBridgeTest {
             bridge.onExoPlayerAudioInput(buf)
         }
 
-        // First 750ms read should contain blocks 4, 5, 6 (newest 36,000 frames) without corruption
-        val blockBytes = framesPerBlock * 4 // 48,000 bytes
+        // First 160ms read should contain blocks 4, 5, 6 (newest 7,680 frames) without corruption
+        val blockBytes = framesPerBlock * 4 // 10,240 bytes
         val expectedMarkers = intArrayOf(4, 5, 6)
         for (expectedBlock in expectedMarkers) {
             val readBuf = ByteBuffer.allocateDirect(blockBytes)
@@ -181,12 +255,26 @@ class RtmpAudioBridgeTest {
             assertEquals((-expectedBlock * 1000).toShort(), readBuf.getShort(blockBytes - 2))
         }
 
-        // Next read after draining 750ms should be silence (0)
+        // Next read after draining 160ms should be silence (0)
         val silenceBuf = ByteBuffer.allocateDirect(1920)
         val silenceBytes = bridge.readPcm(silenceBuf, 1920)
         assertEquals(1920, silenceBytes)
         for (i in 0 until 1920) {
             assertEquals(0.toByte(), silenceBuf.get(i))
         }
+
+        // Verify flushRingBuffer resets buffered data while preserving format metadata
+        val extraBuf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (f in 0 until framesPerBlock) {
+            extraBuf.putShort(1234)
+            extraBuf.putShort(-1234)
+        }
+        extraBuf.flip()
+        bridge.onExoPlayerAudioInput(extraBuf)
+        assertTrue(bridge.availableDurationMs() > 0)
+        bridge.flushRingBuffer()
+        assertEquals(0, bridge.availableDurationMs())
+        assertTrue(bridge.hasActiveInput)
+        assertEquals(48000, bridge.inputSampleRate)
     }
 }

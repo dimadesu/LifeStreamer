@@ -31,6 +31,7 @@ class ExoPlayerAudioSource(
     companion object {
         private const val TAG = "ExoPlayerAudioSource"
         private const val MAX_DRIFT_NS = 200_000_000L // 200 ms resync threshold
+        private const val CATCH_UP_HIGH_WATERMARK_MS = 100
     }
 
     private var _bufferSize: Int = 3840 // default 20ms at 48kHz stereo 16-bit
@@ -92,6 +93,7 @@ class ExoPlayerAudioSource(
 
     override suspend fun startStream() {
         if (isRunning.getAndSet(true)) return
+        bridge.flushRingBuffer()
         nextReadTimeNs = System.nanoTime()
         _isStreamingFlow.tryEmit(true)
         try {
@@ -127,7 +129,14 @@ class ExoPlayerAudioSource(
         val maxWritable = buffer.remaining().let { if (it > 0) it else buffer.capacity() }
         val bytesToFill = (min(targetChunkBytes, maxWritable) / frameSize) * frameSize
         val framesToRead = (bytesToFill / frameSize).coerceAtLeast(1)
-        val frameDurationNs = (framesToRead * 1_000_000_000L) / sampleRate
+        val baseFrameDurationNs = (framesToRead * 1_000_000_000L) / sampleRate
+        val bufferedMs = bridge.availableDurationMs()
+        val frameDurationNs = if (bufferedMs > CATCH_UP_HIGH_WATERMARK_MS) {
+            // Pull ~5% faster when ring buffer creeps above high watermark to drain smoothly without drops
+            (baseFrameDurationNs * 95L) / 100L
+        } else {
+            baseFrameDurationNs
+        }
 
         val nowNs = System.nanoTime()
         val scheduledNs = nextReadTimeNs
