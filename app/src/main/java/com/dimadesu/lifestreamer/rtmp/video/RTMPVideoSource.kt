@@ -87,9 +87,7 @@ class RTMPVideoSource (
         // observe a transient 'not streaming' state when startStream is called.
         _isStreamingFlow.value = true
 
-        // Cancel any pending cleanup because we're starting streaming now
         mainHandler.post {
-            cancelPendingCleanup("before startStream")
             try {
                 // Ensure format listener is registered early so cached values are populated
                 try {
@@ -271,34 +269,8 @@ class RTMPVideoSource (
     private var inputSurface: Surface? = null
     private var outputSurfaceOutput: SurfaceOutput? = null
     private var previewSurfaceOutput: SurfaceOutput? = null
-    // Main thread handler used for scheduling/cancelling delayed cleanup
+    // Main thread handler for posting ExoPlayer operations
     private val mainHandler = Handler(Looper.getMainLooper())
-    // Single pending cleanup runnable reference so we can cancel it if preview/stream restarts
-    private var pendingCleanupRunnable: Runnable? = null
-    // Cancel and scheduling helpers to reduce duplication
-    private fun cancelPendingCleanup(reason: String? = null) {
-        pendingCleanupRunnable?.let {
-            Log.d(TAG, "Cancelling pending cleanup${reason?.let { r -> ": $r" } ?: ""}")
-            mainHandler.removeCallbacks(it)
-            pendingCleanupRunnable = null
-        }
-    }
-
-    private fun schedulePendingCleanup(delayMs: Long = 500L, action: () -> Unit) {
-        cancelPendingCleanup("scheduling new cleanup")
-        val runnable = Runnable {
-            try {
-                action()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in scheduled cleanup: ${e.message}", e)
-            } finally {
-                pendingCleanupRunnable = null
-            }
-        }
-        pendingCleanupRunnable = runnable
-        mainHandler.postDelayed(runnable, delayMs)
-        Log.d(TAG, "Scheduled pending cleanup in ${delayMs}ms")
-    }
     // Single listener instance to avoid leaks from multiple anonymous listeners
     private var playerListener: Player.Listener? = null
     // Listener to update cached format values on main thread.
@@ -399,7 +371,6 @@ class RTMPVideoSource (
         initializeSurfaceProcessor()
         Handler(Looper.getMainLooper()).post {
             try {
-                cancelPendingCleanup("setOutput called")
                 // Set the input surface (from surface processor) to ExoPlayer
                 // The surface processor will copy frames to both output and preview surfaces
                 inputSurface?.let { input ->
@@ -420,16 +391,12 @@ class RTMPVideoSource (
         previewSurface = surface
         initializeSurfaceProcessor()
         Log.d(TAG, "Preview surface set: $surface")
-        cancelPendingCleanup("setPreview called")
     }
 
     override suspend fun startPreview() {
         previewSurface?.let { surface ->
             _isPreviewingFlow.value = true
             Log.d(TAG, "Starting preview with surface processor")
-
-            // Cancel any pending cleanup because we're starting preview
-            cancelPendingCleanup("before startPreview")
 
             Handler(Looper.getMainLooper()).post {
                 try {
@@ -518,9 +485,6 @@ class RTMPVideoSource (
     }
 
     private fun initializeSurfaceProcessor() {
-        // Cancel any pending cleanup because we're initializing/updating surfaces
-        cancelPendingCleanup("initializeSurfaceProcessor called")
-
         if (surfaceProcessor == null && (outputSurface != null || previewSurface != null)) {
             try {
                 Log.d(TAG, "Initializing surface processor for dual output")
@@ -557,8 +521,6 @@ class RTMPVideoSource (
     }
 
     private fun addSurfacesToProcessor(forceRecreate: Boolean = false) {
-        // Cancel any pending cleanup because we're adding/updating surfaces
-        cancelPendingCleanup("addSurfacesToProcessor called")
         surfaceProcessor?.let { processor ->
             // Add output surface for streaming if available
             outputSurface?.let { surface ->
