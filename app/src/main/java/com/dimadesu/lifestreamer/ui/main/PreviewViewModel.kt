@@ -4468,6 +4468,16 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Reset disconnection handler guard flag and clean up RTMP connection monitoring
         isHandlingDisconnection = false
         stopRtmpConnectionMonitoring()
+        // RTMPVideoSource keeps ExoPlayer playing when preview stops. If we're not
+        // streaming, stop it so it doesn't keep playing unmonitored after the UI is gone.
+        // (startStream() from the notification re-prepares it if needed.)
+        if (serviceStreamer?.isStreamingFlow?.value != true) {
+            try {
+                currentRtmpPlayer?.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to stop RTMP player in onCleared(): ${e.message}")
+            }
+        }
         currentRtmpPlayer = null
         
         // Clean up UVC camera helper

@@ -180,51 +180,10 @@ class RTMPVideoSource (
     override suspend fun stopStream() {
     Log.d(TAG, "stopStream() called - streaming: ${_isStreamingFlow.value}")
         _isStreamingFlow.value = false
-        Handler(Looper.getMainLooper()).post {
-            try {
-                Log.d(TAG, "Stopping stream - current state: ${exoPlayer.playbackState}")
-                // If preview is active, keep playback running for the preview.
-                // Only pause playback immediately if no preview is active.
-                if (!_isPreviewingFlow.value) {
-                    exoPlayer.playWhenReady = false
-                    Log.d(TAG, "Set playWhenReady = false (no preview active)")
-                } else {
-                    Log.d(TAG, "Preview active - keeping playback for preview")
-                }
-
-                // Give a small delay before performing a full stop/cleanup. Only
-                // perform the full stop if both streaming and previewing are
-                // inactive to avoid interrupting an ongoing preview.
-                schedulePendingCleanup(500) {
-                    if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
-                        Log.d(TAG, "Delayed full stop: stopping ExoPlayer and clearing surface")
-                        exoPlayer.stop()
-                        exoPlayer.setVideoSurface(null)
-                        // Remove any attached listener to prevent leaks
-                        playerListener?.let { listener ->
-                            try {
-                                exoPlayer.removeListener(listener)
-                            } catch (ignored: Exception) {
-                            }
-                            playerListener = null
-                        }
-                        // Also remove formatListener if it was added
-                        if (isFormatListenerRegistered) {
-                            try {
-                                exoPlayer.removeListener(formatListener)
-                            } catch (ignored: Exception) {
-                            }
-                            isFormatListenerRegistered = false
-                        }
-                        Log.d(TAG, "Stream stopped and surface cleared")
-                    } else {
-                        Log.d(TAG, "Skipping full stop because preview or streaming became active")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping ExoPlayer: ${e.message}", e)
-            }
-        }
+        // Keep ExoPlayer playing so the RTMP source stays hot for preview and for
+        // restarting the stream (including from the background). Full stop/cleanup
+        // happens in release() when this source is replaced.
+        Log.d(TAG, "Stream stopped - keeping ExoPlayer playback active")
     }
 
 
@@ -510,48 +469,13 @@ class RTMPVideoSource (
             previewSurfaceOutput = null
         }
 
-        // If streaming is active, keep playback running for streaming; only
-        // pause/cleanup if neither streaming nor previewing are active.
-        Handler(Looper.getMainLooper()).post {
-            try {
-                if (!_isStreamingFlow.value) {
-                    exoPlayer.playWhenReady = false
-                    Log.d(TAG, "Set playWhenReady = false from stopPreview()")
-                } else {
-                    Log.d(TAG, "Streaming active - keeping playback after stopPreview()")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping preview playback: ${e.message}", e)
-            }
-        }
-
-        // If both previewing and streaming are now inactive, schedule a full stop
-        // to cleanup surfaces/listeners. Use a cancelable pending runnable so
-        // surface recreation or quick restarts cancel the cleanup.
-        schedulePendingCleanup(500) {
-            if (!_isStreamingFlow.value && !_isPreviewingFlow.value) {
-                Log.d(TAG, "Both streaming and preview inactive - performing full stop cleanup")
-                try {
-                    exoPlayer.stop()
-                    exoPlayer.setVideoSurface(null)
-                } catch (ignored: Exception) {
-                }
-                playerListener?.let { listener ->
-                    try {
-                        exoPlayer.removeListener(listener)
-                    } catch (ignored: Exception) {
-                    }
-                    playerListener = null
-                }
-                if (isFormatListenerRegistered) {
-                    try {
-                        exoPlayer.removeListener(formatListener)
-                    } catch (ignored: Exception) {
-                    }
-                    isFormatListenerRegistered = false
-                }
-            }
-        }
+        // Keep ExoPlayer playing (rendering into the offscreen surface processor input)
+        // even when preview stops (e.g. app backgrounded). This keeps the RTMP source hot
+        // so a stream can be started instantly from the background (notification) and
+        // avoids a spurious STATE_IDLE that PreviewViewModel would treat as a disconnect.
+        // ExoPlayer lifecycle is owned by PreviewViewModel/RtmpSourceSwitchHelper and
+        // release() when this source is replaced.
+        Log.d(TAG, "Preview stopped - keeping ExoPlayer playback active")
     }
 
     override fun <T> getPreviewSize(targetSize: Size, targetClass: Class<T>): Size {
