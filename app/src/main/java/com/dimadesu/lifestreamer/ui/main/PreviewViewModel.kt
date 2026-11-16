@@ -113,6 +113,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -3078,6 +3079,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (!isStreaming) {
                     // Not streaming - use hot-swap behavior (no bitrate regulator to manage)
                     handleRtmpDisconnectionWithHotSwap(currentStreamer, isStreaming = false)
+                } else if (service?.userStoppedManually?.value == true) {
+                    // Stream is already stopping due to a manual Stop — wait for stop/cleanup
+                    // and switch the broken RTMP source to bitmap fallback without restarting.
+                    Log.i(TAG, "RTMP disconnect while user stopped stream manually - falling back without restarting")
+                    fallbackRtmpWithoutStreamRestart(currentStreamer)
                 } else {
                     // Streaming - check if we should restart the stream (recommended) or use original hot-swap behavior
                     val shouldRestartStream = storageRepository.rtmpSourceRestartOnDisconnectFlow.first()
@@ -3094,6 +3100,69 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
     }
+
+    /**
+     * Fallback to bitmap and start RTMP retry without restarting the published stream
+     * (used when a manual stop or another stream reconnection owns the stream lifecycle).
+     */
+    private suspend fun fallbackRtmpWithoutStreamRestart(currentStreamer: SingleStreamer) {
+        withTimeoutOrNull(5000) {
+            while (currentStreamer.isStreamingFlow.value || service?.isCleanupInProgress == true) {
+                delay(100)
+            }
+        }
+        if (_activeRtmpIndex.value != null) {
+            handleRtmpDisconnectionWithHotSwap(
+                currentStreamer,
+                isStreaming = currentStreamer.isStreamingFlow.value
+            )
+        } else {
+            isHandlingDisconnection = false
+        }
+    }
+
+    private suspend fun switchToBitmapSourceAndRetryRtmp(
+        currentStreamer: SingleStreamer,
+        readdRegulatorOnConnect: Boolean
+    ) {
+        Log.i(TAG, "Switching to bitmap source with ExoPlayerAudioSource...")
+        currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
+
+        try {
+            currentStreamer.setAudioSource(ExoPlayerAudioSourceFactory())
+            Log.i(TAG, "Kept ExoPlayerAudioSource for RTMP retry")
+        } catch (e: Exception) {
+            Log.w(TAG, "ExoPlayerAudioSource failed during fallback: ${e.message}")
+        }
+
+        startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = readdRegulatorOnConnect)
+    }
+
+    private suspend fun startRtmpSourceRetry(
+        currentStreamer: SingleStreamer,
+        readdRegulatorOnConnect: Boolean
+    ) {
+        val activeIndex = _activeRtmpIndex.value ?: 1
+        val rtmpUrl = storageRepository.rtmpSourceUrlFlow(activeIndex).first()
+        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
+            application = application,
+            currentStreamer = currentStreamer,
+            testBitmap = testBitmap,
+            videoSourceUrl = rtmpUrl,
+            storageRepository = storageRepository,
+            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
+            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+            onRtmpConnected = { player ->
+                monitorRtmpConnection(player)
+                isHandlingDisconnection = false
+                if (readdRegulatorOnConnect) {
+                    viewModelScope.launch {
+                        readdBitrateRegulatorIfNeeded()
+                    }
+                }
+            }
+        )
+    }
     
     /**
      * Handle RTMP disconnection by stopping stream, switching to bitmap, and restarting.
@@ -3101,18 +3170,33 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Recommended approach - fixes OBS media source playback issues.
      */
     private suspend fun handleRtmpDisconnectionWithRestart(currentStreamer: SingleStreamer) {
+        if (service?.userStoppedManually?.value == true) {
+            Log.i(TAG, "Skipping RTMP disconnection restart - user stopped stream manually")
+            fallbackRtmpWithoutStreamRestart(currentStreamer)
+            return
+        }
+
         Log.i(TAG, "Handling RTMP disconnection - stopping stream, switching to bitmap, restarting")
         
         // Signal reconnecting state BEFORE stopping stream to prevent orientation unlock.
         // When isStreamingFlow becomes false, Fragment observers check isReconnecting
         // and will keep orientation locked if true.
         val reconnecting = service?.beginReconnection("RTMP stream playback stopped. Restarting stream") ?: false
-        if (reconnecting) {
-            service?.setReconnectionMessage("RTMP stream playback stopped. Restarting stream")
-            Log.i(TAG, "Set reconnecting state to preserve orientation during RTMP restart")
-        } else {
-            Log.w(TAG, "Could not set reconnecting state - orientation may unlock during restart")
+        if (!reconnecting) {
+            Log.w(
+                TAG,
+                "Could not begin reconnection (userStopped=${service?.userStoppedManually?.value}, " +
+                    "isReconnecting=${service?.isReconnecting?.value}, cleanup=${service?.isCleanupInProgress}) - aborting stream restart"
+            )
+            if (service != null) {
+                fallbackRtmpWithoutStreamRestart(currentStreamer)
+            } else {
+                isHandlingDisconnection = false
+            }
+            return
         }
+        service?.setReconnectionMessage("RTMP stream playback stopped. Restarting stream")
+        Log.i(TAG, "Set reconnecting state to preserve orientation during RTMP restart")
         
         // Cancel existing retry job and wait for it to finish.
         // The retry loop runs on a standalone CoroutineScope(Dispatchers.Main),
@@ -3138,6 +3222,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         currentRtmpPlayer = null
         RtmpAudioBridge.clear()
+
+        if (service?.userStoppedManually?.value == true) {
+            Log.i(TAG, "User stopped stream manually before published stream teardown - aborting restart")
+            service?.cancelReconnection()
+            fallbackRtmpWithoutStreamRestart(currentStreamer)
+            return
+        }
         
         // Stop the published stream
         Log.i(TAG, "Stopping published stream...")
@@ -3157,6 +3248,22 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         
         // Small delay
         delay(500)
+
+        if (service?.userStoppedManually?.value == true) {
+            Log.i(TAG, "User stopped stream manually during RTMP restart cleanup - keeping stream stopped")
+            service?.cancelReconnection()
+            withTimeoutOrNull(4000) {
+                while (currentStreamer.isStreamingFlow.value || service?.isCleanupInProgress == true) {
+                    delay(100)
+                }
+            }
+            if (_activeRtmpIndex.value != null) {
+                switchToBitmapSourceAndRetryRtmp(currentStreamer, readdRegulatorOnConnect = false)
+            } else {
+                isHandlingDisconnection = false
+            }
+            return
+        }
         
         // Switch to bitmap source, keeping ExoPlayerAudioSource
         Log.i(TAG, "Switching to bitmap source with ExoPlayerAudioSource...")
@@ -3196,12 +3303,20 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // Restart the published stream (SRT, SRTLA, or RTMP) using shared start logic
         Log.i(TAG, "Restarting published stream...")
         val restartSuccess = doStartStream(shouldAutoRetry = true)
+        if (service?.userStoppedManually?.value == true) {
+            Log.i(TAG, "User stopped stream manually during RTMP restart - aborting restart completion")
+            service?.cancelReconnection()
+            if (_activeRtmpIndex.value != null) {
+                startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = false)
+            } else {
+                isHandlingDisconnection = false
+            }
+            return
+        }
         if (restartSuccess) {
             // Clear reconnecting state now that stream is back up
-            if (reconnecting) {
-                service?.completeReconnection()
-                Log.i(TAG, "Cleared reconnecting state after successful RTMP restart")
-            }
+            service?.completeReconnection()
+            Log.i(TAG, "Cleared reconnecting state after successful RTMP restart")
             service?.setStreamStatus(StreamStatus.STREAMING)
             
             Log.i(TAG, "Stream restarted with bitmap source (orientation preserved)")
@@ -3209,9 +3324,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         } else {
             Log.e(TAG, "Failed to restart stream after RTMP disconnect")
             // Cancel current reconnecting state so handleDisconnection can begin fresh
-            if (reconnecting) {
-                service?.cancelReconnection()
-            }
+            service?.cancelReconnection()
             isHandlingDisconnection = false
             // Delegate to standard reconnection handler - will retry with 5-second intervals
             // Sources (bitmap video + audio) are already configured, so attemptReconnection
@@ -3221,24 +3334,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         
         // Start retry loop to reconnect RTMP
-        val activeIndexRestart = _activeRtmpIndex.value ?: 1
-        val rtmpUrlRestart = storageRepository.rtmpSourceUrlFlow(activeIndexRestart).first()
-        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-            application = application,
-            currentStreamer = currentStreamer,
-            testBitmap = testBitmap,
-            videoSourceUrl = rtmpUrlRestart,
-            storageRepository = storageRepository,
-            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-            onRtmpConnected = { player -> 
-                monitorRtmpConnection(player)
-                isHandlingDisconnection = false
-                viewModelScope.launch {
-                    readdBitrateRegulatorIfNeeded()
-                }
-            }
-        )
+        startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = true)
     }
     
     /**
@@ -3295,27 +3391,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         RtmpAudioBridge.clear()
         
         // Start retry loop
-        val activeIndexHotSwap = _activeRtmpIndex.value ?: 1
-        val rtmpUrlHotSwap = storageRepository.rtmpSourceUrlFlow(activeIndexHotSwap).first()
-        rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
-            application = application,
-            currentStreamer = currentStreamer,
-            testBitmap = testBitmap,
-            videoSourceUrl = rtmpUrlHotSwap,
-            storageRepository = storageRepository,
-            postError = { msg -> _streamerErrorLiveData.postValue(msg) },
-            postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-            onRtmpConnected = { player -> 
-                monitorRtmpConnection(player)
-                isHandlingDisconnection = false
-                if (isStreaming) {
-                    // Re-add bitrate regulator after RTMP connects (video encoder may have changed)
-                    viewModelScope.launch {
-                        readdBitrateRegulatorIfNeeded()
-                    }
-                }
-            }
-        )
+        startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = isStreaming)
     }
 
     /**
@@ -3434,7 +3510,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     removeBitrateRegulatorIfNeeded()
 
                     // Cancel any existing retry job first
-                    rtmpRetryJob?.cancel()
+                    rtmpRetryJob?.cancelAndJoin()
                     rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
                         application = application,
                         currentStreamer = currentStreamer,
@@ -3443,8 +3519,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         storageRepository = storageRepository,
                         postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                         postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
+                        onBitmapFallback = {
+                            readdBitrateRegulatorIfNeeded()
+                        },
                         onRtmpConnected = { player ->
                             monitorRtmpConnection(player)
+                            isHandlingDisconnection = false
                             viewModelScope.launch {
                                 readdBitrateRegulatorIfNeeded()
                             }
@@ -3464,14 +3544,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Clear suppress flag (in case it was set and RTMP never connected)
                     suppressPassthroughObserver = false
 
-                    // Clear RTMP status message FIRST before cancelling job
+                    // Clear RTMP status message before and after cancelling job
                     // (job might be in middle of delay showing error message)
                     // Use setValue for immediate effect since we're on main thread
                     _rtmpStatusLiveData.value = null
 
                     // Cancel any ongoing RTMP retry loop and reset disconnection flag
-                    rtmpRetryJob?.cancel()
+                    rtmpRetryJob?.cancelAndJoin()
                     rtmpRetryJob = null
+                    _rtmpStatusLiveData.value = null
                     isHandlingDisconnection = false // Reset flag when cancelling retry
                     Log.i(TAG, "Cancelled RTMP retry loop and reset disconnection flag")
                     
