@@ -2970,6 +2970,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             applyMonitorAudioState()
         }
         
+        // Keep a 1s video-frame watchdog across both STATE_READY and STATE_BUFFERING:
+        // the configured bufferForPlaybackMs absorbs normal jitter while READY, so any
+        // rebuffer or stall that withholds frames for >= 1s is intentionally treated as
+        // a disconnect instead of freezing downstream video for multiple seconds.
         val frameWatchdogTimeoutMs = 1_000L // 1 second without rendered video frames = disconnection
         val watchdogPollIntervalMs = 200L
         lastRtmpVideoFrameTimeMs = SystemClock.elapsedRealtime()

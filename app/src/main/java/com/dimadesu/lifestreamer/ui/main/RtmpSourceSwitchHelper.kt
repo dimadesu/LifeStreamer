@@ -3,6 +3,7 @@ package com.dimadesu.lifestreamer.ui.main
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -12,6 +13,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -47,17 +51,40 @@ internal object RtmpSourceSwitchHelper {
         return url.lowercase().startsWith("srt://")
     }
 
+    /**
+     * Build a [DefaultLoadControl] using [bufferForPlaybackMs] for both initial start
+     * and post-rebuffer resume so ExoPlayer honors the user's configured buffer cushion
+     * instead of forcing ExoPlayer's hardcoded 5,000 ms rebuffer threshold.
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    internal fun createLoadControl(bufferForPlaybackMs: Int): DefaultLoadControl {
+        val playbackBufferMs = bufferForPlaybackMs.coerceIn(0, DefaultLoadControl.DEFAULT_MIN_BUFFER_MS)
+        return DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS, // 50 seconds
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS, // 50 seconds
+                playbackBufferMs, // Start playback after buffering this many ms
+                playbackBufferMs  // Match user buffer on rebuffer instead of 5s default
+            )
+            .build()
+    }
+
+    /**
+     * Fail fast on transport/IO errors for live RTMP/SRT sources so ExoPlayer surfaces
+     * `onPlayerError` immediately instead of retrying internally across multiple seconds.
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    internal fun createFailFastLoadErrorHandlingPolicy(): LoadErrorHandlingPolicy =
+        object : DefaultLoadErrorHandlingPolicy(/* minimumLoadableRetryCount = */ 0) {
+            override fun getRetryDelayMsFor(
+                loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo
+            ): Long = C.TIME_UNSET
+        }
+
     @androidx.annotation.OptIn(UnstableApi::class)
     suspend fun createExoPlayer(application: Application, url: String, bufferForPlaybackMs: Int): ExoPlayer =
         withContext(Dispatchers.Main) {
-            val loadControl = DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,      // 50 seconds
-                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,      // 50 seconds
-                    bufferForPlaybackMs, // Start playback after buffering this many ms
-                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS  // 5 seconds
-                )
-                .build()
+            val loadControl = createLoadControl(bufferForPlaybackMs)
 
             val renderersFactory = object : DefaultRenderersFactory(application) {
                 override fun buildAudioSink(
@@ -85,21 +112,24 @@ internal object RtmpSourceSwitchHelper {
                 .build()
 
             val mediaItem = MediaItem.fromUri(url)
-            
+
             // Use SRT data source for srt:// URLs, otherwise use default (supports RTMP, etc.)
-            val mediaSource = if (isSrtUrl(url)) {
-                Log.i(TAG, "Creating SRT media source for: $url")
-                androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
+            val isSrt = isSrtUrl(url)
+            Log.i(TAG, "Creating ${if (isSrt) "SRT" else "default"} media source for: $url")
+            val mediaSourceFactory = if (isSrt) {
+                ProgressiveMediaSource.Factory(
                     SrtDataSourceFactory(),
                     TsOnlyExtractorFactory()
-                ).createMediaSource(mediaItem)
+                )
             } else {
-                Log.i(TAG, "Creating default media source for: $url")
-                androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
+                ProgressiveMediaSource.Factory(
                     DefaultDataSource.Factory(application),
                     DefaultExtractorsFactory()
-                ).createMediaSource(mediaItem)
+                )
             }
+            val mediaSource = mediaSourceFactory
+                .setLoadErrorHandlingPolicy(createFailFastLoadErrorHandlingPolicy())
+                .createMediaSource(mediaItem)
 
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.volume = 0f
