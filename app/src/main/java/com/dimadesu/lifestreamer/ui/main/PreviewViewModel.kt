@@ -3030,6 +3030,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             while (isActive) {
                 delay(watchdogPollIntervalMs)
                 if (currentRtmpPlayer !== player || isHandlingDisconnection) break
+                if (!player.playWhenReady) {
+                    lastRtmpVideoFrameTimeMs = SystemClock.elapsedRealtime()
+                    continue
+                }
                 val playbackState = player.playbackState
                 if (playbackState == androidx.media3.common.Player.STATE_READY ||
                     playbackState == androidx.media3.common.Player.STATE_BUFFERING
