@@ -84,24 +84,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="In the bottom left corner of the Main screen, there is a button to switch to/from RTMP source. Once pressed, it will try to open the RTMP URL set in Settings. If successful, the app will switch preview and output to RTMP source. If not, it will fall back to a placeholder image view."
-      android:textSize="16sp"
-      android:lineSpacingMultiplier="1.2"
-      android:paddingBottom="16dp" />
-
-    <TextView
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:text="How to capture RTMP audio?"
-      android:textSize="20sp"
-      android:textStyle="bold"
-      android:paddingTop="8dp"
-      android:paddingBottom="8dp" />
-
-    <TextView
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:text="LifeStreamer app uses ExoPlayer to playback RTMP streams. App needs your permission to use Media Projection API (aka Android screen recorder) to capture RTMP player audio from ExoPlayer.\n\nRTMP video is easy to capture from the RTMP player without a screen recorder.\n\nYou need to allow the app to capture audio when prompted by the Android system dialog.\n\nFor RTMP source LifeStreamer app captures only its own audio (from ExoPlayer) using Media Projection and nothing else.\n\nOn newer phones, for screen capture Android might ask to record a single app or the whole phone. This doesn't affect audio capture. You can use either option."
+      android:text="In the bottom left corner of the Main screen, there is a button to switch to/from RTMP source. Once pressed, it will try to open the RTMP URL set in the settings. If successful, the app will switch preview and output to RTMP source. If not, it will fall back to a placeholder image."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
