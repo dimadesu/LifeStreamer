@@ -117,4 +117,13 @@ class RtmpSourceSwitchHelperTest {
             )
         )
     }
+
+    @Test
+    fun remainingStatusDisplayMs_padsFastFailuresAndSkipsSlowAttempts() {
+        assertEquals(1_000L, RtmpSourceSwitchHelper.MIN_STATUS_DISPLAY_MS)
+        assertEquals(980L, RtmpSourceSwitchHelper.remainingStatusDisplayMs(elapsedMs = 20L))
+        assertEquals(0L, RtmpSourceSwitchHelper.remainingStatusDisplayMs(elapsedMs = 1_000L))
+        assertEquals(0L, RtmpSourceSwitchHelper.remainingStatusDisplayMs(elapsedMs = 7_500L))
+        assertEquals(1_000L, RtmpSourceSwitchHelper.remainingStatusDisplayMs(elapsedMs = -50L))
+    }
 }
