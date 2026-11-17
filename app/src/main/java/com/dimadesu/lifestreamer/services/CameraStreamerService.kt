@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
+import com.dimadesu.lifestreamer.rtmp.audio.ExoPlayerAudioSource
 import kotlinx.coroutines.*
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
@@ -1375,9 +1376,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         val isStreaming = streamer.isStreamingFlow.value
         val passthroughWasRunning = _isPassthroughRunning.value
         
-        // Check if using mic-based audio (not MediaProjection) - BT mic only applies to mic-based audio
+        // Check if using mic-based audio (not MediaProjection/ExoPlayer) - BT mic only applies to mic-based audio
         val currentAudioSource = (streamer as? IWithAudioSource)?.audioInput?.sourceFlow?.value
-        val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource
+        val isMediaProjectionAudio = currentAudioSource is IMediaProjectionSource || currentAudioSource is ExoPlayerAudioSource
         
         // Attempt SCO whenever mic-based audio is active (pre-stream and during streaming).
         // Previously deferred pre-stream, but that left VU meters on built-in mic until stream start.
@@ -1686,6 +1687,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         streamingStartTime = System.currentTimeMillis()
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = "Reconnected successfully!"
+        _serviceStreamStatus.value = StreamStatus.STREAMING
         
         // Clear success message after 3 seconds
         serviceScope.launch {

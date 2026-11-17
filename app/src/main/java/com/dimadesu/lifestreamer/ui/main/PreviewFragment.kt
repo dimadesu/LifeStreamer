@@ -1217,24 +1217,10 @@ class PreviewFragment : Fragment(R.layout.main_fragment) {
     }
 
     /**
-     * Toggle RTMP video source, showing an explanation dialog before requesting
-     * MediaProjection permission when the user is switching to RTMP for the first time
-     * and no MediaProjection token exists yet.
+     * Toggle RTMP video source. Uses direct ExoPlayer audio capture without requiring MediaProjection.
      */
     private fun toggleVideoSourceWithExplanation(rtmpIndex: Int) {
-        val isSwitchingTo = previewViewModel.activeRtmpIndex.value != rtmpIndex
-        if (isSwitchingTo && !previewViewModel.rtmpAudioExplanationShown && !previewViewModel.hasMediaProjection()) {
-            previewViewModel.pendingRtmpIndex = rtmpIndex
-            if (childFragmentManager.findFragmentByTag(ExplanationDialogFragment.RTMP_AUDIO_TAG) == null) {
-                ExplanationDialogFragment.newInstance(
-                    R.string.rtmp_audio_explanation_title,
-                    R.string.rtmp_audio_explanation_message,
-                    ExplanationDialogFragment.RTMP_AUDIO_TAG
-                ).show(childFragmentManager, ExplanationDialogFragment.RTMP_AUDIO_TAG)
-            }
-        } else {
-            previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
-        }
+        previewViewModel.toggleVideoSource(mediaProjectionLauncher, rtmpIndex = rtmpIndex)
     }
 
     /**

@@ -34,6 +34,7 @@
     <string name="rtmp_audio_explanation_title">ExoPlayer Audio Capture</string>
     <string name="rtmp_audio_explanation_message">LifeStreamer uses ExoPlayer to playback RTMP or SRT streams. App needs your permission to capture ExoPlayer audio output.\n\nNew Android versions ask to choose a single app or the entire device for video capture. This choice has no effect on audio capture.\n\nLifeStreamer records only its own (ExoPlayer) audio and nothing else for RTMP source.</string>
     <string name="audio_source_rtmp">Media Projection Audio</string>
+    <string name="audio_source_exoplayer">ExoPlayer Audio</string>
     <string name="audio_source_none">No Audio</string>
 
     <!-- Notification action labels -->
@@ -245,7 +246,7 @@
     <string name="rtmp_source_url_key">rtmp_source_url_key</string>
     <string name="rtmp_source_default_url">rtmp://localhost:1935/publish/live</string>
     <string name="rtmp_source_restart_on_disconnect_key">rtmp_source_restart_on_disconnect_key</string>
-    <string name="rtmp_source_restart_on_disconnect_title">Restart SRT stream on RTMP source disconnect</string>
+    <string name="rtmp_source_restart_on_disconnect_title">When RTMP source disconnects restart the stream that LifeStreamer publishes</string>
     <string name="rtmp_source_restart_on_disconnect_summary">Recommended. Fixes OBS media source playback issues when RTMP source disconnects.</string>
     <string name="rtmp_source_require_audio_track_key">rtmp_source_require_audio_track_key</string>
     <string name="rtmp_source_require_audio_track_title">Restart playback if player doesn\'t detect audio track</string>

@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import io.github.thibaultbee.streampack.core.interfaces.IWithAudioSource
 import io.github.thibaultbee.streampack.core.streamers.single.ISingleStreamer
 import io.github.thibaultbee.streampack.core.elements.sources.IMediaProjectionSource
+import com.dimadesu.lifestreamer.rtmp.audio.ExoPlayerAudioSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -91,11 +92,12 @@ class BluetoothAudioManager(
                 scope.launch(Dispatchers.Default) {
                     try {
                         val audioStreamer = streamer as? IWithAudioSource
-                        val isMediaProjectionActive = audioStreamer?.audioInput?.sourceFlow?.value is IMediaProjectionSource
+                        val currentSource = audioStreamer?.audioInput?.sourceFlow?.value
+                        val isMediaProjectionActive = currentSource is IMediaProjectionSource || currentSource is ExoPlayerAudioSource
 
                         if (isMediaProjectionActive) {
-                            // SYS AUDIO is active — just stop SCO/cleanup, don't touch the audio source
-                            Log.i(TAG, "applyPolicy disable: MediaProjection audio active, only stopping SCO")
+                            // Non-mic audio is active — just stop SCO/cleanup, don't touch the audio source
+                            Log.i(TAG, "applyPolicy disable: Non-mic audio active, only stopping SCO")
                             stopScoAndResetAudio()
                             BluetoothAudioConfig.setPreferredDevice(null)
                             _scoStateFlow.tryEmit(ScoState.IDLE)
@@ -123,10 +125,11 @@ class BluetoothAudioManager(
                         // Skip when SYS AUDIO is taking over — ViewModel sets MP via
                         // setAudioSourceBasedOnVideoSource() and any source switch here
                         // would race and override it.
-                        // Also re-check at runtime in case SYS AUDIO activated during delays.
-                        val isMediaProjectionNow = audioStreamer?.audioInput?.sourceFlow?.value is IMediaProjectionSource
+                        // Also re-check at runtime in case SYS AUDIO / ExoPlayer activated during delays.
+                        val nowSource = audioStreamer?.audioInput?.sourceFlow?.value
+                        val isMediaProjectionNow = nowSource is IMediaProjectionSource || nowSource is ExoPlayerAudioSource
                         if (sysAudioTransition || isMediaProjectionNow) {
-                            Log.i(TAG, "applyPolicy disable: Step 3 skipped - SYS AUDIO transition or MediaProjection now active")
+                            Log.i(TAG, "applyPolicy disable: Step 3 skipped - SYS AUDIO transition or non-mic source now active")
                         } else {
                             Log.i(TAG, "applyPolicy disable: Step 3 - recreate audio source")
                             audioStreamer?.setAudioSource(ConditionalAudioSourceFactory())
@@ -600,9 +603,10 @@ class BluetoothAudioManager(
             scope.launch(Dispatchers.Default) {
                 try {
                     val audioInput = (streamerInstance as? IWithAudioSource)?.audioInput
-                    // Don't overwrite MediaProjection audio source (e.g. SYS AUDIO active)
-                    if (audioInput?.sourceFlow?.value is IMediaProjectionSource) {
-                        Log.i(TAG, "Recreate mic source: skipped - MediaProjection audio is active")
+                    // Don't overwrite MediaProjection or ExoPlayer audio source
+                    val currentSource = audioInput?.sourceFlow?.value
+                    if (currentSource is IMediaProjectionSource || currentSource is ExoPlayerAudioSource) {
+                        Log.i(TAG, "Recreate mic source: skipped - non-mic audio source is active")
                         return@launch
                     }
                     // After BT disconnect, current source is BluetoothAudioSource which won't match
