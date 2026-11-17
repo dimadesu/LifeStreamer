@@ -49,7 +49,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Stopping RTMP source can disrupt SRT playback in OBS (no audio)"
+      android:text="Stopping RTMP source can disrupt stream playback in OBS (no audio)"
       android:textSize="20sp"
       android:textStyle="bold"
       android:paddingTop="8dp"
@@ -58,7 +58,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Inside LifeStreamer app on the Settings screen there is a toggle to restart SRT stream to fix this issue."
+      android:text="Inside LifeStreamer app on the Settings screen there is a toggle to restart publishing of stream from LifeStreamer to fix this issue."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -66,7 +66,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="When? RTMP source in LifeStreamer app is toggled ON and RTMP plays fine. User re-streams RTMP as SRT using LifeStreamer app. SRT stream is played in OBS using media source. User stops RTMP stream on purpose or it gets disconnected."
+      android:text="When? RTMP source in LifeStreamer app is toggled ON and RTMP plays fine. User re-streams RTMP using LifeStreamer app. Stream published from LifeStreamer is played in OBS using media source. User stops RTMP stream on purpose or it gets disconnected."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -74,7 +74,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="The issue. There is a high chance that SRT playback in OBS will be disrupted and might end up without audio and won't be able to recover automatically."
+      android:text="The issue. There is a high chance that playback in OBS will be disrupted and might end up without audio and won't be able to recover automatically."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />
@@ -90,7 +90,7 @@
     <TextView
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:text="Workaround 2. Monitor final stream for this issue. Restart SRT playback in OBS to fix it: either stop and start publishing SRT stream from LifeStreamer app or change scene in OBS to the one without SRT source and back."
+      android:text="Workaround 2. Monitor final stream for this issue. Restart playback in OBS to fix it: either stop and start publishing stream from LifeStreamer app or change scene in OBS to the one without this stream source and back."
       android:textSize="16sp"
       android:lineSpacingMultiplier="1.2"
       android:paddingBottom="16dp" />

@@ -47,7 +47,7 @@ There are more features available in [LifeStreamerV2](https://github.com/dimades
 - USB audio: USB headphones, USB audio interfaces, wireless mic receivers, etc.
   - With USB video LifeStreamer is using USB audio from USB camera if available.
 - Mics from Bluetooth headphones, earbuds, etc.
-- For RTMP and SRT sources app uses Media Projection Audio to record RTMP/SRT player audio - kind of like phone screen recorder.
+- For RTMP and SRT sources app uses ExoPlayer to play the streams, so UI will show 'ExoPlayer Audio'.
 - Record device's audio output (system audio).
 
 ![LifeStreamer app: inputs and outputs diagram](docs/LifeStreamer-inputs-outputs-diagram.png)
