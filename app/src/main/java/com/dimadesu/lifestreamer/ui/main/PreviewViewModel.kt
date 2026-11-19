@@ -3371,9 +3371,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             readdBitrateRegulatorIfNeeded()
         }
         
-        // Small delay to let the video source release complete and surface processor cleanup
-        delay(100)
-        
         // Now release the old ExoPlayer to prevent multiple instances playing simultaneously
         // (which causes audio echo when captured by MediaProjection)
         currentRtmpPlayer?.let { player ->
@@ -3574,10 +3571,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         mediaProjectionHelper.release()
                     }
 
-                    // Add delay before switching sources to allow RTMP/ExoPlayer to fully release
-                    // This prevents resource conflicts when hot-swapping sources
-                    kotlinx.coroutines.delay(300)
-                    
                     // Remove bitrate regulator if streaming with SRT
                     removeBitrateRegulatorIfNeeded()
                     
