@@ -80,9 +80,6 @@ fun initializeUvcCamera(context: Context) {
 ```kotlin
 suspend fun switchToUvcSource(streamer: SingleStreamer, cameraHelper: CameraHelper) {
     try {
-        // Optional: Add delay for clean source transition
-        delay(300)
-
         // Set UVC video source
         streamer.setVideoSource(UvcVideoSource.Factory(cameraHelper))
 

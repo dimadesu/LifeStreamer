@@ -1112,9 +1112,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      */
     private suspend fun switchToUvcBitmapFallback(streamer: SingleStreamer, bitmap: Bitmap) {
         try {
-            // Add delay before switching sources to allow previous sources to fully release
-            kotlinx.coroutines.delay(300)
-            
             // Set video to bitmap - audio stays unchanged (already on microphone for UVC)
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
             Log.i(TAG, "Switched to UVC bitmap fallback (audio unchanged)")
@@ -3711,7 +3708,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         removeBitrateRegulatorIfNeeded()
                         
                         // Switch back to camera (audio unchanged)
-                        delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
                         // Now explicitly release the CameraHelper since user toggled UVC OFF
@@ -3802,7 +3798,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 removeBitrateRegulatorIfNeeded()
                                                 
                                                 // Switch back to UVC source
-                                                delay(300)
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
                                                 
                                                 // Re-add bitrate regulator if streaming with SRT
@@ -3838,7 +3833,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 removeBitrateRegulatorIfNeeded()
                                                 
                                                 // Switch to UVC source (audio source unchanged - Android handles USB audio routing)
-                                                delay(300)
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
                                                 
                                                 // Re-add bitrate regulator if streaming with SRT
@@ -3972,7 +3966,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         removeBitrateRegulatorIfNeeded()
                         
                         // Switch to UVC source first
-                        delay(300)
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
                         
                         // Re-add bitrate regulator if streaming with SRT
@@ -3999,7 +3992,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Remove bitrate regulator if streaming with SRT
                         removeBitrateRegulatorIfNeeded()
                         
-                        delay(300)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
                         // Re-add bitrate regulator if streaming with SRT
