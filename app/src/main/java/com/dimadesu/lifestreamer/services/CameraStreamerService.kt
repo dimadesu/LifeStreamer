@@ -56,6 +56,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import com.dimadesu.lifestreamer.audio.BluetoothAudioSource
 import com.dimadesu.lifestreamer.audio.ScoOrchestrator
+import io.github.thibaultbee.streampack.core.elements.endpoints.DualEndpoint
+import io.github.thibaultbee.streampack.core.elements.endpoints.DualEndpointFactory
+import io.github.thibaultbee.streampack.core.elements.endpoints.DynamicEndpointFactory
+import io.github.thibaultbee.streampack.core.elements.endpoints.DynamicLocalEndpointFactory
+import io.github.thibaultbee.streampack.core.elements.endpoints.isLocal
+import io.github.thibaultbee.streampack.core.elements.endpoints.openSecond
 
 /**
  * CameraStreamerService extending StreamerService for camera streaming
@@ -65,7 +71,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         override fun create(context: Context): ISingleStreamer {
             return SingleStreamer(
                 context,
-                audioInputMode = AudioInputMode.PUSH
+                audioInputMode = AudioInputMode.PUSH,
+                endpointFactory = DualEndpointFactory(
+                    mainEndpointFactory = DynamicLocalEndpointFactory(),
+                    secondEndpointFactory = DynamicEndpointFactory()
+                )
             )
         }
     },
@@ -588,14 +598,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // when the stream truly stops (not during reconnection cleanup)
         // This prevents rotation changes from being accepted during reconnection
         Log.i(TAG, "Streaming stopped - rotation lock maintained for potential reconnection")
-        
-        // Release wake locks when streaming stops
-        releaseWakeLock()
-        releaseNetworkWakeLock()
-        // clear start time
-        streamingStartTime = null
-        // Clear uptime so UI hides the uptime display immediately
-        try { _uptimeFlow.tryEmit(null) } catch (_: Throwable) {}
+
+        if (!_isReconnecting.value) {
+            // Release wake locks when streaming truly stops
+            releaseWakeLock()
+            releaseNetworkWakeLock()
+            // clear start time
+            streamingStartTime = null
+            // Clear uptime so UI hides the uptime display immediately
+            try { _uptimeFlow.tryEmit(null) } catch (_: Throwable) {}
+        } else {
+            Log.i(TAG, "Keeping wake locks and start time during reconnection")
+        }
         
         // Override the base class behavior to NOT stop the service when streaming stops
         // This allows the service to remain running for quick restart of streaming
@@ -1201,14 +1215,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
 
             try {
+                // Keep device and network awake during initial connect and any retries
+                acquireWakeLock()
+                acquireNetworkWakeLock()
+
                 // Indicate we're attempting to connect/open
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
-                // Use NonCancellable for camera configuration to prevent "Broken pipe" errors
-                // if coroutine is cancelled during camera setup
+                val dualEndpoint = currentStreamer.endpoint as? DualEndpoint
                 withTimeout(10000) { // 10s open timeout
-                    // withContext(NonCancellable) {
+                    if (dualEndpoint != null && !descriptor.type.sinkType.isLocal) {
+                        dualEndpoint.openSecond(descriptor)
+                    } else {
                         currentStreamer.open(descriptor)
-                    // }
+                    }
                 }
                 
                 // Wait for encoders to be initialized after open
@@ -1620,6 +1639,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             Log.i(TAG, "Cancelling reconnection due to manual stop")
             _isReconnecting.value = false
             _reconnectionStatusMessage.value = null
+            if (streamer.isStreamingFlow.value != true) {
+                releaseWakeLock()
+                releaseNetworkWakeLock()
+            }
         }
     }
     
@@ -1684,7 +1707,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      */
     fun completeReconnection() {
         Log.i(TAG, "Reconnection completed successfully")
-        streamingStartTime = System.currentTimeMillis()
+        if (streamingStartTime == null) {
+            streamingStartTime = System.currentTimeMillis()
+        }
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = "Reconnected successfully!"
         _serviceStreamStatus.value = StreamStatus.STREAMING
@@ -1706,6 +1731,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Set flag FIRST before status to avoid intermediate state
         _isReconnecting.value = false
         _reconnectionStatusMessage.value = null
+        if (streamer.isStreamingFlow.value != true) {
+            releaseWakeLock()
+            releaseNetworkWakeLock()
+        }
         // Now update status - this will trigger notification observer
         _serviceStreamStatus.value = StreamStatus.NOT_STREAMING
     }
