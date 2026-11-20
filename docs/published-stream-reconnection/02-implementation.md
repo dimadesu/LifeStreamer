@@ -43,3 +43,28 @@ Sorry about the delay earlier — several stream interruptions occurred during p
   - `:app:testDebugUnitTest` and `:app:assembleDebug` passed (`BUILD SUCCESSFUL`).
   - `:streampack-core:testDebugUnitTest` and `:streampack-ui:testDebugUnitTest` passed (`BUILD SUCCESSFUL`; `streampack-flv`, `streampack-rtmp`, `streampack-services`, and `streampack-srt` have no unit test sources).
   - Live network/device reconnection tests (`androidTest` / streaming against real RTMP/SRT/SRTLA ingest servers) were not run in this environment.
+
+---
+---
+---
+
+Here are a few ways to explain it depending on who you're talking to—from a quick analogy to a short release-note summary:
+
+### 1. The Everyday Analogy (Best for non-technical people)
+> **"Imagine a live TV broadcast where the camera crew is both recording to a hard drive and beaming the video out over a satellite truck.**
+>
+> **Before:** If the internet connection dropped for a moment, the app used to shut down the *entire studio*—turning off the camera, stopping the microphone, shutting down the video processor, and restarting everything from scratch 5 seconds later.
+>
+> **Now:** Only the internet connection itself reconnects in the background while the camera, microphone, and video processor keep running smoothly. That means reconnecting is faster and cleaner, it lays the groundwork for recording an uninterrupted backup video to your phone even when your cell signal drops, and it avoids accidentally telling platforms like YouTube or Twitch that your stream is 'finished' when you just hit a brief dead zone."
+
+---
+
+### 2. Three Simple Bullet Points (What actually gets better)
+- **No more "full reboot" on a bad signal:** When your internet drops while streaming, the app no longer shuts down and restarts the camera, microphone, and video encoder—it keeps them running and only reconnects the network link.
+- **Ready for uninterrupted local backup recording:** Because the camera and video encoder never stop during a network drop, when local file recording is enabled, the video saved to your phone won't get cut off or split up when your internet drops.
+- **Safer reconnections on YouTube / Twitch (RTMP):** Previously, when reconnecting or switching a disconnected video input, the app could accidentally send a "stream ended" signal to the streaming server, which can cause platforms like YouTube or Twitch to end your broadcast completely instead of waiting for you to reconnect. Now it only sends that "stream ended" signal when you actually press **Stop**.
+
+---
+
+### 3. Short Release Note / Changelog Version
+> **Smarter Stream Reconnection:** Improved how LifeStreamer recovers from connection drops on RTMP, SRT, and SRTLA. Instead of stopping and restarting the entire camera/audio pipeline when the network drops, the app now keeps the capture and encoding pipeline running while reconnecting in the background—preventing RTMP servers from prematurely ending your broadcast and preparing the app for uninterrupted local video recording.
