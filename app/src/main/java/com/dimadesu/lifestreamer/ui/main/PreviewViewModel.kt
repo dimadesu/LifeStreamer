@@ -2139,69 +2139,32 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     val isCurrentlyReconnecting = service?.isReconnecting?.value ?: false
                     Log.i(TAG, "stopStream() called - Streaming state: $currentStreamingState, Status: $currentStatus, isReconnecting: $isCurrentlyReconnecting")
 
-                    // If reconnecting, always cancel reconnection regardless of streaming state
+                    // If reconnecting, cancel reconnection state/timer.
+                    // If pipeline is NOT streaming (e.g., failed initial connect), abort quickly here;
+                    // if pipeline IS streaming (kept alive during reconnect), fall through to standard stop teardown.
                     if (isCurrentlyReconnecting) {
                         Log.i(TAG, "Cancelling active reconnection...")
-                        
+
                         // userStoppedManually already marked via service before acquiring mutex
-                        
+
                         // Cancel reconnection timer and clear service flags
                         reconnectTimer.stop()
                         service?.cancelReconnection()
-                        
+
                         // Update UI state so user gets instant feedback
                         service?.setStreamStatus(StreamStatus.NOT_STREAMING)
                         Log.i(TAG, "UI updated immediately - reconnection cancelled by user")
-                        
-                        // Unlock stream rotation since we're truly stopped
-                        service?.unlockStreamRotation()
-                        
-                        // Stop SRTLA proxy since we're aborting the session entirely
-                        if (SrtlaManager.isRunning) {
-                            Log.i(TAG, "stopStream() - Stopping SRTLA during reconnection cancel")
-                            SrtlaManager.stop()
-                        }
 
-                        // If pipeline was actually streaming (e.g., kept alive during reconnection),
-                        // stop stream and close endpoints in background with cleanup flag
-                        // If just connecting/reconnecting before pipeline started, close quickly without the flag
-                        if (currentStreamingState == true) {
-                            if (streamingMediaProjection != null) {
-                                startupMediaProjection = streamingMediaProjection
-                                streamingMediaProjection = null
-                                Log.i(TAG, "MediaProjection transferred to startupMediaProjection after reconnection cancel")
+                        if (currentStreamingState != true) {
+                            // Unlock stream rotation since we're truly stopped
+                            service?.unlockStreamRotation()
+
+                            // Stop SRTLA proxy since we're aborting the session entirely
+                            if (SrtlaManager.isRunning) {
+                                Log.i(TAG, "stopStream() - Stopping SRTLA during reconnection cancel")
+                                SrtlaManager.stop()
                             }
-                            try {
-                                currentStreamer.bitrateRegulatorControllerFactory = null
-                            } catch (_: Exception) {}
-                            try {
-                                stopServiceStreaming()
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Error stopping stream during reconnection cancel: ${e.message}")
-                            }
-                            service?.isCleanupInProgress = true
-                            Log.i(TAG, "stopStream() - Set service.isCleanupInProgress=true for reconnection cancel cleanup (was streaming)")
-                            viewModelScope.launch(Dispatchers.IO) {
-                                try {
-                                    var retries = 0
-                                    while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
-                                        delay(100)
-                                        retries++
-                                    }
-                                    Log.d(TAG, "Closing endpoint in background (was streaming, may take time)...")
-                                    withTimeout(3000) {
-                                        currentStreamer.close()
-                                    }
-                                    Log.i(TAG, "Reconnection cancelled - endpoint closed")
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
-                                } finally {
-                                    setupAudioLevelMonitoring()
-                                    service?.isCleanupInProgress = false
-                                    Log.i(TAG, "stopStream() - Cleared service.isCleanupInProgress after reconnection cancel cleanup")
-                                }
-                            }
-                        } else {
+
                             // Was just connecting/reconnecting, close quickly
                             try {
                                 Log.d(TAG, "Closing endpoint (was just connecting, should be fast)...")
@@ -2214,10 +2177,10 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             } catch (e: Exception) {
                                 Log.w(TAG, "Error closing endpoint during reconnection cancel: ${e.message}")
                             }
+
+                            tookEarlyExit = true
+                            return@launch
                         }
-                        
-                        tookEarlyExit = true
-                        return@launch
                     }
 
                     // If already stopped and not in CONNECTING state, don't do anything
@@ -2344,25 +2307,13 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return@launch
             }
             
-            // Move cleanup to IO dispatcher to avoid blocking main thread for up to 8+ seconds
-            // Wait for stream to stop and close endpoint OUTSIDE the mutex
-            // Protected by isCleanupInProgress flag to prevent start() racing with cleanup
+            // Move cleanup to IO dispatcher to avoid blocking main thread
+            // Close endpoint OUTSIDE the mutex, protected by isCleanupInProgress flag
+            // to prevent start() racing with cleanup
             withContext(Dispatchers.IO) {
                 try {
                     val currentStreamer = serviceStreamer
                     if (currentStreamer != null) {
-                        // Wait for stream to actually stop before closing endpoint
-                        // This prevents calling close() while stopStream() is still executing
-                        var retries = 0
-                        while (currentStreamer.isStreamingFlow.value == true && retries < 50) {
-                            kotlinx.coroutines.delay(100)
-                            retries++
-                        }
-                        
-                        if (retries >= 50) {
-                            Log.w(TAG, "Timeout waiting for stream to stop - forcing close anyway")
-                        }
-                        
                         // Close the endpoint connection to allow fresh connection on next start
                         // Without this, the endpoint stays open and cannot be reopened on next start
                         try {
@@ -2377,10 +2328,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Do not clear MediaProjection from the service on stream stop — the token
                         // is transferred to startupMediaProjection and can be reused for SYS AUDIO
                         // or the next stream without a new permission dialog.
-                        
-                        if (currentStreamer.isStreamingFlow.value == true) {
-                            Log.w(TAG, "Stream did not stop cleanly after 5 seconds - forcing cleanup")
-                        }
                         
                         // Restart VU meter after stream stops — audio source remains valid regardless
                         // of video source since startupMediaProjection is always available.
