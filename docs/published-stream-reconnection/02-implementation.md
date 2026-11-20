@@ -97,3 +97,31 @@ Here is how to explain each of the three **StreamPack** commits in plain languag
   - When Output 2 reconnected while the video processor was already running, the splitter didn't re-introduce the audio and video tracks to the new connection, and could try pushing video frames into the new connection before the server handshake was finished.
   - It also didn't pass along live network health stats (used for automatic video quality adjustment) or reliably report connection drops after switching between SRT and RTMP.
 - **What We Fixed:** We upgraded the splitter so it keeps the "studio" (camera, mic, and video processor) alive even when the internet output disconnects, properly re-registers the audio/video tracks and waits for the handshake to finish before sending frames when the internet reconnects, and passes through live network stats so automatic bitrate adjustment works normally.
+
+---
+---
+---
+
+Here is how to explain what we changed in the **LifeStreamer** app itself (excluding the underlying StreamPack library changes) in plain language:
+
+---
+
+### 1. Switched the App to Use a "Two-Outlet Splitter" Setup
+- **Before:** LifeStreamer plugged its video processor directly into a single output plug (either the internet stream *or* a file).
+- **Now:** LifeStreamer always runs with a built-in two-outlet splitter (`DualEndpoint`): **Outlet 1** is reserved for saving a file to the phone, and **Outlet 2** is used for the live internet stream (RTMP, SRT, or SRTLA). This means the app is wired and ready to record a local backup file and stream live at the same time.
+
+### 2. Reconnect Only the Internet Plug—Leave the Camera & Mic Alone
+- **Before:** When the internet dropped, LifeStreamer hit the main "Stop" button on everything—shutting down the camera, microphone, Bluetooth audio, and video processor—waited 5 seconds, and started everything up again from scratch.
+- **Now:** When the internet drops, LifeStreamer leaves the camera, microphone, and video processor running. It simply unplugs **Outlet 2** (the broken internet connection), pauses the automatic quality adjuster while offline, waits 5 seconds, and plugs **Outlet 2** back in. As soon as it reconnects, it asks the already-running video processor to immediately produce a fresh full picture (keyframe) so viewers see the video right away.
+
+### 3. Don't Cut Off YouTube/Twitch When an External Camera (RTMP Source) Disconnects
+- **Before:** If you were using an external wireless camera/drone (an inbound RTMP video source) and *that* camera lost connection, LifeStreamer switched to a fallback "test card" image—and by default **restarted your outgoing live stream** to clear up any video timing hiccups. While that trick helped for SRT/OBS, doing it while streaming to an RTMP server (like YouTube or Twitch) sent an official *"stream ended"* signal to the platform and killed your broadcast.
+- **Now:** If you are broadcasting to an RTMP server and your external camera disconnects, LifeStreamer smoothly swaps the video to the fallback image **without** disconnecting or restarting your outgoing stream to YouTube/Twitch. (And if you're broadcasting over SRT, it only bounces the internet connection without shutting down the internal pipeline.)
+
+### 4. Keep the Phone Awake & Keep the Stream Timer Running During Reconnects
+- **Before:** Whenever the stream dropped, the background service temporarily released its "keep the phone and Wi-Fi/cellular awake" locks and reset the "Live 00:15:32" uptime clock back to zero. If your phone screen was off in your pocket during a disconnect, Android could throttle the phone right when it was trying to reconnect.
+- **Now:** The phone keeps its CPU and network wake locks held the entire time it is trying to reconnect (only releasing them when *you* actually stop the stream), and your total stream uptime timer keeps counting instead of resetting to `0:00` after every network blip.
+
+### 5. Proper Full Shutdown If You Press "Stop" While It's Reconnecting
+- **Before:** Because the camera and video processor used to already be stopped during the 5-second reconnect wait, pressing **Stop** while reconnecting only had to cancel the timer.
+- **Now:** Since the camera, mic, and video processor stay running while waiting to reconnect, pressing **Stop** during a reconnection now properly shuts down the running camera/encoder pipeline and cleans everything up.
