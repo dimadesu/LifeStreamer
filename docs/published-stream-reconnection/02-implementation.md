@@ -68,3 +68,32 @@ Here are a few ways to explain it depending on who you're talking to—from a qu
 
 ### 3. Short Release Note / Changelog Version
 > **Smarter Stream Reconnection:** Improved how LifeStreamer recovers from connection drops on RTMP, SRT, and SRTLA. Instead of stopping and restarting the entire camera/audio pipeline when the network drops, the app now keeps the capture and encoding pipeline running while reconnecting in the background—preventing RTMP servers from prematurely ending your broadcast and preparing the app for uninterrupted local video recording.
+
+---
+---
+---
+
+Here is how to explain each of the three **StreamPack** commits in plain language:
+
+---
+
+### Commit 1: `fix(flv): drop leading video inter-frames until first keyframe and sequence header`
+- **The Problem:** Video streams don't send a full picture on every single frame. Instead, they send one **complete picture** (a "keyframe") every couple of seconds, followed by dozens of tiny **"what moved since the last frame" updates** (plus an initial "instruction manual" that tells the video player the resolution and format). When we reconnected to a server while the video processor was already running, the app immediately started sending those partial "what moved" updates before sending the instruction manual and a complete starting picture—so the server couldn't make sense of the video.
+- **What We Fixed:** When a new connection opens mid-stream, it now throws away those partial "what moved" frames for a split second until the very next **complete picture** arrives, then sends the instruction manual + complete picture first so the server can play the video cleanly right away.
+
+---
+
+### Commit 2: `fix(rtmp): reset FLV muxer state on close/disconnect and avoid deleteStream after close`
+- **The Problem:** Two things could go wrong when an RTMP stream (used by YouTube, Twitch, etc.) lost connection:
+  1. When cleaning up a broken connection, the app could try to send an official *"I'm done broadcasting (`deleteStream`)"* command—which tells YouTube or Twitch to permanently end the live stream instead of waiting for you to reconnect.
+  2. When closing a broken connection without a full stop, the app forgot to reset its internal "new connection" checklist (like resetting the timer to 0 and remembering to resend the video/audio setup headers on the next connection).
+- **What We Fixed:** Closing a dropped RTMP connection now hangs up the broken line quietly (without sending the *"broadcast is over"* signal to the server) and resets the internal checklist so the next connection starts fresh with a clean timer and fresh setup headers. It also ensures an old, slow-closing connection can't accidentally interfere with a brand-new connection that just opened.
+
+---
+
+### Commit 3: `feat(core): support isolated DualEndpoint reconnection without stopping pipeline`
+- **The Problem:** StreamPack has a "splitter" (`DualEndpoint`) that lets one video processor send the same video to two places at once: **Output 1 (a file on your phone)** and **Output 2 (the live internet stream)**. However, it wasn't built to handle Output 2 disconnecting and reconnecting on the fly:
+  - If you weren't recording a file and the internet dropped, the splitter reported that *everything* was closed, which caused the whole camera and video processor to shut down.
+  - When Output 2 reconnected while the video processor was already running, the splitter didn't re-introduce the audio and video tracks to the new connection, and could try pushing video frames into the new connection before the server handshake was finished.
+  - It also didn't pass along live network health stats (used for automatic video quality adjustment) or reliably report connection drops after switching between SRT and RTMP.
+- **What We Fixed:** We upgraded the splitter so it keeps the "studio" (camera, mic, and video processor) alive even when the internet output disconnects, properly re-registers the audio/video tracks and waits for the handshake to finish before sending frames when the internet reconnects, and passes through live network stats so automatic bitrate adjustment works normally.
