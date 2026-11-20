@@ -206,10 +206,6 @@ internal object RtmpSourceSwitchHelper {
         bitmap: Bitmap
     ): Boolean {
         return try {
-            // Add delay before switching sources to allow previous sources to fully release
-            // This prevents resource conflicts when hot-swapping sources
-            delay(300)
-
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
             streamer.setAudioSource(ExoPlayerAudioSourceFactory())
@@ -361,10 +357,6 @@ internal object RtmpSourceSwitchHelper {
 
                         // ExoPlayer appears ready. Attach RTMP video and audio to the streamer.
                         try {
-                            // Add delay before switching sources to allow previous sources to fully release
-                            // This prevents resource conflicts when hot-swapping sources
-                            delay(300)
-                            
                             // Switch video source
                             currentStreamer.setVideoSource(RTMPVideoSource.Factory(exoPlayerInstance))
                             
