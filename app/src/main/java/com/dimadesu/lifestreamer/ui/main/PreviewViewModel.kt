@@ -838,25 +838,25 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "startServiceStreaming: Pipeline already running, reconnecting secondEndpoint...")
                 withTimeout(10000) {
                     withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        dualEndpoint!!.openSecond(descriptor)
+                        dualEndpoint.openSecond(descriptor)
                     }
                 }
 
                 if (service?.userStoppedManually?.value == true) {
                     Log.i(TAG, "startServiceStreaming: User stopped manually before startStreamSecond(), aborting")
                     withContext(NonCancellable) {
-                        try { dualEndpoint?.closeSecond() } catch (_: Throwable) {}
+                        try { dualEndpoint.closeSecond() } catch (_: Throwable) {}
                     }
                     return false
                 }
 
                 try {
                     withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        dualEndpoint!!.startStreamSecond()
+                        dualEndpoint.startStreamSecond()
                     }
                 } catch (e: Exception) {
                     withContext(NonCancellable) {
-                        try { dualEndpoint?.closeSecond() } catch (_: Throwable) {}
+                        try { dualEndpoint.closeSecond() } catch (_: Throwable) {}
                     }
                     throw e
                 }
@@ -881,7 +881,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             withTimeout(10000) { // 10 second timeout
                 withContext(kotlinx.coroutines.Dispatchers.IO) {
                     if (isRemoteDualEndpoint) {
-                        dualEndpoint!!.openSecond(descriptor)
+                        dualEndpoint.openSecond(descriptor)
                     } else {
                         currentStreamer.open(descriptor)
                     }
@@ -907,7 +907,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.e(TAG, "startServiceStreaming: $errorMsg")
                 withContext(NonCancellable) {
                     try {
-                        if (isRemoteDualEndpoint) dualEndpoint?.closeSecond() else currentStreamer.close()
+                        if (isRemoteDualEndpoint) dualEndpoint.closeSecond() else currentStreamer.close()
                     } catch (_: Throwable) {}
                 }
                 if (!shouldSuppressErrors) {
@@ -936,7 +936,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.i(TAG, "startServiceStreaming: User stopped manually before startStream(), aborting")
                 withContext(NonCancellable) {
                     try {
-                        if (isRemoteDualEndpoint) dualEndpoint?.closeSecond() else currentStreamer.close()
+                        if (isRemoteDualEndpoint) dualEndpoint.closeSecond() else currentStreamer.close()
                     } catch (_: Throwable) {}
                 }
                 return false
