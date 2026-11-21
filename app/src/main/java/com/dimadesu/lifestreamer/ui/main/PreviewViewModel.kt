@@ -134,6 +134,11 @@ import androidx.media3.exoplayer.video.VideoFrameMetadataListener
 
 class PreviewViewModel(private val application: Application) : ObservableViewModel() {
     private val storageRepository = DataStoreRepository(application, application.dataStore)
+    private val localRecordingConfigStateFlow = storageRepository.localRecordingConfigFlow.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        null
+    )
     private val streamConfigurationHelper = StreamConfigurationHelper(storageRepository)
     private val rotationRepository = RotationRepository.getInstance(application)
     val mediaProjectionHelper = MediaProjectionHelper(application)
@@ -379,10 +384,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             if (currentStreamer?.audioInput?.sourceFlow?.value is IAudioRecordSource) {
                 permissions.add(Manifest.permission.RECORD_AUDIO)
             }
-            storageRepository.endpointDescriptorFlow.asLiveData().value?.let {
-                if (it is UriMediaDescriptor) {
-                    permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && localRecordingConfigStateFlow.value != null) {
+                permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
 
             return permissions
@@ -738,7 +741,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
         if (!isCurrentlyStreaming) return
         
-        val sinkType = storageRepository.endpointDescriptorFlow.first().type.sinkType
+        val sinkType = storageRepository.endpointTypeFlow.first().sinkType
         if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
         
         try {
@@ -758,7 +761,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         if (!isCurrentlyStreaming) return
         if (service?.isReconnecting?.value == true) return
         
-        val sinkType = storageRepository.endpointDescriptorFlow.first().type.sinkType
+        val sinkType = storageRepository.endpointTypeFlow.first().sinkType
         if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
         
         try {
@@ -1007,7 +1010,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "doStartStream: Sources validated successfully")
 
         try {
-            val descriptor = storageRepository.endpointDescriptorFlow.first()
+            val descriptor = storageRepository.createEndpointDescriptor()
             Log.i(TAG, "doStartStream: Starting stream with descriptor: $descriptor")
             
             val success = startServiceStreaming(descriptor, shouldSuppressErrors = shouldAutoRetry)
@@ -1080,7 +1083,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     private suspend fun stopServiceStreaming(): Boolean {
         return try {
             Log.i(TAG, "stopServiceStreaming: Stopping stream...")
-            serviceStreamer?.stopStream()
+            withContext(Dispatchers.IO) {
+                serviceStreamer?.stopStream()
+            }
             Log.i(TAG, "stopServiceStreaming: Stream stopped successfully")
 
             // Stop embedded SRTLA proxy if it was running
@@ -2049,7 +2054,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "startStreamInternal called - beginning setup...")
         viewModelScope.launch {
             try {
-                val descriptor = storageRepository.endpointDescriptorFlow.first()
+                val descriptor = storageRepository.createEndpointDescriptor()
                 Log.i(TAG, "Starting stream with descriptor: $descriptor")
                 Log.i(TAG, "About to call startServiceStreaming()...")
                 val success = startServiceStreaming(descriptor, shouldSuppressErrors = true)
@@ -3113,7 +3118,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 } else {
                     // Never restart the outbound RTMP stream on an inbound RTMP source disconnect
                     // (doing so would signal end-of-transmission to the RTMP ingest server).
-                    val sinkType = storageRepository.endpointDescriptorFlow.first().type.sinkType
+                    val sinkType = storageRepository.endpointTypeFlow.first().sinkType
                     val shouldRestartStream = sinkType != MediaSinkType.RTMP &&
                         storageRepository.rtmpSourceRestartOnDisconnectFlow.first()
                     

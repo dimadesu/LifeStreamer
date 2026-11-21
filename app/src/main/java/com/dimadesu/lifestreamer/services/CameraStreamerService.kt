@@ -356,12 +356,12 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     // Only update if currently streaming with SRT endpoint
                     if (_serviceStreamStatus.value == StreamStatus.STREAMING) {
                         try {
-                            val descriptor = storageRepository.endpointDescriptorFlow.first()
-                            if (descriptor.type.sinkType == MediaSinkType.SRT || descriptor.type.sinkType == MediaSinkType.RTMP) {
+                            val sinkType = storageRepository.endpointTypeFlow.first().sinkType
+                            if (sinkType == MediaSinkType.SRT || sinkType == MediaSinkType.RTMP) {
                                 Log.i(TAG, "Bitrate regulator settings changed during stream - updating controller")
                                 streamConfigurationHelper.attachBitrateRegulator(
                                     streamer as? IVideoSingleStreamer,
-                                    descriptor.type.sinkType,
+                                    sinkType,
                                     TAG
                                 )
                                 if (config != null) {
@@ -1183,7 +1183,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
             // Read configured endpoint descriptor
             val descriptor = try {
-                storageRepository.endpointDescriptorFlow.first()
+                storageRepository.createEndpointDescriptor()
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read endpoint descriptor from storage: ${e.message}")
                 customNotificationUtils.notify(onErrorNotification(Throwable("No endpoint configured")) ?: onCreateNotification())

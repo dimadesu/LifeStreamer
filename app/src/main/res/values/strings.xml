@@ -262,9 +262,20 @@
 
     <string name="file_endpoint_key">file_endpoint_key</string>
     <string name="file">File</string>
+    <string name="local_recording">Local recording</string>
+    <string name="record_to_disk_enable_key">record_to_disk_enable_key</string>
+    <string name="record_to_disk_enable_title">Record stream to file</string>
+    <string name="record_to_disk_enable_summary">Save a copy to Movies/LifeStreamer/ even if the remote connection drops</string>
+    <string name="record_to_disk_format_key">record_to_disk_format_key</string>
+    <string name="record_to_disk_format_title">Recording format</string>
+    <string name="local_recording_format_ts">TS (.ts) — Recommended, crash-safe</string>
+    <string name="local_recording_format_mp4">MP4 (.mp4) — AAC audio only</string>
+    <string name="local_recording_format_flv">FLV (.flv) — RTMP native</string>
+    <string name="local_recording_warning_key">local_recording_warning_key</string>
+    <string name="local_recording_warning_title">Incompatible encoder settings</string>
     <string name="file_name_key">file_name_key</string>
-    <string name="file_name">File name</string>
-    <string name="default_file_name">StreamPackFile</string>
+    <string name="file_name">File name prefix</string>
+    <string name="default_file_name">LifeStreamer</string>
 
     <!-- Video and audio encoders -->
     <string name="video_encoder_h264">AVC/H.264</string>
