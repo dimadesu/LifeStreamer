@@ -505,7 +505,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Stop any active bitrate regulator controller before releasing the streamer
         try {
             (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = null
-        } catch (_: Throwable) {}
+        } catch (t: Throwable) {
+            Log.w(TAG, "onDestroy: failed to detach bitrate regulator controller: ${t.message}")
+        }
 
         // Cleanup Bluetooth audio manager resources
         try {
