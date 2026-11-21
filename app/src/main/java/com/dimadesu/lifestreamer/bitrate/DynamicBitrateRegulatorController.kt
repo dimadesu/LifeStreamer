@@ -159,7 +159,10 @@ class DynamicBitrateRegulatorController internal constructor(
             while (isActive) {
                 delay(interval)
                 synchronized(stateLock) {
-                    if (!isRunning) return@synchronized
+                    // `synchronized` is not a suspension point, so a job cancelled (e.g. by a mode
+                    // switch rescheduling the loop) while blocked on the lock would otherwise still
+                    // run one stale tick against the newly installed regulator.
+                    if (!isRunning || !isActive) return@synchronized
                     try {
                         runTickLocked()
                     } catch (e: Exception) {
