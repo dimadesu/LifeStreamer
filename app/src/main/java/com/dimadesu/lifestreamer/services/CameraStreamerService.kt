@@ -1140,6 +1140,21 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
      * Start streaming using the endpoint configured in DataStore.
      * Mirrors the logic from PreviewViewModel.startStream(): open with timeout and attach regulator if needed.
      */
+    private suspend fun cleanupFailedOpen(
+        currentStreamer: ISingleStreamer,
+        remoteDualEndpoint: DualEndpoint?,
+        emptyLocalUri: android.net.Uri?
+    ) {
+        withContext(NonCancellable + Dispatchers.IO) {
+            try {
+                if (remoteDualEndpoint != null) remoteDualEndpoint.closeSecond() else currentStreamer.close()
+            } catch (_: Throwable) {}
+            if (emptyLocalUri?.scheme == "content") {
+                try { contentResolver.delete(emptyLocalUri, null, null) } catch (_: Throwable) {}
+            }
+        }
+    }
+
     private suspend fun startStreamFromConfiguredEndpoint() {
         try {
             // Lock stream rotation BEFORE starting to ensure consistent orientation
@@ -1290,14 +1305,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
                     if (!encodersReady) {
                         setConnectingRemote(false)
-                        withContext(NonCancellable) {
-                            try { currentStreamer.close() } catch (_: Throwable) {}
-                            openedLocalUri?.let { uri ->
-                                if (uri.scheme == "content") {
-                                    try { contentResolver.delete(uri, null, null) } catch (_: Throwable) {}
-                                }
-                            }
-                        }
+                        cleanupFailedOpen(currentStreamer, remoteDualEndpoint = null, emptyLocalUri = openedLocalUri)
                         val errorMsg = "Encoders not ready after local open"
                         Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
                         serviceScope.launch { _criticalErrors.emit(errorMsg) }
@@ -1316,6 +1324,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     } catch (e: Exception) {
                         setConnectingRemote(false)
                         Log.w(TAG, "Failed to start local recording pipeline: ${e.message}")
+                        cleanupFailedOpen(currentStreamer, remoteDualEndpoint = null, emptyLocalUri = openedLocalUri)
                         serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
                         return
                     }
@@ -1387,6 +1396,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                     val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
                     val errorMsg = "Encoders not ready after open (video=$videoEncoderExists, audio=$audioEncoderExists)"
                     Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
+                    cleanupFailedOpen(
+                        currentStreamer,
+                        remoteDualEndpoint = if (isRemoteDualEndpoint) dualEndpoint else null,
+                        emptyLocalUri = if (!isRemoteDualEndpoint) descriptor.uri else null
+                    )
                     customNotificationUtils.notify(onErrorNotification(Throwable(errorMsg)) ?: onCreateNotification())
                     serviceScope.launch { _criticalErrors.emit(errorMsg) }
                     return
@@ -1428,6 +1442,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 Log.i(TAG, "startStream() called successfully, waiting for isStreamingFlow to confirm")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start stream after open: ${e.message}")
+                cleanupFailedOpen(
+                    currentStreamer,
+                    remoteDualEndpoint = if (isRemoteDualEndpoint) dualEndpoint else null,
+                    emptyLocalUri = if (!isRemoteDualEndpoint) descriptor.uri else null
+                )
                 // Don't set ERROR status - keep CONNECTING so ViewModel can trigger reconnection
                 // The ViewModel's critical errors observer will detect this and trigger handleDisconnection
                 // Don't call notify(onCreateNotification()) here - let the status observer handle it
