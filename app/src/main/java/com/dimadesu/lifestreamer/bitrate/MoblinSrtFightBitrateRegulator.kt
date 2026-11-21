@@ -1,6 +1,5 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
 import io.github.thibaultbee.streampack.ext.srt.elements.endpoints.SrtEndpointMetrics
 import kotlin.math.max
@@ -26,22 +25,6 @@ class MoblinSrtFightBitrateRegulator(
     initialSnapshot: SrtRegulatorSnapshot? = null,
     nanoTimeProvider: () -> Long = System::nanoTime
 ) : SnapshotableSrtRegulator {
-
-    constructor(
-        metricsTracker: EndpointMetricsTracker,
-        bitrateRegulatorConfig: BitrateRegulatorConfig,
-        moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
-        onVideoTargetBitrateChange: ((Int) -> Unit),
-        initialSnapshot: SrtRegulatorSnapshot? = null,
-        nanoTimeProvider: () -> Long = System::nanoTime
-    ) : this(
-        metricsTracker = metricsTracker,
-        initialVideoBitrateRange = BitrateRange.from(bitrateRegulatorConfig),
-        moblinConfig = moblinConfig,
-        onVideoTargetBitrateChange = onVideoTargetBitrateChange,
-        initialSnapshot = initialSnapshot,
-        nanoTimeProvider = nanoTimeProvider
-    )
 
     companion object {
         private const val TAG = "MoblinSrtFightBitrateRegulator"

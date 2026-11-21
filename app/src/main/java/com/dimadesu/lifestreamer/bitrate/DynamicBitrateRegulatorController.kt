@@ -1,6 +1,5 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import androidx.annotation.VisibleForTesting
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.encoders.IEncoder
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
@@ -67,9 +66,6 @@ class DynamicBitrateRegulatorController internal constructor(
 
     internal val currentPollingTime: Duration
         get() = synchronized(stateLock) { pollingTime }
-
-    internal val mode: RegulatorMode
-        get() = synchronized(stateLock) { currentMode }
 
     override fun start() {
         synchronized(stateLock) {
@@ -142,13 +138,6 @@ class DynamicBitrateRegulatorController internal constructor(
             if (isRunning) {
                 launchPollingLoopLocked()
             }
-        }
-    }
-
-    @VisibleForTesting
-    internal fun tickOnceForTest() {
-        synchronized(stateLock) {
-            runTickLocked()
         }
     }
 
@@ -249,22 +238,10 @@ class DynamicBitrateRegulatorController internal constructor(
 
     class Factory(
         val sinkType: MediaSinkType,
-        private val initialRange: BitrateRange,
+        private val bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
         private val initialMode: RegulatorMode = RegulatorMode.MOBLIN_FAST,
         private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig()
     ) : IBitrateRegulatorController.Factory {
-
-        constructor(
-            sinkType: MediaSinkType,
-            bitrateRegulatorConfig: BitrateRegulatorConfig = BitrateRegulatorConfig(),
-            initialMode: RegulatorMode = RegulatorMode.MOBLIN_FAST,
-            moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig()
-        ) : this(
-            sinkType = sinkType,
-            initialRange = BitrateRange.from(bitrateRegulatorConfig),
-            initialMode = initialMode,
-            moblinConfig = moblinConfig
-        )
 
         /**
          * The controller created when this factory was assigned to `streamer.bitrateRegulatorControllerFactory`.
@@ -294,7 +271,7 @@ class DynamicBitrateRegulatorController internal constructor(
                 videoEncoderProvider = { pipelineOutput.videoEncoder },
                 audioEncoderProvider = { audioOutput?.audioEncoder },
                 metricsTracker = metricsProvider.createMetricsTracker(),
-                initialRange = initialRange,
+                initialRange = BitrateRange.from(bitrateRegulatorConfig),
                 initialMode = initialMode,
                 moblinConfig = moblinConfig,
                 coroutineDispatcher = coroutineDispatcher

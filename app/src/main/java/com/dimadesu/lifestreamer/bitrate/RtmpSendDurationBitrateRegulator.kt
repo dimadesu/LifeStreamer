@@ -1,7 +1,6 @@
 package com.dimadesu.lifestreamer.bitrate
 
 import io.github.komedia.komuxer.rtmp.util.metrics.RtmpMetrics
-import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
 import io.github.thibaultbee.streampack.ext.rtmp.elements.endpoints.RtmpEndpointMetrics
 import io.github.thibaultbee.streampack.ext.rtmp.elements.endpoints.rtmpMetrics
@@ -49,18 +48,6 @@ class RtmpSendDurationBitrateRegulator(
     private val onVideoTargetBitrateChange: ((Int) -> Unit),
     private val nanoTimeProvider: () -> Long = System::nanoTime
 ) : DynamicBitrateRegulator {
-
-    constructor(
-        metricsTracker: EndpointMetricsTracker,
-        bitrateRegulatorConfig: BitrateRegulatorConfig,
-        onVideoTargetBitrateChange: ((Int) -> Unit),
-        nanoTimeProvider: () -> Long = System::nanoTime
-    ) : this(
-        metricsTracker = metricsTracker,
-        initialVideoBitrateRange = BitrateRange.from(bitrateRegulatorConfig),
-        onVideoTargetBitrateChange = onVideoTargetBitrateChange,
-        nanoTimeProvider = nanoTimeProvider
-    )
 
     companion object {
         private const val TAG = "RtmpSendDurationReg"
@@ -124,8 +111,6 @@ class RtmpSendDurationBitrateRegulator(
     }
 
     internal fun getSmoothFillRatio(): Double = smoothFillRatio
-
-    internal fun getFastFillRatio(): Double = fastFillRatio
 
     internal fun getTransportBitrateBps(): Long = transportBitrateBps
 

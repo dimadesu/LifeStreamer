@@ -18,8 +18,6 @@ data class BitrateRange(
 
     fun coerceIn(value: Int): Int = value.coerceIn(lower, upper)
 
-    fun coerceIn(value: Long): Long = value.coerceIn(lower.toLong(), upper.toLong())
-
     companion object {
         fun from(config: BitrateRegulatorConfig): BitrateRange =
             BitrateRange(config.videoBitrateRange.lower, config.videoBitrateRange.upper)
@@ -44,10 +42,6 @@ data class SrtRegulatorSnapshot(
  */
 interface DynamicBitrateRegulator : IBitrateRegulator {
     fun updateVideoBitrateRange(range: BitrateRange)
-
-    fun updateConfig(config: BitrateRegulatorConfig) {
-        updateVideoBitrateRange(BitrateRange.from(config))
-    }
 }
 
 /**
