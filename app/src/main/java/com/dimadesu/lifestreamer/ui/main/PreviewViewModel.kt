@@ -879,6 +879,148 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 return true
             }
 
+            // Offline-first simultaneous local recording: open & start mainEndpoint immediately
+            // so recording begins at t=0s even if the remote endpoint cannot connect yet.
+            val localRecordingConfig = if (isRemoteDualEndpoint) {
+                storageRepository.localRecordingConfigFlow.first()
+            } else null
+
+            if (isRemoteDualEndpoint && localRecordingConfig != null) {
+                service?.setConnectingRemote(true)
+                var openedLocalUri: android.net.Uri? = null
+                var localOpened = false
+                try {
+                    val localDescriptor = storageRepository.createLocalRecordingDescriptor(localRecordingConfig)
+                    openedLocalUri = localDescriptor.uri
+                    withContext(Dispatchers.IO) {
+                        currentStreamer.open(localDescriptor)
+                    }
+                    localOpened = true
+                    Log.i(TAG, "startServiceStreaming: Opened local recording on mainEndpoint: ${localDescriptor.uri}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "startServiceStreaming: Failed to open local recording: ${e.message}", e)
+                    openedLocalUri?.let { uri ->
+                        if (uri.scheme == "content") {
+                            try { application.contentResolver.delete(uri, null, null) } catch (_: Throwable) {}
+                        }
+                    }
+                    service?.setConnectingRemote(false)
+                    _streamerErrorLiveData.postValue("Could not start local recording: ${e.message}. Continuing live stream without recording.")
+                }
+
+                if (localOpened) {
+                    val encodersReady = kotlinx.coroutines.withTimeoutOrNull(5000) {
+                        while ((currentStreamer as? IVideoSingleStreamer)?.videoEncoder == null
+                            || (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder == null) {
+                            kotlinx.coroutines.delay(200)
+                        }
+                        true
+                    } ?: false
+
+                    if (!encodersReady) {
+                        service?.setConnectingRemote(false)
+                        val videoEncoderExists = (currentStreamer as? IVideoSingleStreamer)?.videoEncoder != null
+                        val audioEncoderExists = (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder != null
+                        val errorMsg = "Encoders not ready (video=$videoEncoderExists, audio=$audioEncoderExists)"
+                        Log.e(TAG, "startServiceStreaming: $errorMsg")
+                        withContext(NonCancellable) {
+                            try { currentStreamer.close() } catch (_: Throwable) {}
+                            openedLocalUri?.let { uri ->
+                                if (uri.scheme == "content") {
+                                    try { application.contentResolver.delete(uri, null, null) } catch (_: Throwable) {}
+                                }
+                            }
+                        }
+                        if (!shouldSuppressErrors) {
+                            _streamerErrorLiveData.postValue(errorMsg)
+                        }
+                        return false
+                    }
+
+                    service?.getSavedStreamingOrientation()?.let { savedRotation ->
+                        try {
+                            currentStreamer.setTargetRotation(savedRotation)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "startServiceStreaming: Failed to apply saved rotation: ${e.message}")
+                        }
+                    }
+
+                    if (service?.userStoppedManually?.value == true) {
+                        service?.setConnectingRemote(false)
+                        Log.i(TAG, "startServiceStreaming: User stopped manually before local startStream(), aborting")
+                        withContext(NonCancellable) {
+                            try { currentStreamer.close() } catch (_: Throwable) {}
+                            openedLocalUri?.let { uri ->
+                                if (uri.scheme == "content") {
+                                    try { application.contentResolver.delete(uri, null, null) } catch (_: Throwable) {}
+                                }
+                            }
+                        }
+                        return false
+                    }
+
+                    withContext(Dispatchers.IO) {
+                        currentStreamer.startStream()
+                        streamConfigurationHelper.applyConfiguredVideoBitrate(
+                            currentStreamer as? IVideoSingleStreamer,
+                            TAG
+                        )
+                    }
+                    Log.i(TAG, "startServiceStreaming: Local recording started on mainEndpoint; connecting secondEndpoint...")
+
+                    try {
+                        withTimeout(10000) {
+                            withContext(Dispatchers.IO) {
+                                dualEndpoint.openSecond(descriptor)
+                            }
+                        }
+
+                        if (service?.userStoppedManually?.value == true) {
+                            service?.setConnectingRemote(false)
+                            withContext(NonCancellable) {
+                                try { dualEndpoint.closeSecond() } catch (_: Throwable) {}
+                            }
+                            return false
+                        }
+
+                        try {
+                            withContext(Dispatchers.IO) {
+                                dualEndpoint.startStreamSecond()
+                            }
+                        } catch (e: Exception) {
+                            withContext(NonCancellable) {
+                                try { dualEndpoint.closeSecond() } catch (_: Throwable) {}
+                            }
+                            throw e
+                        }
+
+                        (currentStreamer as? IVideoSingleStreamer)?.videoEncoder?.requestKeyFrame()
+                        streamConfigurationHelper.applySafeInitialBitrate(
+                            currentStreamer as? IVideoSingleStreamer,
+                            TAG
+                        )
+                        streamConfigurationHelper.attachBitrateRegulator(
+                            currentStreamer as? IVideoSingleStreamer,
+                            descriptor.type.sinkType,
+                            TAG
+                        )
+                        service?.setConnectingRemote(false)
+                        Log.i(TAG, "startServiceStreaming: Simultaneous local recording + remote stream active")
+                        return true
+                    } catch (e: Exception) {
+                        // Keep mainEndpoint recording and keep isConnectingRemote=true until
+                        // handleDisconnection() atomically sets isReconnecting=true (or clear if no retry).
+                        withContext(NonCancellable) {
+                            try { dualEndpoint.closeSecond() } catch (_: Throwable) {}
+                        }
+                        if (!shouldSuppressErrors) {
+                            service?.setConnectingRemote(false)
+                        }
+                        throw e
+                    }
+                }
+            }
+
             // Add timeout to prevent hanging
             // Run on IO dispatcher to prevent blocking UI thread
             withTimeout(10000) { // 10 second timeout
@@ -1513,6 +1655,26 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     }
                 }
         }
+        (currentStreamer.endpoint as? DualEndpoint)?.let { dualEndpoint ->
+            viewModelScope.launch {
+                dualEndpoint.mainThrowableFlow.filterNotNull().collect { throwable ->
+                    val errorMessage = throwable.message ?: throwable.javaClass.simpleName
+                    Log.e(TAG, "Local recording error on mainEndpoint: $errorMessage", throwable)
+                    val endpointType = storageRepository.endpointTypeFlow.first()
+                    if (endpointType.isStreaming) {
+                        // Close only mainEndpoint so the live remote stream continues uninterrupted
+                        withContext(Dispatchers.IO) {
+                            try { dualEndpoint.stopStreamMain() } catch (_: Throwable) {}
+                            try { dualEndpoint.closeMain() } catch (_: Throwable) {}
+                        }
+                        _streamerErrorLiveData.postValue("Local recording stopped: $errorMessage")
+                    } else {
+                        _streamerErrorLiveData.postValue("Recording error: $errorMessage")
+                        stopStream()
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             serviceReadyFlow.collect { isReady ->
                 if (isReady) {
@@ -1537,12 +1699,12 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         
                         if (isStreaming) {
                             previouslyStreaming = true
-                            // Don't change to STREAMING during reconnection - keep CONNECTING status
-                            // This ensures stop button works during reconnection attempts
-                            if (service?.isReconnecting?.value != true) {
+                            // Don't change to STREAMING during reconnection or initial remote handshake
+                            // while offline-first local recording is running
+                            if (service?.isReconnecting?.value != true && service?.isConnectingRemote?.value != true) {
                                 service?.setStreamStatus(StreamStatus.STREAMING)
                             } else {
-                                Log.d(TAG, "Stream started during reconnection - keeping CONNECTING status for stop button")
+                                Log.d(TAG, "Stream started while connecting/reconnecting remote - keeping CONNECTING status for stop button")
                             }
                         } else {
                             // Stream stopped - check if this was unexpected (should trigger reconnection).
@@ -1668,6 +1830,21 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             }
         }
         
+        // Observe non-retryable configuration / local-recording errors from service
+        viewModelScope.launch {
+            _serviceReady.first { it }
+            service?.let { svc ->
+                try {
+                    svc.configurationErrors.collect { errorMessage ->
+                        Log.w(TAG, "Configuration error from service: $errorMessage")
+                        _streamerErrorLiveData.postValue(errorMessage)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to collect configuration errors from service: ${e.message}")
+                }
+            }
+        }
+
         // Observe critical errors from service (e.g., start from notification failures)
         // Trigger reconnection for these errors
         viewModelScope.launch {
@@ -1817,7 +1994,17 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 Log.d(TAG, "startStream() - Pre-flight check failed, aborting")
                 return@launch
             }
-            
+
+            // Pre-flight check: block start if simultaneous local recording format is incompatible with encoders
+            val compatibilityError = streamConfigurationHelper.validateLocalRecordingCompatibility()
+            if (compatibilityError != null) {
+                val errorMsg = "Cannot start: $compatibilityError"
+                Log.e(TAG, "startStream() blocked by incompatible local recording settings: $errorMsg")
+                service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                _streamerErrorLiveData.postValue(errorMsg)
+                return@launch
+            }
+
             service?.setStreamStatus(StreamStatus.STARTING)
             Log.i(TAG, "startStream() called")
             
@@ -2054,6 +2241,18 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         Log.i(TAG, "startStreamInternal called - beginning setup...")
         viewModelScope.launch {
             try {
+                // Pre-flight check: block start if simultaneous local recording format is incompatible with encoders
+                val compatibilityError = streamConfigurationHelper.validateLocalRecordingCompatibility()
+                if (compatibilityError != null) {
+                    val errorMsg = "Cannot start: $compatibilityError"
+                    Log.e(TAG, "startStreamInternal blocked by incompatible local recording settings: $errorMsg")
+                    service?.unlockStreamRotation()
+                    service?.setStreamStatus(StreamStatus.NOT_STREAMING)
+                    _streamerErrorLiveData.postValue(errorMsg)
+                    onError(errorMsg)
+                    return@launch
+                }
+
                 val descriptor = storageRepository.createEndpointDescriptor()
                 Log.i(TAG, "Starting stream with descriptor: $descriptor")
                 Log.i(TAG, "About to call startServiceStreaming()...")
@@ -2428,6 +2627,15 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         Log.i(TAG, "secondEndpoint closed before reconnection (isStreaming=$isCurrentlyStreaming)")
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to close secondEndpoint before reconnection: ${e.message}")
+                    }
+
+                    // If local recording is running while offline, restore configured Video bitrate
+                    // instead of leaving the encoder at whatever low ABR bitrate preceded the disconnect.
+                    if (isCurrentlyStreaming && dualEndpoint.mainEndpoint.isOpenFlow.value) {
+                        streamConfigurationHelper.applyConfiguredVideoBitrate(
+                            currentStreamer as? IVideoSingleStreamer,
+                            TAG
+                        )
                     }
                 } else {
                     rtmpRetryJob?.cancel()

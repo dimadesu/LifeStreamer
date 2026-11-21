@@ -170,10 +170,16 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     private var statusUpdaterJob: Job? = null
     // Cache last notification state to avoid re-posting identical notifications
     private var lastNotificationKey: String? = null
-    // Critical error flow for the UI to show dialogs (non-transient errors)
+    // Critical error flow for the UI to show dialogs (non-transient errors that trigger reconnection)
     // Use replay=0 because we'll handle notification-start timing differently
     private val _criticalErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val criticalErrors = _criticalErrors.asSharedFlow()
+    // Non-retryable configuration/recording warnings or errors for UI display without triggering reconnect
+    private val _configurationErrors = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val configurationErrors = _configurationErrors.asSharedFlow()
+    // True while local recording is already running and initial remote endpoint handshake is in progress
+    private val _isConnectingRemote = MutableStateFlow(false)
+    val isConnectingRemote = _isConnectingRemote.asStateFlow()
     // Current outgoing video bitrate in bits per second (nullable when unknown)
     private val _currentBitrateFlow = MutableStateFlow<Int?>(null)
     val currentBitrateFlow = _currentBitrateFlow.asStateFlow()
@@ -600,6 +606,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         Log.i(TAG, "Streaming stopped - rotation lock maintained for potential reconnection")
 
         if (!_isReconnecting.value) {
+            _isConnectingRemote.value = false
             // Release wake locks when streaming truly stops
             releaseWakeLock()
             releaseNetworkWakeLock()
@@ -870,8 +877,9 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             val reconnecting = _isReconnecting.value
             val streamingNow = streamer.isStreamingFlow.value
             
-            // If reconnecting, always show CONNECTING status until completeReconnection() clears it
-            if (reconnecting) {
+            // If reconnecting or performing initial remote handshake while recording locally,
+            // keep CONNECTING status until remote connects.
+            if (reconnecting || _isConnectingRemote.value) {
                 return StreamStatus.CONNECTING
             }
             
@@ -963,10 +971,10 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             Log.i(TAG, "Foreground service reinforced with all required service types")
-            if (!_isReconnecting.value) {
+            if (!_isReconnecting.value && !_isConnectingRemote.value) {
                 try { _serviceStreamStatus.tryEmit(StreamStatus.STREAMING) } catch (_: Throwable) {}
             } else {
-                Log.d(TAG, "onStreamingStart: keeping CONNECTING status while reconnecting")
+                Log.d(TAG, "onStreamingStart: keeping CONNECTING status while connecting/reconnecting remote")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to maintain foreground service state", e)
@@ -1181,6 +1189,18 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 return
             }
 
+            // Pre-flight check: block start if simultaneous recording format is incompatible with encoders
+            val compatibilityError = streamConfigurationHelper.validateLocalRecordingCompatibility()
+            if (compatibilityError != null) {
+                val errorMsg = "Cannot start: $compatibilityError"
+                Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
+                unlockStreamRotation()
+                _serviceStreamStatus.tryEmit(StreamStatus.NOT_STREAMING)
+                customNotificationUtils.notify(createDefaultNotification(errorMsg))
+                serviceScope.launch { _configurationErrors.emit(errorMsg) }
+                return
+            }
+
             // Read configured endpoint descriptor
             val descriptor = try {
                 storageRepository.createEndpointDescriptor()
@@ -1214,6 +1234,118 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 SrtlaManager.start(this, srtlaConfig.receiverHost, srtlaConfig.receiverPort, srtlaConfig.listenPort)
             }
 
+            val dualEndpoint = currentStreamer.endpoint as? DualEndpoint
+            val isRemoteDualEndpoint = dualEndpoint != null && !descriptor.type.sinkType.isLocal
+            val localRecordingConfig = if (isRemoteDualEndpoint) {
+                storageRepository.localRecordingConfigFlow.first()
+            } else null
+
+            // Offline-first simultaneous recording: open & start local file immediately, then connect remote
+            if (isRemoteDualEndpoint && localRecordingConfig != null) {
+                acquireWakeLock()
+                acquireNetworkWakeLock()
+                setConnectingRemote(true)
+                try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
+
+                var openedLocalUri: android.net.Uri? = null
+                var localOpened = false
+                try {
+                    val localDescriptor = storageRepository.createLocalRecordingDescriptor(localRecordingConfig)
+                    openedLocalUri = localDescriptor.uri
+                    withContext(Dispatchers.IO) {
+                        currentStreamer.open(localDescriptor)
+                    }
+                    localOpened = true
+                    Log.i(TAG, "startStreamFromConfiguredEndpoint: Local recording opened: ${localDescriptor.uri}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "startStreamFromConfiguredEndpoint: Failed to open local recording: ${e.message}", e)
+                    openedLocalUri?.let { uri ->
+                        if (uri.scheme == "content") {
+                            try { contentResolver.delete(uri, null, null) } catch (_: Throwable) {}
+                        }
+                    }
+                    serviceScope.launch {
+                        _configurationErrors.emit("Could not start local recording: ${e.message}. Continuing live stream without recording.")
+                    }
+                }
+
+                if (localOpened) {
+                    val encodersReady = withTimeoutOrNull(5000) {
+                        while ((currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer)?.videoEncoder == null
+                            || (currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IAudioSingleStreamer)?.audioEncoder == null) {
+                            delay(200)
+                        }
+                        true
+                    } ?: false
+
+                    if (!encodersReady) {
+                        setConnectingRemote(false)
+                        withContext(NonCancellable) {
+                            try { currentStreamer.close() } catch (_: Throwable) {}
+                            openedLocalUri?.let { uri ->
+                                if (uri.scheme == "content") {
+                                    try { contentResolver.delete(uri, null, null) } catch (_: Throwable) {}
+                                }
+                            }
+                        }
+                        val errorMsg = "Encoders not ready after local open"
+                        Log.e(TAG, "startStreamFromConfiguredEndpoint: $errorMsg")
+                        serviceScope.launch { _criticalErrors.emit(errorMsg) }
+                        return
+                    }
+
+                    try {
+                        withContext(Dispatchers.IO) {
+                            currentStreamer.startStream()
+                            streamConfigurationHelper.applyConfiguredVideoBitrate(
+                                currentStreamer as? IVideoSingleStreamer,
+                                TAG
+                            )
+                        }
+                        Log.i(TAG, "startStreamFromConfiguredEndpoint: Local recording started immediately; connecting remote...")
+                    } catch (e: Exception) {
+                        setConnectingRemote(false)
+                        Log.w(TAG, "Failed to start local recording pipeline: ${e.message}")
+                        serviceScope.launch { _criticalErrors.emit("Start failed: ${e.message}") }
+                        return
+                    }
+
+                    try {
+                        withTimeout(10000) {
+                            withContext(Dispatchers.IO) {
+                                dualEndpoint.openSecond(descriptor)
+                            }
+                        }
+                        withContext(Dispatchers.IO) {
+                            dualEndpoint.startStreamSecond()
+                        }
+                        (currentStreamer as? IVideoSingleStreamer)?.videoEncoder?.requestKeyFrame()
+                        streamConfigurationHelper.applySafeInitialBitrate(
+                            currentStreamer as? IVideoSingleStreamer,
+                            TAG
+                        )
+                        streamConfigurationHelper.attachBitrateRegulator(
+                            currentStreamer as? IVideoSingleStreamer,
+                            descriptor.type.sinkType,
+                            TAG
+                        )
+                        setConnectingRemote(false)
+                        _serviceStreamStatus.tryEmit(StreamStatus.STREAMING)
+                        Log.i(TAG, "startStreamFromConfiguredEndpoint: Simultaneous recording + remote stream active")
+                    } catch (e: Exception) {
+                        // Leave isConnectingRemote=true until ViewModel's handleDisconnection() sets isReconnecting=true
+                        Log.w(TAG, "Remote connect failed while local recording is running: ${e.message}")
+                        withContext(NonCancellable) {
+                            try { dualEndpoint.closeSecond() } catch (_: Throwable) {}
+                        }
+                        serviceScope.launch { _criticalErrors.emit("Open failed: ${e.message}") }
+                    }
+                    return
+                } else {
+                    setConnectingRemote(false)
+                }
+            }
+
             try {
                 // Keep device and network awake during initial connect and any retries
                 acquireWakeLock()
@@ -1221,9 +1353,8 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
 
                 // Indicate we're attempting to connect/open
                 try { _serviceStreamStatus.tryEmit(StreamStatus.CONNECTING) } catch (_: Throwable) {}
-                val dualEndpoint = currentStreamer.endpoint as? DualEndpoint
                 withTimeout(10000) { // 10s open timeout
-                    if (dualEndpoint != null && !descriptor.type.sinkType.isLocal) {
+                    if (isRemoteDualEndpoint) {
                         dualEndpoint.openSecond(descriptor)
                     } else {
                         currentStreamer.open(descriptor)
@@ -1634,6 +1765,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
     fun markUserStoppedManually() {
         Log.i(TAG, "markUserStoppedManually() called")
         _userStoppedManually.value = true
+        _isConnectingRemote.value = false
         // Also cancel any ongoing reconnection
         if (_isReconnecting.value) {
             Log.i(TAG, "Cancelling reconnection due to manual stop")
@@ -1689,10 +1821,15 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         // Set reconnecting flag FIRST so that when status change triggers observers,
         // getEffectiveServiceStatus() will see reconnecting=true
         _isReconnecting.value = true
+        _isConnectingRemote.value = false
         _reconnectionStatusMessage.value = "Could not connect. Reconnecting in 5 seconds"
         // Now set status - this triggers observers which will see reconnecting=true
         _serviceStreamStatus.value = StreamStatus.CONNECTING
         return true
+    }
+
+    fun setConnectingRemote(connecting: Boolean) {
+        _isConnectingRemote.value = connecting
     }
     
     /**
@@ -1730,6 +1867,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         Log.i(TAG, "Reconnection cancelled")
         // Set flag FIRST before status to avoid intermediate state
         _isReconnecting.value = false
+        _isConnectingRemote.value = false
         _reconnectionStatusMessage.value = null
         if (streamer.isStreamingFlow.value != true) {
             releaseWakeLock()

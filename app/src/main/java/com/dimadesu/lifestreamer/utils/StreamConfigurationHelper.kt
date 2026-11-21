@@ -45,6 +45,32 @@ class StreamConfigurationHelper(private val storageRepository: DataStoreReposito
         streamer.bitrateRegulatorControllerFactory = factory
     }
 
+    suspend fun validateLocalRecordingCompatibility(): String? {
+        val endpointType = storageRepository.endpointTypeFlow.first()
+        if (!endpointType.isStreaming) return null
+        val localConfig = storageRepository.localRecordingConfigFlow.first() ?: return null
+        val videoConfig = storageRepository.videoConfigFlow.first()
+        val audioConfig = storageRepository.audioConfigFlow.first()
+        return LocalRecordingCompatibilityValidator.validate(
+            extension = localConfig.extension,
+            videoMimeType = videoConfig?.mimeType,
+            audioMimeType = audioConfig?.mimeType,
+            endpointType = endpointType
+        )
+    }
+
+    suspend fun applyConfiguredVideoBitrate(streamer: IVideoSingleStreamer?, tag: String) {
+        if (streamer == null) return
+        storageRepository.videoConfigFlow.first()?.let { config ->
+            try {
+                streamer.videoEncoder?.bitrate = config.startBitrate
+                Log.i(tag, "applyConfiguredVideoBitrate: Applied configured video bitrate (${config.startBitrate / 1000}kbps) for local recording")
+            } catch (e: Exception) {
+                Log.w(tag, "applyConfiguredVideoBitrate: Failed to apply configured video bitrate: ${e.message}")
+            }
+        }
+    }
+
     suspend fun applySafeInitialBitrate(streamer: IVideoSingleStreamer?, tag: String) {
         if (streamer == null) return
         
