@@ -32,11 +32,19 @@ class RecordingFileNameFormatterTest {
     }
 
     @Test
-    fun `strips legacy video extension before appending timestamp and extension`() {
+    fun `strips legacy video extension and migrates legacy defaults to LifeStreamer`() {
         val ts = utcMillis(2026, 11, 21, 12, 0, 0)
         assertEquals(
-            "StreamPackFile_2026-11-21_12-00-00.mp4",
+            "LifeStreamer_2026-11-21_12-00-00.mp4",
             RecordingFileNameFormatter.format("StreamPackFile.mp4", FileExtension.MP4, ts, utc)
+        )
+        assertEquals(
+            "LifeStreamer_2026-11-21_12-00-00.ts",
+            RecordingFileNameFormatter.format("output.ts", FileExtension.TS, ts, utc)
+        )
+        assertEquals(
+            "LifeStreamer_2026-11-21_12-00-00.ts",
+            RecordingFileNameFormatter.format("StreamPack", FileExtension.TS, ts, utc)
         )
         assertEquals(
             "MyTrip_2026-11-21_12-00-00.ts",

@@ -17,9 +17,11 @@ object RecordingFileNameFormatter {
 
     private val ILLEGAL_CHARS_REGEX = Regex("[/\\\\:*?\"<>|]")
     private val KNOWN_EXTENSIONS = FileExtension.entries.map { it.extension }
+    private val LEGACY_DEFAULT_PREFIXES = setOf("streampackfile", "streampack", "output")
 
     /**
      * Cleans a raw user-entered filename prefix by stripping legacy video extensions,
+     * migrating legacy default names (`StreamPackFile`, `StreamPack`, `output`) to [DEFAULT_PREFIX],
      * removing filesystem-unsafe characters, and falling back to [DEFAULT_PREFIX] if blank.
      */
     fun sanitizePrefix(rawPrefix: String?): String {
@@ -38,7 +40,10 @@ object RecordingFileNameFormatter {
         } while (stripped)
 
         cleaned = ILLEGAL_CHARS_REGEX.replace(cleaned, "_").trim()
-        return cleaned.ifEmpty { DEFAULT_PREFIX }
+        if (cleaned.isEmpty() || cleaned.lowercase(Locale.US) in LEGACY_DEFAULT_PREFIXES) {
+            return DEFAULT_PREFIX
+        }
+        return cleaned
     }
 
     /**
