@@ -1,12 +1,9 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
-import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
+import io.github.komedia.komuxer.rtmp.util.metrics.RtmpMetrics
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
 import io.github.thibaultbee.streampack.ext.rtmp.elements.endpoints.RtmpEndpointMetrics
 import io.github.thibaultbee.streampack.ext.rtmp.elements.endpoints.rtmpMetrics
-import io.github.thibaultbee.streampack.ext.rtmp.regulator.RtmpBitrateRegulator
-import io.github.komedia.komuxer.rtmp.util.metrics.RtmpMetrics
 import kotlin.math.max
 import kotlin.math.min
 
@@ -41,15 +38,16 @@ import kotlin.math.min
  * does replicate Moblin's real mechanism exactly.
  *
  * [TransportBitrateEstimator] scales its 0.7/0.3 retention by actual elapsed time rather than assuming
- * a fixed 1s tick, which matters here because [IntervalBitrateRegulatorController] polls every 500ms,
+ * a fixed 1s tick, which matters here because the controller polls every 500ms,
  * not 1s - without the time scaling the EMA would decay per-second at 0.7^2 = 0.49 instead of the
  * intended 0.7, making the estimate needlessly noisy/reactive.
  */
 class RtmpSendDurationBitrateRegulator(
-    metricsTracker: EndpointMetricsTracker,
-    bitrateRegulatorConfig: BitrateRegulatorConfig,
-    onVideoTargetBitrateChange: ((Int) -> Unit)
-) : RtmpBitrateRegulator(metricsTracker, bitrateRegulatorConfig, onVideoTargetBitrateChange, { /* no audio */ }) {
+    override val metricsTracker: EndpointMetricsTracker,
+    initialVideoBitrateRange: BitrateRange,
+    private val onVideoTargetBitrateChange: ((Int) -> Unit),
+    private val nanoTimeProvider: () -> Long = System::nanoTime
+) : DynamicBitrateRegulator {
 
     companion object {
         private const val TAG = "RtmpSendDurationReg"
@@ -79,12 +77,19 @@ class RtmpSendDurationBitrateRegulator(
         private const val TRANSPORT_BITRATE_MINIMUM = 100_000L
     }
 
-    private var lastRawMetrics: RtmpMetrics? = null
+    private data class Sample(
+        val messagesSent: Long,
+        val messagesSendDropped: Long,
+        val sendDurationNs: Long
+    )
+
+    private var videoBitrateRange: BitrateRange = initialVideoBitrateRange
+    private var lastSample: Sample? = null
     private var lastPollNs: Long = 0L
 
     // Smoothed real socket throughput, used to cap the target bitrate (Moblin's limitByTransportBitrate).
     // Adapted analogy, not a literal port - see class doc.
-    private val transportBitrateEstimator = TransportBitrateEstimator()
+    private val transportBitrateEstimator = TransportBitrateEstimator(nanoTimeProvider)
     private val transportBitrateBps: Long
         get() = transportBitrateEstimator.bitrateBps
 
@@ -101,29 +106,57 @@ class RtmpSendDurationBitrateRegulator(
     // Cooldown tracker to prevent sawtooth oscillation
     private var nextIncreaseAllowedNs: Long = 0L
 
+    override fun updateVideoBitrateRange(range: BitrateRange) {
+        videoBitrateRange = range
+    }
+
+    internal fun getSmoothFillRatio(): Double = smoothFillRatio
+
+    internal fun getTransportBitrateBps(): Long = transportBitrateBps
+
+    private fun emitVideoTargetBitrate(bitrate: Int) {
+        onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
+    }
+
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
         val metrics = metricsTracker.cumulative as? RtmpEndpointMetrics ?: return
         val raw = metrics.rawMetrics.rtmpMetrics
+        updateWithMetrics(
+            currentVideoBitrate = currentVideoBitrate,
+            messagesSent = raw.messagesSent,
+            messagesSendDropped = raw.messagesSendDropped,
+            sendDurationNs = raw.sendDuration.inWholeNanoseconds,
+            totalBytesSent = raw.totalBytesSent
+        )
+    }
 
-        val nowNs = System.nanoTime()
-        val previousRaw = lastRawMetrics
+    internal fun updateWithMetrics(
+        currentVideoBitrate: Int,
+        messagesSent: Long,
+        messagesSendDropped: Long,
+        sendDurationNs: Long,
+        totalBytesSent: Long
+    ) {
+        val nowNs = nanoTimeProvider()
+        val currentSample = Sample(messagesSent, messagesSendDropped, sendDurationNs)
+        val previousSample = lastSample
         val previousNs = lastPollNs
-        lastRawMetrics = raw
+        lastSample = currentSample
         lastPollNs = nowNs
 
         // First sample: nothing to diff against yet.
-        if (previousRaw == null) return
+        if (previousSample == null) return
         val elapsedNs = nowNs - previousNs
         if (elapsedNs <= 0) return
 
-        val deltaSent = raw.messagesSent - previousRaw.messagesSent
-        val deltaDropped = raw.messagesSendDropped - previousRaw.messagesSendDropped
-        val deltaSendDurationNs = (raw.sendDuration - previousRaw.sendDuration).inWholeNanoseconds
+        val deltaSent = currentSample.messagesSent - previousSample.messagesSent
+        val deltaDropped = currentSample.messagesSendDropped - previousSample.messagesSendDropped
+        val deltaSendDurationNs = (currentSample.sendDurationNs - previousSample.sendDurationNs)
             .coerceAtLeast(0)
         val instantFillRatio = (deltaSendDurationNs.toDouble() / elapsedNs.toDouble()).coerceIn(0.0, 1.0)
         calcFillRatios(instantFillRatio)
 
-        transportBitrateEstimator.update(raw.totalBytesSent)
+        transportBitrateEstimator.update(totalBytesSent)
 
         // Escalation multiplier: consecutive decreases get progressively harder.
         val escalation = if (consecutiveDecreases > 1) {
@@ -140,16 +173,16 @@ class RtmpSendDurationBitrateRegulator(
                     MIN_DECREASE_STEP
                 )
                 consecutiveDecreases++
-                Log.i(TAG, "Queue overflow: dropped=$deltaDropped, reducing by $percentageReduction% to $newBitrate")
-                onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
+                BitrateRegulatorLog.i(TAG, "Queue overflow: dropped=$deltaDropped, reducing by $percentageReduction% to $newBitrate")
+                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 
             fastFillRatio >= FILL_RATIO_EMERGENCY_THRESHOLD -> {
                 // Socket is almost fully blocked: emergency drop to minimum bitrate.
-                val minBitrate = bitrateRegulatorConfig.videoBitrateRange.lower
+                val minBitrate = videoBitrateRange.lower
                 consecutiveDecreases++
-                Log.i(TAG, "EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, dropping to min=$minBitrate")
-                onVideoTargetBitrateChange(minBitrate)
+                BitrateRegulatorLog.i(TAG, "EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, dropping to min=$minBitrate")
+                emitVideoTargetBitrate(minBitrate)
             }
 
             smoothFillRatio >= FILL_RATIO_DECREASE_THRESHOLD -> {
@@ -160,8 +193,8 @@ class RtmpSendDurationBitrateRegulator(
                     MIN_DECREASE_STEP
                 )
                 consecutiveDecreases++
-                Log.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
-                onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
+                BitrateRegulatorLog.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
+                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 
             fastFillRatio - smoothFillRatio >= FILL_RATIO_LAZY_DECREASE_DIFF_THRESHOLD -> {
@@ -172,22 +205,22 @@ class RtmpSendDurationBitrateRegulator(
                     MIN_DECREASE_STEP
                 )
                 consecutiveDecreases++
-                Log.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
-                onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
+                BitrateRegulatorLog.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
+                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 
             smoothFillRatio <= FILL_RATIO_INCREASE_THRESHOLD &&
-                currentVideoBitrate < bitrateRegulatorConfig.videoBitrateRange.upper &&
+                currentVideoBitrate < videoBitrateRange.upper &&
                 nowNs >= nextIncreaseAllowedNs -> {
                 consecutiveDecreases = 0 // Reset escalation on increase
                 val increaseStep = (currentVideoBitrate * INCREASE_PERCENTAGE / 100)
                     .coerceIn(MIN_INCREASE_STEP, MAX_INCREASE_STEP)
                 val newBitrate = min(
                     currentVideoBitrate + increaseStep,
-                    bitrateRegulatorConfig.videoBitrateRange.upper
+                    videoBitrateRange.upper
                 )
                 nextIncreaseAllowedNs = nowNs + INCREASE_COOLDOWN_NS
-                onVideoTargetBitrateChange(capByTransportBitrate(newBitrate))
+                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 
             else -> {
@@ -225,20 +258,5 @@ class RtmpSendDurationBitrateRegulator(
             (17 * transportBitrateBps) / 10
         )
         return min(bitrate.toLong(), maxAllowedByTransport).toInt()
-    }
-
-    class Factory : RtmpBitrateRegulator.Factory {
-        override fun newBitrateRegulator(
-            metricsTracker: EndpointMetricsTracker,
-            bitrateRegulatorConfig: BitrateRegulatorConfig,
-            onVideoTargetBitrateChange: (Int) -> Unit,
-            onAudioTargetBitrateChange: (Int) -> Unit
-        ): RtmpBitrateRegulator {
-            return RtmpSendDurationBitrateRegulator(
-                metricsTracker,
-                bitrateRegulatorConfig,
-                onVideoTargetBitrateChange
-            )
-        }
     }
 }

@@ -11,16 +11,36 @@ import kotlin.math.max
  * Moblin's 1s cadence still get the same per-second decay of 0.7, instead of an unintentionally
  * stronger/weaker smoothing effect tied to their actual polling interval.
  */
-class TransportBitrateEstimator {
+class TransportBitrateEstimator(
+    private val nanoTimeProvider: () -> Long = System::nanoTime
+) {
+    data class Snapshot(
+        val bitrateBps: Long,
+        val previousByteSentTotal: Long,
+        val previousTransportUpdateTimeNs: Long
+    )
+
     private var previousByteSentTotal: Long = -1L
     private var previousTransportUpdateTimeNs: Long = -1L
     
     var bitrateBps: Long = 0
         private set
 
+    fun exportSnapshot(): Snapshot = Snapshot(
+        bitrateBps = bitrateBps,
+        previousByteSentTotal = previousByteSentTotal,
+        previousTransportUpdateTimeNs = previousTransportUpdateTimeNs
+    )
+
+    fun restoreSnapshot(snapshot: Snapshot) {
+        bitrateBps = snapshot.bitrateBps
+        previousByteSentTotal = snapshot.previousByteSentTotal
+        previousTransportUpdateTimeNs = snapshot.previousTransportUpdateTimeNs
+    }
+
     fun update(byteSentTotal: Long): Boolean {
         var updated = false
-        val nowNs = System.nanoTime()
+        val nowNs = nanoTimeProvider()
         if (previousByteSentTotal >= 0 && previousTransportUpdateTimeNs > 0) {
             val deltaBytes = max(0L, byteSentTotal - previousByteSentTotal)
             val deltaMs = (nowNs - previousTransportUpdateTimeNs) / 1_000_000.0

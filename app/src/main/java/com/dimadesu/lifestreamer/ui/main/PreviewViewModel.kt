@@ -733,52 +733,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     /**
-     * Remove bitrate regulator from streamer if streaming with SRT.
-     * Safe to call even if regulator is not attached.
-     */
-    private suspend fun removeBitrateRegulatorIfNeeded() {
-        val currentStreamer = serviceStreamer ?: return
-        val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
-        if (!isCurrentlyStreaming) return
-        
-        val sinkType = storageRepository.endpointTypeFlow.first().sinkType
-        if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
-        
-        try {
-            Log.i(TAG, "Removing bitrate regulator before video source switch")
-            currentStreamer.bitrateRegulatorControllerFactory = null
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not remove bitrate regulator: ${e.message}")
-        }
-    }
-    
-    /**
-     * Re-add bitrate regulator to streamer if streaming with SRT.
-     */
-    private suspend fun readdBitrateRegulatorIfNeeded() {
-        val currentStreamer = serviceStreamer ?: return
-        val isCurrentlyStreaming = currentStreamer.isStreamingFlow.value == true
-        if (!isCurrentlyStreaming) return
-        if (service?.isReconnecting?.value == true) return
-        
-        val sinkType = storageRepository.endpointTypeFlow.first().sinkType
-        if (sinkType != MediaSinkType.SRT && sinkType != MediaSinkType.RTMP) return
-        
-        try {
-            if (storageRepository.bitrateRegulatorConfigFlow.first() != null) {
-                streamConfigurationHelper.attachBitrateRegulator(
-                    currentStreamer as? io.github.thibaultbee.streampack.core.streamers.single.IVideoSingleStreamer,
-                    sinkType,
-                    TAG
-                )
-                Log.i(TAG, "Re-added bitrate regulator after video source switch")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not re-add bitrate regulator: ${e.message}")
-        }
-    }
-
-    /**
      * Helper functions to interact with streamer directly (service compatibility layer)
      * 
      * @param shouldSuppressErrors If true, errors won't be posted to streamerErrorLiveData (for auto-retry)
@@ -2841,9 +2795,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 onRtmpConnected = { player ->
                     monitorRtmpConnection(player)
                     isHandlingDisconnection = false
-                    viewModelScope.launch {
-                        readdBitrateRegulatorIfNeeded()
-                    }
                 }
             )
         }
@@ -3364,8 +3315,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
     }
 
     private suspend fun switchToBitmapSourceAndRetryRtmp(
-        currentStreamer: SingleStreamer,
-        readdRegulatorOnConnect: Boolean
+        currentStreamer: SingleStreamer
     ) {
         Log.i(TAG, "Switching to bitmap source with ExoPlayerAudioSource...")
         currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
@@ -3377,12 +3327,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.w(TAG, "ExoPlayerAudioSource failed during fallback: ${e.message}")
         }
 
-        startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = readdRegulatorOnConnect)
+        startRtmpSourceRetry(currentStreamer)
     }
 
     private suspend fun startRtmpSourceRetry(
-        currentStreamer: SingleStreamer,
-        readdRegulatorOnConnect: Boolean
+        currentStreamer: SingleStreamer
     ) {
         val activeIndex = _activeRtmpIndex.value ?: 1
         val rtmpUrl = storageRepository.rtmpSourceUrlFlow(activeIndex).first()
@@ -3397,11 +3346,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             onRtmpConnected = { player ->
                 monitorRtmpConnection(player)
                 isHandlingDisconnection = false
-                if (readdRegulatorOnConnect) {
-                    viewModelScope.launch {
-                        readdBitrateRegulatorIfNeeded()
-                    }
-                }
             }
         )
     }
@@ -3516,7 +3460,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 }
             }
             if (_activeRtmpIndex.value != null) {
-                switchToBitmapSourceAndRetryRtmp(currentStreamer, readdRegulatorOnConnect = false)
+                switchToBitmapSourceAndRetryRtmp(currentStreamer)
             } else {
                 isHandlingDisconnection = false
             }
@@ -3567,7 +3511,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "User stopped stream manually during RTMP restart - aborting restart completion")
             service?.cancelReconnection()
             if (_activeRtmpIndex.value != null) {
-                startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = false)
+                startRtmpSourceRetry(currentStreamer)
             } else {
                 isHandlingDisconnection = false
             }
@@ -3594,7 +3538,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         }
         
         // Start retry loop to reconnect RTMP
-        startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = true)
+        startRtmpSourceRetry(currentStreamer)
     }
     
     /**
@@ -3602,7 +3546,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
      * Switches only video source to bitmap without restarting the stream.
      * May cause audio sync issues in OBS when streaming.
      * 
-     * @param isStreaming If true, handles bitrate regulator; if false, skips it
+     * @param isStreaming Whether the streamer is currently publishing
      */
     private suspend fun handleRtmpDisconnectionWithHotSwap(currentStreamer: SingleStreamer, isStreaming: Boolean) {
         Log.i(TAG, "Handling RTMP disconnection - falling back to bitmap and retrying (hot-swap, streaming=$isStreaming)")
@@ -3619,19 +3563,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         // STATE_IDLE or watchdog callbacks from re-triggering handleRtmpDisconnection()
         stopRtmpConnectionMonitoring()
         
-        // Remove bitrate regulator if streaming with SRT
-        if (isStreaming) {
-            removeBitrateRegulatorIfNeeded()
-        }
-        
         // Switch only VIDEO to bitmap - keep existing audio source to avoid glitches
         currentStreamer.setVideoSource(BitmapSourceFactory(testBitmap))
         Log.i(TAG, "Switched to bitmap fallback (video only, keeping current audio source)")
-        
-        // Re-add bitrate regulator if streaming with SRT
-        if (isStreaming) {
-            readdBitrateRegulatorIfNeeded()
-        }
         
         // Now release the old ExoPlayer to prevent multiple instances playing simultaneously
         // (which causes audio echo when captured by MediaProjection)
@@ -3648,7 +3582,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
         RtmpAudioBridge.clear()
         
         // Start retry loop
-        startRtmpSourceRetry(currentStreamer, readdRegulatorOnConnect = isStreaming)
+        startRtmpSourceRetry(currentStreamer)
     }
 
     /**
@@ -3763,9 +3697,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Hide BT toggle - RTMP uses ExoPlayer audio, not microphone
                     _showBluetoothToggle.postValue(false)
 
-                    // Remove bitrate regulator if streaming with SRT
-                    removeBitrateRegulatorIfNeeded()
-
                     // Cancel any existing retry job first
                     rtmpRetryJob?.cancelAndJoin()
                     rtmpRetryJob = RtmpSourceSwitchHelper.switchToRtmpSource(
@@ -3776,15 +3707,9 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         storageRepository = storageRepository,
                         postError = { msg -> _streamerErrorLiveData.postValue(msg) },
                         postRtmpStatus = { msg -> _rtmpStatusLiveData.postValue(msg) },
-                        onBitmapFallback = {
-                            readdBitrateRegulatorIfNeeded()
-                        },
                         onRtmpConnected = { player ->
                             monitorRtmpConnection(player)
                             isHandlingDisconnection = false
-                            viewModelScope.launch {
-                                readdBitrateRegulatorIfNeeded()
-                            }
                         }
                     )
                 }
@@ -3833,9 +3758,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         mediaProjectionHelper.release()
                     }
 
-                    // Remove bitrate regulator if streaming with SRT
-                    removeBitrateRegulatorIfNeeded()
-                    
                     // Switch to camera sources - restore last used camera if available
                     val cameraId = lastUsedCameraId
                     if (cameraId != null) {
@@ -3855,9 +3777,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     // Resume VU meter now that the audio source is restored
                     setupAudioLevelMonitoring()
 
-                    // Re-add bitrate regulator if streaming with SRT
-                    readdBitrateRegulatorIfNeeded()
-                    
                     // Reapply audio monitoring if toggle is ON
                     if (_isMonitorAudioOn.value == true) {
                         applyMonitorAudioState()
@@ -3959,9 +3878,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _userToggledUvc.postValue(false)
                         _isScreenSource.postValue(false)
                         
-                        // Remove bitrate regulator if streaming with SRT
-                        removeBitrateRegulatorIfNeeded()
-                        
                         // Switch back to camera (audio unchanged)
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
                         
@@ -3977,9 +3893,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                             }
                         }
                         uvcCameraHelper = null
-                        
-                        // Re-add bitrate regulator if streaming with SRT
-                        readdBitrateRegulatorIfNeeded()
                         
                         // Reapply audio monitoring if toggle is ON
                         if (_isMonitorAudioOn.value == true) {
@@ -4049,14 +3962,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                         Log.i(TAG, "UVC device reopened while on bitmap fallback - switching back to UVC source")
                                         viewModelScope.launch {
                                             try {
-                                                // Remove bitrate regulator if streaming with SRT
-                                                removeBitrateRegulatorIfNeeded()
-                                                
                                                 // Switch back to UVC source
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
-                                                
-                                                // Re-add bitrate regulator if streaming with SRT
-                                                readdBitrateRegulatorIfNeeded()
                                                 
                                                 // Reapply audio monitoring if toggle is ON
                                                 if (_isMonitorAudioOn.value == true) {
@@ -4084,14 +3991,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                                                 _isScreenSource.postValue(false)
                                                 _activeRtmpIndex.postValue(null)
                                                 
-                                                // Remove bitrate regulator if streaming with SRT
-                                                removeBitrateRegulatorIfNeeded()
-                                                
                                                 // Switch to UVC source (audio source unchanged - Android handles USB audio routing)
                                                 currentStreamer.setVideoSource(UvcVideoSource.Factory(this@apply))
-                                                
-                                                // Re-add bitrate regulator if streaming with SRT
-                                                readdBitrateRegulatorIfNeeded()
                                                 
                                                 // Reapply audio monitoring if toggle is ON
                                                 if (_isMonitorAudioOn.value == true) {
@@ -4217,14 +4118,8 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         _isScreenSource.postValue(false)
                         _activeRtmpIndex.postValue(null)
                         
-                        // Remove bitrate regulator if streaming with SRT
-                        removeBitrateRegulatorIfNeeded()
-                        
                         // Switch to UVC source first
                         currentStreamer.setVideoSource(UvcVideoSource.Factory(helper))
-                        
-                        // Re-add bitrate regulator if streaming with SRT
-                        readdBitrateRegulatorIfNeeded()
                         
                         // Reapply audio monitoring if toggle is ON
                         if (_isMonitorAudioOn.value == true) {
@@ -4244,13 +4139,7 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                         // Clear UVC toggle flag (user wants camera now)
                         _userToggledUvc.postValue(false)
                         
-                        // Remove bitrate regulator if streaming with SRT
-                        removeBitrateRegulatorIfNeeded()
-                        
                         currentStreamer.setVideoSource(CameraSourceFactory(lastUsedCameraId ?: application.cameraManager.cameras.firstOrNull() ?: "0"))
-                        
-                        // Re-add bitrate regulator if streaming with SRT
-                        readdBitrateRegulatorIfNeeded()
                         
                         // Reapply audio monitoring if toggle is ON
                         if (_isMonitorAudioOn.value == true) {
@@ -4362,8 +4251,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                 if (streamingMediaProjection == null && startupMediaProjection == null) {
                     mediaProjectionHelper.release()
                 }
-
-                removeBitrateRegulatorIfNeeded()
                 
                 val cameraId = lastUsedCameraId
                 if (cameraId != null) {
@@ -4373,14 +4260,11 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
                     currentStreamer.setVideoSource(CameraSourceFactory(application))
                     Log.i(TAG, "Switched to camera video (default camera)")
                 }
-                
-                readdBitrateRegulatorIfNeeded()
             }
         }
     }
     
     private suspend fun switchToMediaProjectionVideoSource(currentStreamer: SingleStreamer, projection: MediaProjection) {
-        removeBitrateRegulatorIfNeeded()
         val videoSource = currentStreamer.videoInput.sourceFlow.value
         if (videoSource is ICameraSource) {
             lastUsedCameraId = videoSource.cameraId
@@ -4395,8 +4279,6 @@ class PreviewViewModel(private val application: Application) : ObservableViewMod
             Log.i(TAG, "switchToMediaProjectionVideoSource: Switching to default MediaProjection source")
             currentStreamer.setVideoSource(MediaProjectionVideoSourceFactory(projection))
         }
-        
-        readdBitrateRegulatorIfNeeded()
     }
 
     /**

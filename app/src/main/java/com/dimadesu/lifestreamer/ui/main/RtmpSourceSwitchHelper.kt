@@ -204,18 +204,16 @@ internal object RtmpSourceSwitchHelper {
     suspend fun switchToBitmapFallback(
         streamer: SingleStreamer,
         bitmap: Bitmap
-    ): Boolean {
-        return try {
+    ) {
+        try {
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
             streamer.setAudioSource(ExoPlayerAudioSourceFactory())
             Log.i(TAG, "Switched to bitmap fallback with ExoPlayerAudioSource")
-            true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
-            false
         }
     }
 
@@ -238,7 +236,6 @@ internal object RtmpSourceSwitchHelper {
         storageRepository: DataStoreRepository,
         postError: (String) -> Unit,
         postRtmpStatus: (String?) -> Unit,
-        onBitmapFallback: (suspend () -> Unit)? = null,
         onRtmpConnected: ((ExoPlayer) -> Unit)? = null
     ): kotlinx.coroutines.Job {
         var attemptCount = 0
@@ -264,9 +261,7 @@ internal object RtmpSourceSwitchHelper {
                     try { playerToRelease.release() } catch (_: Exception) {}
                 }
                 if (attemptCount == 1 && isActive) {
-                    if (switchToBitmapFallback(currentStreamer, testBitmap)) {
-                        onBitmapFallback?.invoke()
-                    }
+                    switchToBitmapFallback(currentStreamer, testBitmap)
                 }
                 ensureMinAttemptStatusVisible()
                 if (isActive) {
