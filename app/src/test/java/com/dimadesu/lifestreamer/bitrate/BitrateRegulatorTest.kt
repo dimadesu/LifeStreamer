@@ -281,36 +281,4 @@ class BitrateRegulatorTest {
             regulator.getTransportBitrateBps()
         )
     }
-
-    @Test
-    fun moblinRegulator_updateGate_toleratesPollingJitterAndThrottlesRapidCalls() {
-        var nowNs = 1_000_000_000L
-        val regulator = MoblinSrtFightBitrateRegulator(
-            metricsTracker = dummyMetricsTracker(),
-            initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
-            onVideoTargetBitrateChange = {},
-            nanoTimeProvider = { nowNs }
-        )
-
-        // First sample establishes baseline and ramps from 1 Mbps
-        var bytesSent = 100_000L
-        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
-        val afterFirst = regulator.getCurrentBitrate()
-        assertTrue("Expected initial ramp above 1 Mbps, got $afterFirst", afterFirst > 1_000_000)
-
-        // 100 ms later: too soon, must be skipped
-        nowNs += 100_000_000L
-        bytesSent += 62_500L
-        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
-        assertEquals("Rapid call at 100 ms should be throttled", afterFirst, regulator.getCurrentBitrate())
-
-        // 195 ms after first accepted tick (within jitter margin around 200 ms): must run
-        nowNs += 95_000_000L
-        bytesSent += 62_500L
-        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
-        assertTrue(
-            "Tick at 195 ms (minor delay jitter) should not be skipped, got ${regulator.getCurrentBitrate()} vs $afterFirst",
-            regulator.getCurrentBitrate() > afterFirst
-        )
-    }
 }

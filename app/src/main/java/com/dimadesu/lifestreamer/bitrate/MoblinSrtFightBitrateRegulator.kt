@@ -24,7 +24,7 @@ class MoblinSrtFightBitrateRegulator(
     private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
     private val onVideoTargetBitrateChange: ((Int) -> Unit),
     initialSnapshot: SrtRegulatorSnapshot? = null,
-    private val nanoTimeProvider: () -> Long = System::nanoTime
+    nanoTimeProvider: () -> Long = System::nanoTime
 ) : SnapshotableSrtRegulator {
 
     constructor(
@@ -49,11 +49,6 @@ class MoblinSrtFightBitrateRegulator(
 
         // Matches Moblin's adaptiveBitrateTransportMinimum (= adaptiveBitrateStart).
         private const val TRANSPORT_BITRATE_MINIMUM = ADAPTIVBITRATE_START
-
-        // Moblin's EMA constants are tuned for a 200 ms cadence. Allow 20 ms tolerance so
-        // slight coroutine delay() jitter (e.g. 199 ms) does not skip a tick and halve the rate
-        // to 400 ms, while still guarding against accidentally calling update() too rapidly.
-        private const val MIN_UPDATE_INTERVAL_NS = 180_000_000L
     }
 
     private var videoBitrateRange: BitrateRange = initialVideoBitrateRange
@@ -84,8 +79,6 @@ class MoblinSrtFightBitrateRegulator(
 
     // Action logging for debugging
     private val actionHistory = mutableListOf<String>()
-    private var hasUpdated = false
-    private var lastUpdateTimeNs = 0L
 
     init {
         if (initialSnapshot != null) {
@@ -147,20 +140,12 @@ class MoblinSrtFightBitrateRegulator(
         )
     }
 
+    // Expected to be called every 200 ms by DynamicBitrateRegulatorController (matching Moblin iOS).
     internal fun updateWithStats(rttMs: Double, packetsInFlight: Double, byteSentTotal: Long) {
         // Skip if no valid data
         if (rttMs <= 0) {
             return
         }
-
-        // Gate using monotonic time so wall-clock jumps cannot freeze regulation, with a small
-        // jitter margin around the 200 ms polling interval.
-        val nowNs = nanoTimeProvider()
-        if (hasUpdated && nowNs - lastUpdateTimeNs < MIN_UPDATE_INTERVAL_NS) {
-            return
-        }
-        lastUpdateTimeNs = nowNs
-        hasUpdated = true
 
         updateTransportBitrate(byteSentTotal)
 
