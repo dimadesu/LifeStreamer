@@ -123,15 +123,6 @@ class RtmpSendDurationBitrateRegulator(
         videoBitrateRange = range
     }
 
-    override fun onResume() {
-        // Drop the counter anchors so the first post-resume poll is treated as a fresh baseline:
-        // diffing across the pause would compute a meaningless fill ratio, and the counters may
-        // have been reset by a new RTMP connection.
-        lastSample = null
-        lastPollNs = 0L
-        transportBitrateEstimator.resetDeltaAnchor()
-    }
-
     internal fun getSmoothFillRatio(): Double = smoothFillRatio
 
     internal fun getFastFillRatio(): Double = fastFillRatio

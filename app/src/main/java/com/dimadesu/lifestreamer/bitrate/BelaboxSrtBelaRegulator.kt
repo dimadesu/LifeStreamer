@@ -118,10 +118,6 @@ class BelaboxSrtBelaRegulator(
         }
     }
 
-    override fun onResume() {
-        transportBitrateEstimator.resetDeltaAnchor()
-    }
-
     override fun exportSnapshot(): SrtRegulatorSnapshot = SrtRegulatorSnapshot(
         currentBitrate = curBitrate,
         transportSnapshot = transportBitrateEstimator.exportSnapshot(),

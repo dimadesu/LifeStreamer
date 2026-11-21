@@ -15,7 +15,7 @@ class BitrateRegulatorTest {
     }.createMetricsTracker()
 
     @Test
-    fun transportBitrateEstimator_snapshotRestoreAndResetAnchor() {
+    fun transportBitrateEstimator_snapshotAndRestore() {
         var nowNs = 1_000_000_000L
         val estimator = TransportBitrateEstimator { nowNs }
 
@@ -38,13 +38,6 @@ class BitrateRegulatorTest {
         nowNs += 1_000_000_000L
         restored.update(1_000_000L) // another 4 Mbps second
         // 1_200_000 * 0.7 + 4_000_000 * 0.3 = 840_000 + 1_200_000 = 2_040_000
-        assertEquals(2_040_000L, restored.bitrateBps)
-
-        // resetDeltaAnchor preserves bitrateBps while skipping the next single-sample delta
-        restored.resetDeltaAnchor()
-        assertEquals(2_040_000L, restored.bitrateBps)
-        nowNs += 5_000_000_000L
-        restored.update(1_000_000L) // 0 bytes over 5s pause should NOT decay estimate
         assertEquals(2_040_000L, restored.bitrateBps)
     }
 
@@ -249,36 +242,5 @@ class BitrateRegulatorTest {
         regulator.updateWithMetrics(2_000_000, sent, 0L, sendDurNs, bytesSent)
         assertEquals(1, emitted.size)
         assertTrue("Expected bitrate increase > 2 Mbps, got ${emitted.first()}", emitted.first() > 2_000_000)
-    }
-
-    @Test
-    fun moblinRegulator_onResume_doesNotDiffTransportBytesAcrossPause() {
-        var nowNs = 1_000_000_000L
-        val regulator = MoblinSrtFightBitrateRegulator(
-            metricsTracker = dummyMetricsTracker(),
-            initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
-            onVideoTargetBitrateChange = {},
-            nanoTimeProvider = { nowNs }
-        )
-
-        var bytesSent = 0L
-        repeat(20) {
-            nowNs += 250_000_000L
-            bytesSent += 125_000L // 4 Mbps
-            regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
-        }
-        val transportBefore = regulator.getTransportBitrateBps()
-        assertTrue(transportBefore > 0L)
-
-        // Stream paused for 10 s; a new SRT connection restarts the byte counter from 0
-        regulator.onResume()
-        nowNs += 10_000_000_000L
-        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = 0L)
-
-        assertEquals(
-            "First post-resume sample must only re-anchor, not decay the estimate",
-            transportBefore,
-            regulator.getTransportBitrateBps()
-        )
     }
 }

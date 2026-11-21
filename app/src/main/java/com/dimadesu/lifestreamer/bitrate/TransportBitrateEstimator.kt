@@ -38,15 +38,6 @@ class TransportBitrateEstimator(
         previousTransportUpdateTimeNs = snapshot.previousTransportUpdateTimeNs
     }
 
-    /**
-     * Clears only the delta anchor while keeping the smoothed [bitrateBps] estimate,
-     * useful when resuming after an intentional pause or gap.
-     */
-    fun resetDeltaAnchor() {
-        previousByteSentTotal = -1L
-        previousTransportUpdateTimeNs = -1L
-    }
-
     fun update(byteSentTotal: Long): Boolean {
         var updated = false
         val nowNs = nanoTimeProvider()
