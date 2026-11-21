@@ -238,7 +238,6 @@ internal object RtmpSourceSwitchHelper {
         storageRepository: DataStoreRepository,
         postError: (String) -> Unit,
         postRtmpStatus: (String?) -> Unit,
-        onBitmapFallback: (suspend () -> Unit)? = null,
         onRtmpConnected: ((ExoPlayer) -> Unit)? = null
     ): kotlinx.coroutines.Job {
         var attemptCount = 0
@@ -264,9 +263,7 @@ internal object RtmpSourceSwitchHelper {
                     try { playerToRelease.release() } catch (_: Exception) {}
                 }
                 if (attemptCount == 1 && isActive) {
-                    if (switchToBitmapFallback(currentStreamer, testBitmap)) {
-                        onBitmapFallback?.invoke()
-                    }
+                    switchToBitmapFallback(currentStreamer, testBitmap)
                 }
                 ensureMinAttemptStatusVisible()
                 if (isActive) {
