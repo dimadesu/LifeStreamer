@@ -35,7 +35,6 @@ import com.dimadesu.lifestreamer.data.storage.DataStoreRepository
 import com.dimadesu.lifestreamer.data.storage.PreferencesDataStoreAdapter
 import com.dimadesu.lifestreamer.models.EndpointFactory
 import com.dimadesu.lifestreamer.models.EndpointType
-import com.dimadesu.lifestreamer.models.FileExtension
 import com.dimadesu.lifestreamer.utils.DialogUtils
 import com.dimadesu.lifestreamer.utils.ProfileLevelDisplay
 import com.dimadesu.lifestreamer.utils.StreamerInfoFactory
@@ -49,10 +48,10 @@ import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.IOException
 
 class SettingsFragment : PreferenceFragmentCompat() {
     private lateinit var streamerInfo: CameraStreamerConfigurationInfo
+    private lateinit var localRecordingSettingsController: LocalRecordingSettingsController
     private val profileLevelDisplay by lazy { ProfileLevelDisplay(requireContext()) }
     private val storageRepository by lazy { DataStoreRepository(requireContext(), requireContext().dataStore) }
 
@@ -144,10 +143,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<PreferenceCategory>(R.string.srt_server_key) ?: error("srt_server_key not found")
     }
 
-    private val fileEndpointPreference: PreferenceCategory by lazy {
-        findPreferenceSafe<PreferenceCategory>(R.string.file_endpoint_key) ?: error("file_endpoint_key not found")
-    }
-
     private val srtlaEndpointPreference: PreferenceCategory by lazy {
         findPreferenceSafe<PreferenceCategory>(R.string.srtla_key) ?: error("srtla_key not found")
     }
@@ -200,16 +195,19 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreferenceSafe<SeekBarPreference>(R.string.rtmp_source_buffer_for_playback_ms_key) ?: error("rtmp_source_buffer_for_playback_ms_key not found")
     }
 
-    private val fileNamePreference: EditTextPreference by lazy {
-        findPreferenceSafe<EditTextPreference>(R.string.file_name_key) ?: error("file_name_key not found")
-    }
-
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceManager.preferenceDataStore =
             PreferencesDataStoreAdapter(requireContext().dataStore, lifecycleScope)
 
         setPreferencesFromResource(R.xml.root_preferences, rootKey)
-        
+        addPreferencesFromResource(R.xml.local_recording_preferences)
+
+        localRecordingSettingsController = LocalRecordingSettingsController(
+            fragment = this,
+            videoEncoderProvider = { videoEncoderListPreference.value },
+            audioEncoderProvider = { audioEncoderListPreference.value }
+        ).apply { bind() }
+
         // Load preferences after XML is inflated to avoid timing issues
         // where lazy properties are accessed before preferences are ready
         loadPreferences()
@@ -340,7 +338,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
             videoEncoderListPreference.value = defaultVideoEncoder
         }
         videoEncoderListPreference.setOnPreferenceChangeListener { _, newValue ->
-            loadVideoSettings(newValue as String, resetToDefaults = true)
+            val newVideoMime = newValue as String
+            loadVideoSettings(newVideoMime, resetToDefaults = true)
+            localRecordingSettingsController.updateCompatibilityWarning(videoMimeType = newVideoMime)
             true
         }
 
@@ -535,7 +535,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
             audioEncoderListPreference.value = defaultAudioEncoder
         }
         audioEncoderListPreference.setOnPreferenceChangeListener { _, newValue ->
-            loadAudioSettings(newValue as String)
+            val newAudioMime = newValue as String
+            loadAudioSettings(newAudioMime)
+            localRecordingSettingsController.updateCompatibilityWarning(audioMimeType = newAudioMime)
             true
         }
 
@@ -770,7 +772,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         srtEndpointPreference.isVisible = endpoint.hasSrtCapabilities
         rtmpEndpointPreference.isVisible = endpoint.hasRtmpCapabilities
         srtlaEndpointPreference.isVisible = endpoint.hasSrtlaCapabilities
-        fileEndpointPreference.isVisible = endpoint.hasFileCapabilities
         bitrateRegulationPreference.isVisible = endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities || endpoint.hasRtmpCapabilities
         
         val isSrt = endpoint.hasSrtCapabilities || endpoint.hasSrtlaCapabilities
@@ -790,41 +791,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         loadVideoSettings()
         loadAudioSettings()
 
-        // Update file extension
-        if (endpoint.hasFileCapabilities) {
-            // Remove previous extension (only once)
-            fileNamePreference.text = fileNamePreference.text?.substringBeforeLast(".") ?: "output"
-            // Add correct extension
-            fileNamePreference.text += when {
-                endpoint.hasFLVCapabilities -> {
-                    FileExtension.FLV.extension
-                }
-
-                endpoint.hasTSCapabilities -> {
-                    FileExtension.TS.extension
-                }
-
-                endpoint.hasMP4Capabilities -> {
-                    FileExtension.MP4.extension
-                }
-
-                endpointType == EndpointType.WEBM_FILE -> {
-                    FileExtension.WEBM.extension
-                }
-
-                endpointType == EndpointType.OGG_FILE -> {
-                    FileExtension.OGG.extension
-                }
-
-                endpointType == EndpointType.THREEGP_FILE -> {
-                    FileExtension.THREEGP.extension
-                }
-
-                else -> {
-                    throw IOException("Unknown file type")
-                }
-            }
-        }
+        localRecordingSettingsController.updateForEndpoint(
+            endpointType = endpointType,
+            videoMimeType = videoEncoderListPreference.value,
+            audioMimeType = audioEncoderListPreference.value
+        )
     }
 
     private fun loadPreferences() {

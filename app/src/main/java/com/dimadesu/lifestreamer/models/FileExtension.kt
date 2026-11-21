@@ -1,12 +1,18 @@
 package com.dimadesu.lifestreamer.models
 
-enum class FileExtension(val extension: String) {
-    TS(".ts"),
-    FLV(".flv"),
-    MP4(".mp4"),
-    WEBM(".webm"),
-    OGG(".ogg"),
-    THREEGP(".3gp");
+import io.github.thibaultbee.streampack.core.elements.endpoints.MediaContainerType
+
+enum class FileExtension(
+    val extension: String,
+    val mimeType: String,
+    val containerType: MediaContainerType
+) {
+    TS(".ts", "video/mp2ts", MediaContainerType.TS),
+    FLV(".flv", "video/x-flv", MediaContainerType.FLV),
+    MP4(".mp4", "video/mp4", MediaContainerType.MP4),
+    WEBM(".webm", "video/webm", MediaContainerType.WEBM),
+    OGG(".ogg", "video/ogg", MediaContainerType.OGG),
+    THREEGP(".3gp", "video/3gpp", MediaContainerType.THREEGP);
 
     companion object {
         fun fromEndpointType(endpointType: EndpointType): FileExtension {
@@ -19,6 +25,10 @@ enum class FileExtension(val extension: String) {
                 EndpointType.THREEGP_FILE -> THREEGP
                 else -> throw IllegalArgumentException("Unknown extension: $endpointType")
             }
+        }
+
+        fun fromContainerType(containerType: MediaContainerType): FileExtension {
+            return entries.first { it.containerType == containerType }
         }
     }
 }
