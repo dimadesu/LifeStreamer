@@ -172,4 +172,34 @@ class DynamicBitrateRegulatorControllerTest {
             controller.stop()
         }
     }
+
+    @Test
+    fun controller_pollingLoopSurvivesTickExceptions() {
+        val encoder = FakeEncoder(2_000_000)
+        val providerCalls = java.util.concurrent.atomic.AtomicInteger(0)
+        val controller = DynamicBitrateRegulatorController(
+            sinkType = MediaSinkType.SRT,
+            videoEncoderProvider = {
+                // First tick throws; later ticks must still run
+                if (providerCalls.incrementAndGet() == 1) throw IllegalStateException("boom")
+                encoder
+            },
+            audioEncoderProvider = { null },
+            metricsTracker = dummyMetricsTracker(),
+            initialRange = BitrateRange(300_000, 6_000_000),
+            initialMode = RegulatorMode.MOBLIN_FAST,
+            coroutineDispatcher = Dispatchers.Default
+        )
+
+        controller.start()
+        try {
+            Thread.sleep(DynamicBitrateRegulatorController.MOBLIN_POLLING_TIME.inWholeMilliseconds * 4)
+            assertTrue(
+                "Expected polling to continue after a failed tick, provider calls=${providerCalls.get()}",
+                providerCalls.get() >= 2
+            )
+        } finally {
+            controller.stop()
+        }
+    }
 }

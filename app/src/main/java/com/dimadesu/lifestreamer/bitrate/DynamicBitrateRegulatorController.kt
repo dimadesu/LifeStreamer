@@ -1,5 +1,6 @@
 package com.dimadesu.lifestreamer.bitrate
 
+import android.util.Log
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.encoders.IEncoder
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
@@ -159,7 +160,13 @@ class DynamicBitrateRegulatorController internal constructor(
                 delay(interval)
                 synchronized(stateLock) {
                     if (!isRunning) return@synchronized
-                    runTickLocked()
+                    try {
+                        runTickLocked()
+                    } catch (e: Exception) {
+                        // A single failed tick (e.g. stats read on a closing socket) must not kill
+                        // the polling loop or escape to the thread's uncaught exception handler.
+                        logWarning("Bitrate regulator tick failed: ${e.message}")
+                    }
                 }
             }
         }
@@ -169,6 +176,14 @@ class DynamicBitrateRegulatorController internal constructor(
         val videoEncoder = videoEncoderProvider() ?: return
         val audioBitrate = audioEncoderProvider()?.bitrate ?: 0
         activeRegulator.update(videoEncoder.bitrate, audioBitrate)
+    }
+
+    private fun logWarning(message: String) {
+        try {
+            Log.w(TAG, message)
+        } catch (_: RuntimeException) {
+            // Android Log is not mocked in local JVM unit tests.
+        }
     }
 
     private fun applyVideoTargetBitrate(targetBitrate: Int) {
@@ -218,6 +233,8 @@ class DynamicBitrateRegulatorController internal constructor(
     }
 
     companion object {
+        private const val TAG = "DynamicBitrateCtrl"
+
         // iOS calls BelaBox on every ~20ms tick (internal timers gate decisions),
         // while SrtFight is gated to every 200ms. Match those intervals so the
         // EMA filters (0.99 decay etc.) behave as designed.
