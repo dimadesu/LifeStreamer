@@ -555,7 +555,13 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                             // Signal that user manually stopped from notification
                             // This allows ViewModel to cancel reconnection timer immediately
                             _userStoppedFromNotification.emit(Unit)
-                            
+
+                            try {
+                                (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = null
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error detaching bitrate regulator on notification stop: ${e.message}")
+                            }
+
                             streamer.stopStream()
 
                             // Stop embedded SRTLA proxy if it was running for this stream
