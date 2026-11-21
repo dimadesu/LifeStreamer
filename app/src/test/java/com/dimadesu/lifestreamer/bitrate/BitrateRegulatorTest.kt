@@ -50,7 +50,6 @@ class BitrateRegulatorTest {
 
     @Test
     fun moblinRegulator_liveRangeUpdate_raisesCeilingWithoutDroppingAndClampsImmediatelyWhenLowered() {
-        var nowMs = 1_000L
         var nowNs = 1_000_000_000L
         val emitted = mutableListOf<Int>()
 
@@ -58,14 +57,12 @@ class BitrateRegulatorTest {
             metricsTracker = dummyMetricsTracker(),
             initialVideoBitrateRange = BitrateRange(300_000, 3_000_000),
             onVideoTargetBitrateChange = { emitted.add(it) },
-            currentTimeMsProvider = { nowMs },
             nanoTimeProvider = { nowNs }
         )
 
         // Train under healthy network conditions (30 ms RTT, 5 PIF, 5 Mbps sent) until hitting 3 Mbps cap
         var bytesSent = 0L
         repeat(35) {
-            nowMs += 250L
             nowNs += 250_000_000L
             bytesSent += 156_250L // 5 Mbps * 0.25s / 8
             regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
@@ -82,7 +79,6 @@ class BitrateRegulatorTest {
         assertEquals(3_000_000, regulator.getCurrentBitrate())
         assertTrue("Raising ceiling should not emit an abrupt bitrate change", emitted.isEmpty())
 
-        nowMs += 250L
         nowNs += 250_000_000L
         bytesSent += 156_250L
         regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
@@ -150,20 +146,17 @@ class BitrateRegulatorTest {
 
     @Test
     fun srtSnapshotTransfer_moblinToBelaboxAndBack_preservesBitrateAndBaselines() {
-        var nowMs = 1_000L
         var nowNs = 1_000_000_000L
 
         val moblin = MoblinSrtFightBitrateRegulator(
             metricsTracker = dummyMetricsTracker(),
             initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
             onVideoTargetBitrateChange = {},
-            currentTimeMsProvider = { nowMs },
             nanoTimeProvider = { nowNs }
         )
 
         var bytesSent = 0L
         repeat(40) {
-            nowMs += 250L
             nowNs += 250_000_000L
             bytesSent += 187_500L // 6 Mbps * 0.25s / 8
             moblin.updateWithStats(rttMs = 42.0, packetsInFlight = 12.0, byteSentTotal = bytesSent)
@@ -204,7 +197,6 @@ class BitrateRegulatorTest {
             initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
             onVideoTargetBitrateChange = {},
             initialSnapshot = snapshotToMoblin,
-            currentTimeMsProvider = { nowMs },
             nanoTimeProvider = { nowNs }
         )
         assertEquals(belabox.getCurrentBitrate(), moblin2.getCurrentBitrate())
@@ -261,19 +253,16 @@ class BitrateRegulatorTest {
 
     @Test
     fun moblinRegulator_onResume_doesNotDiffTransportBytesAcrossPause() {
-        var nowMs = 1_000L
         var nowNs = 1_000_000_000L
         val regulator = MoblinSrtFightBitrateRegulator(
             metricsTracker = dummyMetricsTracker(),
             initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
             onVideoTargetBitrateChange = {},
-            currentTimeMsProvider = { nowMs },
             nanoTimeProvider = { nowNs }
         )
 
         var bytesSent = 0L
         repeat(20) {
-            nowMs += 250L
             nowNs += 250_000_000L
             bytesSent += 125_000L // 4 Mbps
             regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
@@ -283,7 +272,6 @@ class BitrateRegulatorTest {
 
         // Stream paused for 10 s; a new SRT connection restarts the byte counter from 0
         regulator.onResume()
-        nowMs += 10_000L
         nowNs += 10_000_000_000L
         regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = 0L)
 
@@ -291,6 +279,38 @@ class BitrateRegulatorTest {
             "First post-resume sample must only re-anchor, not decay the estimate",
             transportBefore,
             regulator.getTransportBitrateBps()
+        )
+    }
+
+    @Test
+    fun moblinRegulator_updateGate_toleratesPollingJitterAndThrottlesRapidCalls() {
+        var nowNs = 1_000_000_000L
+        val regulator = MoblinSrtFightBitrateRegulator(
+            metricsTracker = dummyMetricsTracker(),
+            initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
+            onVideoTargetBitrateChange = {},
+            nanoTimeProvider = { nowNs }
+        )
+
+        // First sample establishes baseline and ramps from 1 Mbps
+        var bytesSent = 100_000L
+        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
+        val afterFirst = regulator.getCurrentBitrate()
+        assertTrue("Expected initial ramp above 1 Mbps, got $afterFirst", afterFirst > 1_000_000)
+
+        // 100 ms later: too soon, must be skipped
+        nowNs += 100_000_000L
+        bytesSent += 62_500L
+        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
+        assertEquals("Rapid call at 100 ms should be throttled", afterFirst, regulator.getCurrentBitrate())
+
+        // 195 ms after first accepted tick (within jitter margin around 200 ms): must run
+        nowNs += 95_000_000L
+        bytesSent += 62_500L
+        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
+        assertTrue(
+            "Tick at 195 ms (minor delay jitter) should not be skipped, got ${regulator.getCurrentBitrate()} vs $afterFirst",
+            regulator.getCurrentBitrate() > afterFirst
         )
     }
 }

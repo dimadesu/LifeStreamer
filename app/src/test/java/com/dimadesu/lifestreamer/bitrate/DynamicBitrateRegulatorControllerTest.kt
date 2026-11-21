@@ -60,7 +60,6 @@ class DynamicBitrateRegulatorControllerTest {
 
     @Test
     fun srtController_switchesMoblinToBelaboxWithStateHandoffAndNewPollingInterval() {
-        var nowMs = 1_000L
         var nowNs = 1_000_000_000L
         val encoder = FakeEncoder(1_000_000)
 
@@ -72,7 +71,6 @@ class DynamicBitrateRegulatorControllerTest {
             initialRange = BitrateRange(300_000, 6_000_000),
             initialMode = RegulatorMode.MOBLIN_FAST,
             coroutineDispatcher = Dispatchers.Unconfined,
-            currentTimeMsProvider = { nowMs },
             nanoTimeProvider = { nowNs }
         )
 
@@ -80,7 +78,6 @@ class DynamicBitrateRegulatorControllerTest {
         val moblin = controller.currentRegulator as MoblinSrtFightBitrateRegulator
         var bytesSent = 0L
         repeat(40) {
-            nowMs += 250L
             nowNs += 250_000_000L
             bytesSent += 187_500L
             moblin.updateWithStats(rttMs = 38.0, packetsInFlight = 10.0, byteSentTotal = bytesSent)
@@ -205,7 +202,6 @@ class DynamicBitrateRegulatorControllerTest {
 
     @Test
     fun srtController_resyncsBitrateWhenVideoEncoderIsReplacedMidStream() {
-        var nowMs = 1_000L
         var nowNs = 1_000_000_000L
         val firstEncoder = FakeEncoder(1_000_000)
         var activeEncoder: IEncoder = firstEncoder
@@ -218,7 +214,6 @@ class DynamicBitrateRegulatorControllerTest {
             initialRange = BitrateRange(300_000, 6_000_000),
             initialMode = RegulatorMode.MOBLIN_FAST,
             coroutineDispatcher = Dispatchers.Unconfined,
-            currentTimeMsProvider = { nowMs },
             nanoTimeProvider = { nowNs }
         )
 
@@ -230,7 +225,6 @@ class DynamicBitrateRegulatorControllerTest {
         val moblin = controller.currentRegulator as MoblinSrtFightBitrateRegulator
         var bytesSent = 0L
         repeat(25) {
-            nowMs += 250L
             nowNs += 250_000_000L
             bytesSent += 187_500L
             moblin.updateWithStats(rttMs = 35.0, packetsInFlight = 8.0, byteSentTotal = bytesSent)

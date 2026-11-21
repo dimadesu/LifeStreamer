@@ -44,7 +44,6 @@ class DynamicBitrateRegulatorController internal constructor(
     initialMode: RegulatorMode = RegulatorMode.MOBLIN_FAST,
     private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
     coroutineDispatcher: CoroutineDispatcher,
-    private val currentTimeMsProvider: () -> Long = System::currentTimeMillis,
     private val nanoTimeProvider: () -> Long = System::nanoTime
 ) : IBitrateRegulatorController {
 
@@ -242,7 +241,6 @@ class DynamicBitrateRegulatorController internal constructor(
                     moblinConfig = moblinConfig,
                     onVideoTargetBitrateChange = ::applyVideoTargetBitrate,
                     initialSnapshot = initialSnapshot,
-                    currentTimeMsProvider = currentTimeMsProvider,
                     nanoTimeProvider = nanoTimeProvider
                 ).apply {
                     setSettings(mode == RegulatorMode.MOBLIN_FAST)

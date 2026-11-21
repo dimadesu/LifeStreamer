@@ -25,8 +25,7 @@ class MoblinSrtFightBitrateRegulator(
     private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
     private val onVideoTargetBitrateChange: ((Int) -> Unit),
     initialSnapshot: SrtRegulatorSnapshot? = null,
-    private val currentTimeMsProvider: () -> Long = System::currentTimeMillis,
-    nanoTimeProvider: () -> Long = System::nanoTime
+    private val nanoTimeProvider: () -> Long = System::nanoTime
 ) : SnapshotableSrtRegulator {
 
     constructor(
@@ -35,7 +34,6 @@ class MoblinSrtFightBitrateRegulator(
         moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
         onVideoTargetBitrateChange: ((Int) -> Unit),
         initialSnapshot: SrtRegulatorSnapshot? = null,
-        currentTimeMsProvider: () -> Long = System::currentTimeMillis,
         nanoTimeProvider: () -> Long = System::nanoTime
     ) : this(
         metricsTracker = metricsTracker,
@@ -43,7 +41,6 @@ class MoblinSrtFightBitrateRegulator(
         moblinConfig = moblinConfig,
         onVideoTargetBitrateChange = onVideoTargetBitrateChange,
         initialSnapshot = initialSnapshot,
-        currentTimeMsProvider = currentTimeMsProvider,
         nanoTimeProvider = nanoTimeProvider
     )
 
@@ -53,6 +50,11 @@ class MoblinSrtFightBitrateRegulator(
 
         // Matches Moblin's adaptiveBitrateTransportMinimum (= adaptiveBitrateStart).
         private const val TRANSPORT_BITRATE_MINIMUM = ADAPTIVBITRATE_START
+
+        // Moblin's EMA constants are tuned for a 200 ms cadence. Allow 20 ms tolerance so
+        // slight coroutine delay() jitter (e.g. 199 ms) does not skip a tick and halve the rate
+        // to 400 ms, while still guarding against accidentally calling update() too rapidly.
+        private const val MIN_UPDATE_INTERVAL_NS = 180_000_000L
     }
 
     private var videoBitrateRange: BitrateRange = initialVideoBitrateRange
@@ -83,7 +85,8 @@ class MoblinSrtFightBitrateRegulator(
 
     // Action logging for debugging
     private val actionHistory = mutableListOf<String>()
-    private var lastUpdateTime = 0L
+    private var hasUpdated = false
+    private var lastUpdateTimeNs = 0L
 
     init {
         if (initialSnapshot != null) {
@@ -157,18 +160,19 @@ class MoblinSrtFightBitrateRegulator(
     }
 
     internal fun updateWithStats(rttMs: Double, packetsInFlight: Double, byteSentTotal: Long) {
-        val currentTime = currentTimeMsProvider()
-
-        // Skip if called too frequently (Moblin updates every 200ms)
-        if (lastUpdateTime != 0L && currentTime - lastUpdateTime < 200) {
-            return
-        }
-        lastUpdateTime = currentTime
-
         // Skip if no valid data
         if (rttMs <= 0) {
             return
         }
+
+        // Gate using monotonic time so wall-clock jumps cannot freeze regulation, with a small
+        // jitter margin around the 200 ms polling interval.
+        val nowNs = nanoTimeProvider()
+        if (hasUpdated && nowNs - lastUpdateTimeNs < MIN_UPDATE_INTERVAL_NS) {
+            return
+        }
+        lastUpdateTimeNs = nowNs
+        hasUpdated = true
 
         updateTransportBitrate(byteSentTotal)
 
