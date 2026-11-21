@@ -18,6 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.lang.ref.WeakReference
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -63,6 +64,8 @@ class DynamicBitrateRegulatorController internal constructor(
     private var pollingJob: Job? = null
     private var isRunning: Boolean = false
     private var hasStartedBefore: Boolean = false
+    private var hasSeenVideoEncoder: Boolean = false
+    private var lastVideoEncoderRef: WeakReference<IEncoder>? = null
 
     internal val currentRegulator: DynamicBitrateRegulator
         get() = synchronized(stateLock) { activeRegulator }
@@ -182,6 +185,21 @@ class DynamicBitrateRegulatorController internal constructor(
 
     private fun runTickLocked() {
         val videoEncoder = videoEncoderProvider() ?: return
+        val previousEncoder = lastVideoEncoderRef?.get()
+        if (hasSeenVideoEncoder && previousEncoder !== videoEncoder) {
+            // Encoder instance was rebuilt mid-stream (e.g. codec config or rotation change) and
+            // starts at its configured startBitrate. Re-apply the regulator's current target so a
+            // steady-state regulator does not leave the new encoder drifting at the wrong bitrate.
+            val desiredBitrate = activeRegulator.currentTargetVideoBitrate ?: videoEncoder.bitrate
+            val clamped = currentRange.coerceIn(desiredBitrate)
+            if (videoEncoder.bitrate != clamped) {
+                videoEncoder.bitrate = clamped
+            }
+        }
+        hasSeenVideoEncoder = true
+        if (previousEncoder !== videoEncoder) {
+            lastVideoEncoderRef = WeakReference(videoEncoder)
+        }
         val audioBitrate = audioEncoderProvider()?.bitrate ?: 0
         activeRegulator.update(videoEncoder.bitrate, audioBitrate)
     }
