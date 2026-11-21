@@ -204,18 +204,16 @@ internal object RtmpSourceSwitchHelper {
     suspend fun switchToBitmapFallback(
         streamer: SingleStreamer,
         bitmap: Bitmap
-    ): Boolean {
-        return try {
+    ) {
+        try {
             // Set video to bitmap first
             streamer.setVideoSource(BitmapSourceFactory(bitmap))
             streamer.setAudioSource(ExoPlayerAudioSourceFactory())
             Log.i(TAG, "Switched to bitmap fallback with ExoPlayerAudioSource")
-            true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitmap fallback source: ${e.message}", e)
-            false
         }
     }
 
