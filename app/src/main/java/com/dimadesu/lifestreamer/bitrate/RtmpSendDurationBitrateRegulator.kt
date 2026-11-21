@@ -119,15 +119,8 @@ class RtmpSendDurationBitrateRegulator(
     // Cooldown tracker to prevent sawtooth oscillation
     private var nextIncreaseAllowedNs: Long = 0L
 
-    // Last target emitted by this regulator, used to resync a rebuilt encoder mid-stream.
-    private var lastTargetBitrate: Int? = null
-
-    override val currentTargetVideoBitrate: Int?
-        get() = lastTargetBitrate
-
     override fun updateVideoBitrateRange(range: BitrateRange) {
         videoBitrateRange = range
-        lastTargetBitrate = lastTargetBitrate?.let(range::coerceIn)
     }
 
     override fun onResume() {
@@ -146,9 +139,7 @@ class RtmpSendDurationBitrateRegulator(
     internal fun getTransportBitrateBps(): Long = transportBitrateBps
 
     private fun emitVideoTargetBitrate(bitrate: Int) {
-        val clamped = videoBitrateRange.coerceIn(bitrate)
-        lastTargetBitrate = clamped
-        onVideoTargetBitrateChange(clamped)
+        onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
     }
 
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {

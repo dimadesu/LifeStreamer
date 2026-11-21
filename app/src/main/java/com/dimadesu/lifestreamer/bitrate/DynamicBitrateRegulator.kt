@@ -43,14 +43,6 @@ data class SrtRegulatorSnapshot(
  * without recreating the regulator or losing trained EMA state.
  */
 interface DynamicBitrateRegulator : IBitrateRegulator {
-    /**
-     * The video bitrate (bits/s) this regulator currently targets, or `null` if it has not yet
-     * established an independent target. Used by [DynamicBitrateRegulatorController] to resync
-     * a newly rebuilt video encoder before the next steady-state tick.
-     */
-    val currentTargetVideoBitrate: Int?
-        get() = null
-
     fun updateVideoBitrateRange(range: BitrateRange)
 
     fun updateConfig(config: BitrateRegulatorConfig) {

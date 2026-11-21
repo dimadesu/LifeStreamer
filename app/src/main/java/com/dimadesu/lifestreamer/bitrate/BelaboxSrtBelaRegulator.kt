@@ -107,9 +107,6 @@ class BelaboxSrtBelaRegulator(
         }
     }
 
-    override val currentTargetVideoBitrate: Int
-        get() = curBitrate.toInt()
-
     override fun updateVideoBitrateRange(range: BitrateRange) {
         videoBitrateRange = range
         settings.minimumBitrate = range.lower.toLong()

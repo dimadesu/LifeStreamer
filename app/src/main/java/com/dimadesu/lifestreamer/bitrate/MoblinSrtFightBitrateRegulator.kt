@@ -112,9 +112,6 @@ class MoblinSrtFightBitrateRegulator(
         onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
     }
 
-    override val currentTargetVideoBitrate: Int
-        get() = currentBitrate.toInt()
-
     override fun updateVideoBitrateRange(range: BitrateRange) {
         videoBitrateRange = range
         targetBitrate = range.upper.toLong()
