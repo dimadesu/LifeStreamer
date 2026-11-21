@@ -1,6 +1,5 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
 import io.github.komedia.komuxer.rtmp.util.metrics.RtmpMetrics
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
@@ -152,14 +151,6 @@ class RtmpSendDurationBitrateRegulator(
         onVideoTargetBitrateChange(clamped)
     }
 
-    private fun logInfo(message: String) {
-        try {
-            Log.i(TAG, message)
-        } catch (_: RuntimeException) {
-            // Android Log is not mocked in local JVM unit tests.
-        }
-    }
-
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
         val metrics = metricsTracker.cumulative as? RtmpEndpointMetrics ?: return
         val raw = metrics.rawMetrics.rtmpMetrics
@@ -215,7 +206,7 @@ class RtmpSendDurationBitrateRegulator(
                     MIN_DECREASE_STEP
                 )
                 consecutiveDecreases++
-                logInfo("Queue overflow: dropped=$deltaDropped, reducing by $percentageReduction% to $newBitrate")
+                BitrateRegulatorLog.i(TAG, "Queue overflow: dropped=$deltaDropped, reducing by $percentageReduction% to $newBitrate")
                 emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 
@@ -223,7 +214,7 @@ class RtmpSendDurationBitrateRegulator(
                 // Socket is almost fully blocked: emergency drop to minimum bitrate.
                 val minBitrate = videoBitrateRange.lower
                 consecutiveDecreases++
-                logInfo("EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, dropping to min=$minBitrate")
+                BitrateRegulatorLog.i(TAG, "EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, dropping to min=$minBitrate")
                 emitVideoTargetBitrate(minBitrate)
             }
 
@@ -235,7 +226,7 @@ class RtmpSendDurationBitrateRegulator(
                     MIN_DECREASE_STEP
                 )
                 consecutiveDecreases++
-                logInfo("Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
+                BitrateRegulatorLog.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
                 emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 
@@ -247,7 +238,7 @@ class RtmpSendDurationBitrateRegulator(
                     MIN_DECREASE_STEP
                 )
                 consecutiveDecreases++
-                logInfo("Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
+                BitrateRegulatorLog.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
                 emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
             }
 

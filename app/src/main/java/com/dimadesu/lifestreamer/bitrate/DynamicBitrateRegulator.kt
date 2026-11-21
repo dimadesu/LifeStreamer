@@ -1,5 +1,6 @@
 package com.dimadesu.lifestreamer.bitrate
 
+import android.util.Log
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.regulator.IBitrateRegulator
 
@@ -71,4 +72,34 @@ interface DynamicBitrateRegulator : IBitrateRegulator {
  */
 interface SnapshotableSrtRegulator : DynamicBitrateRegulator {
     fun exportSnapshot(): SrtRegulatorSnapshot
+}
+
+/**
+ * JVM-test-safe wrapper around [Log] for the bitrate regulator package so regulators and
+ * controllers can run on a plain JVM without android.jar mocks.
+ */
+internal object BitrateRegulatorLog {
+    fun d(tag: String, message: String) {
+        try {
+            Log.d(tag, message)
+        } catch (_: RuntimeException) {
+            // Android Log is not mocked in local JVM unit tests.
+        }
+    }
+
+    fun i(tag: String, message: String) {
+        try {
+            Log.i(tag, message)
+        } catch (_: RuntimeException) {
+            // Android Log is not mocked in local JVM unit tests.
+        }
+    }
+
+    fun w(tag: String, message: String) {
+        try {
+            Log.w(tag, message)
+        } catch (_: RuntimeException) {
+            // Android Log is not mocked in local JVM unit tests.
+        }
+    }
 }

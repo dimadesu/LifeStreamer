@@ -1,6 +1,5 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
 import io.github.thibaultbee.streampack.ext.srt.elements.endpoints.SrtEndpointMetrics
@@ -111,14 +110,6 @@ class MoblinSrtFightBitrateRegulator(
 
     private fun emitVideoTargetBitrate(bitrate: Int) {
         onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
-    }
-
-    private fun logInfo(message: String) {
-        try {
-            Log.i(TAG, message)
-        } catch (_: RuntimeException) {
-            // Android Log is not mocked in local JVM unit tests.
-        }
     }
 
     override val currentTargetVideoBitrate: Int
@@ -396,7 +387,7 @@ class MoblinSrtFightBitrateRegulator(
         } else {
             moblinConfig.slowSettings
         }
-        logInfo("Switched to ${if (useFastSettings) "fast" else "slow"} settings")
+        BitrateRegulatorLog.i(TAG, "Switched to ${if (useFastSettings) "fast" else "slow"} settings")
     }
 
     internal fun isUsingFastSettings(): Boolean = currentSettings == moblinConfig.fastSettings
@@ -436,11 +427,7 @@ class MoblinSrtFightBitrateRegulator(
      * Log action for debugging
      */
     private fun logAction(action: String) {
-        try {
-            Log.d(TAG, action)
-        } catch (_: RuntimeException) {
-            // Android Log is not mocked in local JVM unit tests.
-        }
+        BitrateRegulatorLog.d(TAG, action)
         actionHistory.add(action)
         if (actionHistory.size > 6) {
             actionHistory.removeAt(0)

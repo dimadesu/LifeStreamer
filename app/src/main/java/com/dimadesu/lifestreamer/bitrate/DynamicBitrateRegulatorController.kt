@@ -1,6 +1,6 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
+import androidx.annotation.VisibleForTesting
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.encoders.IEncoder
 import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
@@ -153,6 +153,7 @@ class DynamicBitrateRegulatorController internal constructor(
         }
     }
 
+    @VisibleForTesting
     internal fun tickOnceForTest() {
         synchronized(stateLock) {
             runTickLocked()
@@ -175,7 +176,7 @@ class DynamicBitrateRegulatorController internal constructor(
                     } catch (e: Exception) {
                         // A single failed tick (e.g. stats read on a closing socket) must not kill
                         // the polling loop or escape to the thread's uncaught exception handler.
-                        logWarning("Bitrate regulator tick failed: ${e.message}")
+                        BitrateRegulatorLog.w(TAG, "Bitrate regulator tick failed: ${e.message}")
                     }
                 }
             }
@@ -201,14 +202,6 @@ class DynamicBitrateRegulatorController internal constructor(
         }
         val audioBitrate = audioEncoderProvider()?.bitrate ?: 0
         activeRegulator.update(videoEncoder.bitrate, audioBitrate)
-    }
-
-    private fun logWarning(message: String) {
-        try {
-            Log.w(TAG, message)
-        } catch (_: RuntimeException) {
-            // Android Log is not mocked in local JVM unit tests.
-        }
     }
 
     private fun applyVideoTargetBitrate(targetBitrate: Int) {
@@ -300,6 +293,9 @@ class DynamicBitrateRegulatorController internal constructor(
          * The controller created when this factory was assigned to `streamer.bitrateRegulatorControllerFactory`.
          * Stored on the factory so any component with access to the streamer can push live config/mode
          * updates without replacing the factory or resetting regulator state.
+         *
+         * Note: each [Factory] instance tracks a single controller and must only be attached to
+         * one pipeline output at a time.
          */
         @Volatile
         var activeController: DynamicBitrateRegulatorController? = null

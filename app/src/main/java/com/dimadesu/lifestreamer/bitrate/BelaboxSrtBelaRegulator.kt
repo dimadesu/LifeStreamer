@@ -1,6 +1,5 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
 import io.github.thibaultbee.srtdroid.core.models.Stats
 import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
@@ -138,7 +137,7 @@ class BelaboxSrtBelaRegulator(
     }
 
     fun setSettings(s: Settings) {
-        logInfo("adaptive-bitrate: Using settings $s")
+        BitrateRegulatorLog.i(TAG, "adaptive-bitrate: Using settings $s")
         settings = s
     }
 
@@ -156,14 +155,6 @@ class BelaboxSrtBelaRegulator(
 
     private fun emitVideoTargetBitrate(bitrate: Int) {
         onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
-    }
-
-    private fun logInfo(message: String) {
-        try {
-            Log.i(TAG, message)
-        } catch (_: RuntimeException) {
-            // Android Log is not mocked in local JVM unit tests.
-        }
     }
 
     private fun rttToSendBufferSize(rtt: Double, throughput: Double): Double {
@@ -213,7 +204,7 @@ class BelaboxSrtBelaRegulator(
     }
 
     private fun logAdaptiveAction(actionTaken: String) {
-        logInfo(actionTaken)
+        BitrateRegulatorLog.i(TAG, actionTaken)
     }
 
     /**
