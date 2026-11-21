@@ -47,6 +47,14 @@ interface DynamicBitrateRegulator : IBitrateRegulator {
     fun updateConfig(config: BitrateRegulatorConfig) {
         updateVideoBitrateRange(BitrateRange.from(config))
     }
+
+    /**
+     * Called when the controller resumes polling after a stop (e.g. stream stopped and started
+     * again on the same controller). Implementations should drop any cumulative-counter delta
+     * anchors so the first post-resume sample is not diffed across the pause, while keeping
+     * smoothed/trained estimates.
+     */
+    fun onResume() {}
 }
 
 /**

@@ -132,6 +132,10 @@ class MoblinSrtFightBitrateRegulator(
         }
     }
 
+    override fun onResume() {
+        transportBitrateEstimator.resetDeltaAnchor()
+    }
+
     override fun exportSnapshot(): SrtRegulatorSnapshot = SrtRegulatorSnapshot(
         currentBitrate = currentBitrate,
         transportSnapshot = transportBitrateEstimator.exportSnapshot(),

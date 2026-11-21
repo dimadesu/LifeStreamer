@@ -62,6 +62,7 @@ class DynamicBitrateRegulatorController internal constructor(
 
     private var pollingJob: Job? = null
     private var isRunning: Boolean = false
+    private var hasStartedBefore: Boolean = false
 
     internal val currentRegulator: DynamicBitrateRegulator
         get() = synchronized(stateLock) { activeRegulator }
@@ -76,6 +77,10 @@ class DynamicBitrateRegulatorController internal constructor(
         synchronized(stateLock) {
             if (isRunning) return
             isRunning = true
+            if (hasStartedBefore) {
+                activeRegulator.onResume()
+            }
+            hasStartedBefore = true
             launchPollingLoopLocked()
         }
     }

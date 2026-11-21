@@ -258,4 +258,39 @@ class BitrateRegulatorTest {
         assertEquals(1, emitted.size)
         assertTrue("Expected bitrate increase > 2 Mbps, got ${emitted.first()}", emitted.first() > 2_000_000)
     }
+
+    @Test
+    fun moblinRegulator_onResume_doesNotDiffTransportBytesAcrossPause() {
+        var nowMs = 1_000L
+        var nowNs = 1_000_000_000L
+        val regulator = MoblinSrtFightBitrateRegulator(
+            metricsTracker = dummyMetricsTracker(),
+            initialVideoBitrateRange = BitrateRange(300_000, 6_000_000),
+            onVideoTargetBitrateChange = {},
+            currentTimeMsProvider = { nowMs },
+            nanoTimeProvider = { nowNs }
+        )
+
+        var bytesSent = 0L
+        repeat(20) {
+            nowMs += 250L
+            nowNs += 250_000_000L
+            bytesSent += 125_000L // 4 Mbps
+            regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = bytesSent)
+        }
+        val transportBefore = regulator.getTransportBitrateBps()
+        assertTrue(transportBefore > 0L)
+
+        // Stream paused for 10 s; a new SRT connection restarts the byte counter from 0
+        regulator.onResume()
+        nowMs += 10_000L
+        nowNs += 10_000_000_000L
+        regulator.updateWithStats(rttMs = 30.0, packetsInFlight = 5.0, byteSentTotal = 0L)
+
+        assertEquals(
+            "First post-resume sample must only re-anchor, not decay the estimate",
+            transportBefore,
+            regulator.getTransportBitrateBps()
+        )
+    }
 }
