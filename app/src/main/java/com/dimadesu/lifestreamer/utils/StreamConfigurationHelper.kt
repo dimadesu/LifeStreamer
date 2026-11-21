@@ -66,6 +66,10 @@ class StreamConfigurationHelper(private val storageRepository: DataStoreReposito
 
         if (config == null) {
             streamer.bitrateRegulatorControllerFactory = null
+            // The regulator may have left the encoder anywhere in its range (often near the
+            // minimum after congestion). Without regulation nothing would ever raise it again,
+            // so restore the user's configured fixed video bitrate.
+            applyConfiguredVideoBitrate(streamer, tag)
             Log.i(tag, "Bitrate regulator disabled mid-stream")
             return
         }
@@ -117,7 +121,7 @@ class StreamConfigurationHelper(private val storageRepository: DataStoreReposito
         storageRepository.videoConfigFlow.first()?.let { config ->
             try {
                 streamer.videoEncoder?.bitrate = config.startBitrate
-                Log.i(tag, "applyConfiguredVideoBitrate: Applied configured video bitrate (${config.startBitrate / 1000}kbps) for local recording")
+                Log.i(tag, "applyConfiguredVideoBitrate: Applied configured video bitrate (${config.startBitrate / 1000}kbps)")
             } catch (e: Exception) {
                 Log.w(tag, "applyConfiguredVideoBitrate: Failed to apply configured video bitrate: ${e.message}")
             }
