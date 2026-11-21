@@ -350,7 +350,7 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
             }
         }
         
-        // Observe bitrate regulator config changes and update regulator mid-stream
+        // Observe bitrate regulator config changes and update regulator mid-stream in-place
         serviceScope.launch {
             combine(
                 storageRepository.bitrateRegulatorConfigFlow,
@@ -359,22 +359,19 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
                 .distinctUntilChanged()
                 .drop(1) // Skip initial emission to avoid replacing on startup
                 .collect { (config, mode) ->
-                    // Only update if currently streaming with SRT endpoint
+                    // Only update if currently streaming with SRT or RTMP endpoint
                     if (_serviceStreamStatus.value == StreamStatus.STREAMING) {
                         try {
                             val sinkType = storageRepository.endpointTypeFlow.first().sinkType
                             if (sinkType == MediaSinkType.SRT || sinkType == MediaSinkType.RTMP) {
                                 Log.i(TAG, "Bitrate regulator settings changed during stream - updating controller")
-                                streamConfigurationHelper.attachBitrateRegulator(
-                                    streamer as? IVideoSingleStreamer,
-                                    sinkType,
-                                    TAG
+                                streamConfigurationHelper.updateBitrateRegulator(
+                                    streamer = streamer as? IVideoSingleStreamer,
+                                    sinkType = sinkType,
+                                    config = config,
+                                    mode = mode,
+                                    tag = TAG
                                 )
-                                if (config != null) {
-                                    Log.i(TAG, "Bitrate regulator updated: range=${config.videoBitrateRange.lower/1000}k-${config.videoBitrateRange.upper/1000}k, mode=$mode")
-                                } else {
-                                    Log.i(TAG, "Bitrate regulator disabled")
-                                }
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to update bitrate regulator controller: ${e.message}")
@@ -504,6 +501,11 @@ class CameraStreamerService : StreamerService<ISingleStreamer>(
         } catch (t: Throwable) {
             Log.w(TAG, "onDestroy: failed to stop audio passthrough cleanly: ${t.message}")
         }
+
+        // Stop any active bitrate regulator controller before releasing the streamer
+        try {
+            (streamer as? IVideoSingleStreamer)?.bitrateRegulatorControllerFactory = null
+        } catch (_: Throwable) {}
 
         // Cleanup Bluetooth audio manager resources
         try {
