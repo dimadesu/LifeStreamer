@@ -1,0 +1,33 @@
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        app:key="@string/file_endpoint_key"
+        app:title="@string/local_recording">
+
+        <SwitchPreference
+            app:defaultValue="false"
+            app:key="@string/record_to_disk_enable_key"
+            app:summary="@string/record_to_disk_enable_summary"
+            app:title="@string/record_to_disk_enable_title" />
+
+        <ListPreference
+            app:defaultValue="ts"
+            app:key="@string/record_to_disk_format_key"
+            app:title="@string/record_to_disk_format_title"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:defaultValue="@string/default_file_name"
+            app:key="@string/file_name_key"
+            app:title="@string/file_name" />
+
+        <Preference
+            app:isPreferenceVisible="false"
+            app:key="@string/local_recording_warning_key"
+            app:selectable="false"
+            app:title="@string/local_recording_warning_title" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

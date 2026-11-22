@@ -368,17 +368,5 @@
                 app:useSimpleSummaryProvider="true" />
 
         </PreferenceCategory>
-
-        <PreferenceCategory
-            app:key="@string/file_endpoint_key"
-            app:title="@string/file">
-
-            <EditTextPreference
-                app:defaultValue="@string/default_file_name"
-                app:key="@string/file_name_key"
-                app:title="@string/file_name"
-                app:useSimpleSummaryProvider="true" />
-
-        </PreferenceCategory>
     </PreferenceCategory>
 </PreferenceScreen>
