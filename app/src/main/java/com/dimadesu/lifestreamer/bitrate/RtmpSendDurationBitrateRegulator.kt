@@ -93,6 +93,17 @@ class RtmpSendDurationBitrateRegulator(
     private val transportBitrateBps: Long
         get() = transportBitrateEstimator.bitrateBps
 
+    // Two-stage bitrate state modeled on Moblin's AdaptiveBitrateSrtFight:
+    // - currentMaximumBitrate tracks the sustained network capacity envelope (climbing when stable,
+    //   stepping down on congestion, and clamped by real socket throughput).
+    // - currentBitrate is modulated down from currentMaximumBitrate during transient write-saturation
+    //   spikes (fastFillRatio > smoothFillRatio) and rebounds back toward currentMaximumBitrate as
+    //   soon as the spike clears, avoiding a slow multi-second climb from minimum bitrate after
+    //   a brief cellular hiccup.
+    private var currentMaximumBitrate: Int = 0
+    private var currentBitrate: Int = 0
+    private var previousEmittedBitrate: Int = 0
+
     // Dual-rate smoothing of fillRatio (Moblin's calcPifs applied to write saturation instead of PIF):
     // smoothFillRatio rises slowly but falls quickly, so a single noisy poll can't trigger a decrease
     // and congestion decisions instead react to sustained saturation. fastFillRatio tracks in near
@@ -108,14 +119,30 @@ class RtmpSendDurationBitrateRegulator(
 
     override fun updateVideoBitrateRange(range: BitrateRange) {
         videoBitrateRange = range
+        if (currentMaximumBitrate > 0) {
+            currentMaximumBitrate = range.coerceIn(currentMaximumBitrate)
+            val clampedBitrate = range.coerceIn(currentBitrate).coerceAtMost(currentMaximumBitrate)
+            if (clampedBitrate != currentBitrate) {
+                currentBitrate = clampedBitrate
+                emitVideoTargetBitrate(currentBitrate)
+            }
+        }
     }
 
     internal fun getSmoothFillRatio(): Double = smoothFillRatio
 
+    internal fun getFastFillRatio(): Double = fastFillRatio
+
     internal fun getTransportBitrateBps(): Long = transportBitrateBps
 
+    internal fun getCurrentMaximumBitrate(): Int = currentMaximumBitrate
+
+    internal fun getCurrentBitrate(): Int = currentBitrate
+
     private fun emitVideoTargetBitrate(bitrate: Int) {
-        onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
+        val clamped = videoBitrateRange.coerceIn(bitrate)
+        previousEmittedBitrate = clamped
+        onVideoTargetBitrateChange(clamped)
     }
 
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
@@ -144,10 +171,25 @@ class RtmpSendDurationBitrateRegulator(
         lastSample = currentSample
         lastPollNs = nowNs
 
-        // First sample: nothing to diff against yet.
-        if (previousSample == null) return
+        // First sample: seed the capacity envelope from the encoder's current bitrate.
+        if (previousSample == null) {
+            val seeded = videoBitrateRange.coerceIn(currentVideoBitrate)
+            currentMaximumBitrate = seeded
+            currentBitrate = seeded
+            previousEmittedBitrate = seeded
+            return
+        }
         val elapsedNs = nowNs - previousNs
         if (elapsedNs <= 0) return
+
+        if (currentMaximumBitrate <= 0) {
+            val seeded = videoBitrateRange.coerceIn(currentVideoBitrate)
+            currentMaximumBitrate = seeded
+            currentBitrate = seeded
+            previousEmittedBitrate = seeded
+        } else {
+            currentMaximumBitrate = videoBitrateRange.coerceIn(currentMaximumBitrate)
+        }
 
         val deltaSent = currentSample.messagesSent - previousSample.messagesSent
         val deltaDropped = currentSample.messagesSendDropped - previousSample.messagesSendDropped
@@ -174,83 +216,142 @@ class RtmpSendDurationBitrateRegulator(
 
         when {
             deltaDropped > 0 -> {
-                // The internal FLV tag queue actually overflowed: react fast and hard.
+                // The internal FLV tag queue actually overflowed: react fast and hard on the ceiling.
                 val percentageReduction = (deltaDropped * 100 / max(1L, deltaSent + deltaDropped))
                     .toInt().coerceIn(MIN_PERCENTAGE_DECREASE, MAX_PERCENTAGE_DECREASE)
-                val newBitrate = currentVideoBitrate - max(
-                    currentVideoBitrate * percentageReduction / 100,
+                val decrease = max(
+                    currentMaximumBitrate * percentageReduction / 100,
                     MIN_DECREASE_STEP
                 )
+                currentMaximumBitrate = capByTransportBitrate(
+                    max(videoBitrateRange.lower, currentMaximumBitrate - decrease)
+                )
                 consecutiveDecreases++
-                BitrateRegulatorLog.i(TAG, "Queue overflow: dropped=$deltaDropped, reducing by $percentageReduction% to $newBitrate")
-                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
+                BitrateRegulatorLog.i(TAG, "Queue overflow: dropped=$deltaDropped, reducing ceiling by $percentageReduction% to $currentMaximumBitrate")
             }
 
             fastFillRatio >= FILL_RATIO_EMERGENCY_THRESHOLD -> {
-                // Socket is almost fully blocked: emergency drop to minimum bitrate.
-                val minBitrate = videoBitrateRange.lower
+                // Socket is almost fully blocked: trim the capacity ceiling modestly while
+                // calculateCurrentBitrate() immediately drops the active encoder bitrate to minimum
+                // so the TCP send buffer can drain without permanently crushing the ceiling.
+                val scaledPercentage = (FILL_RATIO_LAZY_DECREASE_PERCENTAGE * escalation).toInt().coerceAtMost(50)
+                val decrease = max(
+                    currentMaximumBitrate * scaledPercentage / 100,
+                    MIN_DECREASE_STEP
+                )
+                currentMaximumBitrate = capByTransportBitrate(
+                    max(videoBitrateRange.lower, currentMaximumBitrate - decrease)
+                )
                 consecutiveDecreases++
-                BitrateRegulatorLog.i(TAG, "EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, dropping to min=$minBitrate")
-                emitVideoTargetBitrate(minBitrate)
+                BitrateRegulatorLog.i(
+                    TAG,
+                    "EMERGENCY: fastFillRatio=$fastFillRatio >= $FILL_RATIO_EMERGENCY_THRESHOLD, " +
+                        "dropping active to min=${videoBitrateRange.lower} (ceiling=$currentMaximumBitrate)"
+                )
             }
 
             smoothFillRatio >= FILL_RATIO_DECREASE_THRESHOLD -> {
                 // Socket writes are blocked most of the time on average: sustained congestion.
                 val scaledPercentage = (FILL_RATIO_DECREASE_PERCENTAGE * escalation).toInt().coerceAtMost(80)
-                val newBitrate = currentVideoBitrate - max(
-                    currentVideoBitrate * scaledPercentage / 100,
+                val decrease = max(
+                    currentMaximumBitrate * scaledPercentage / 100,
                     MIN_DECREASE_STEP
                 )
+                currentMaximumBitrate = capByTransportBitrate(
+                    max(videoBitrateRange.lower, currentMaximumBitrate - decrease)
+                )
                 consecutiveDecreases++
-                BitrateRegulatorLog.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
-                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
+                BitrateRegulatorLog.i(TAG, "Write saturation: smoothFillRatio=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing ceiling by $scaledPercentage% to $currentMaximumBitrate")
             }
 
             fastFillRatio - smoothFillRatio >= FILL_RATIO_LAZY_DECREASE_DIFF_THRESHOLD -> {
-                // Fresh spike the smoothed average hasn't caught up with yet.
-                val scaledPercentage = (FILL_RATIO_LAZY_DECREASE_PERCENTAGE * escalation).toInt().coerceAtMost(50)
-                val newBitrate = currentVideoBitrate - max(
-                    currentVideoBitrate * scaledPercentage / 100,
+                // Fresh spike the smoothed average hasn't caught up with yet: trim the ceiling
+                // slightly while calculateCurrentBitrate() pulls the active bitrate down proportionally.
+                // Note: do not escalate consecutiveDecreases here, otherwise recovery ticks that
+                // immediately follow an emergency/sustained cut would inherit its high escalation
+                // multiplier and keep crushing the ceiling while fastFillRatio is already falling.
+                val decrease = max(
+                    currentMaximumBitrate * FILL_RATIO_LAZY_DECREASE_PERCENTAGE / 100,
                     MIN_DECREASE_STEP
                 )
-                consecutiveDecreases++
-                BitrateRegulatorLog.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, esc=${"%.1f".format(escalation)}, reducing by $scaledPercentage% to $newBitrate")
-                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
+                currentMaximumBitrate = capByTransportBitrate(
+                    max(videoBitrateRange.lower, currentMaximumBitrate - decrease)
+                )
+                BitrateRegulatorLog.i(TAG, "Write saturation spike: fast=$fastFillRatio, smooth=$smoothFillRatio, reducing ceiling by $FILL_RATIO_LAZY_DECREASE_PERCENTAGE% to $currentMaximumBitrate")
             }
 
             smoothFillRatio <= FILL_RATIO_INCREASE_THRESHOLD &&
-                currentVideoBitrate < videoBitrateRange.upper &&
+                currentMaximumBitrate < videoBitrateRange.upper &&
                 nowNs >= nextIncreaseAllowedNs -> {
                 consecutiveDecreases = 0 // Reset escalation on increase
-                val increaseStep = (currentVideoBitrate * INCREASE_PERCENTAGE / 100)
+                val increaseStep = (currentMaximumBitrate * INCREASE_PERCENTAGE / 100)
                     .coerceIn(MIN_INCREASE_STEP, MAX_INCREASE_STEP)
-                val newBitrate = min(
-                    currentVideoBitrate + increaseStep,
+                val newMaxBitrate = min(
+                    currentMaximumBitrate + increaseStep,
                     videoBitrateRange.upper
                 )
                 nextIncreaseAllowedNs = nowNs + INCREASE_COOLDOWN_NS
-                emitVideoTargetBitrate(capByTransportBitrate(newBitrate))
+                currentMaximumBitrate = capByTransportBitrate(newMaxBitrate)
             }
 
             else -> {
-                // Middle zone: hold steady to avoid oscillating the encoder bitrate.
+                // Middle zone: hold the ceiling steady while active bitrate tracks spike decay.
                 consecutiveDecreases = 0 // Reset escalation when stable
             }
+        }
+
+        currentMaximumBitrate = videoBitrateRange.coerceIn(currentMaximumBitrate)
+        val newBitrate = calculateCurrentBitrate(deltaDropped)
+        currentBitrate = newBitrate
+        if (newBitrate != previousEmittedBitrate || newBitrate != currentVideoBitrate) {
+            emitVideoTargetBitrate(newBitrate)
         }
     }
 
     /**
+     * Computes the instantaneous encoder bitrate from the [currentMaximumBitrate] ceiling,
+     * mirroring Moblin's `calculateCurrentBitrate`:
+     * - Under steady conditions (no spike above [smoothFillRatio]), returns [currentMaximumBitrate].
+     * - During an emergency stall ([fastFillRatio] >= [FILL_RATIO_EMERGENCY_THRESHOLD]), drops
+     *   temporarily to [BitrateRange.lower] so the TCP send buffer can drain rapidly.
+     * - During a moderate write-saturation spike ([fastFillRatio] - [smoothFillRatio] above the
+     *   noise floor), scales [currentMaximumBitrate] down proportionally to the spike and
+     *   automatically rebounds back to [currentMaximumBitrate] as [fastFillRatio] converges.
+     */
+    private fun calculateCurrentBitrate(deltaDropped: Long): Int {
+        if (fastFillRatio >= FILL_RATIO_EMERGENCY_THRESHOLD) {
+            return videoBitrateRange.lower
+        }
+        if (deltaDropped > 0) {
+            return currentMaximumBitrate
+        }
+        val spikeDiff = (fastFillRatio - smoothFillRatio).coerceIn(0.0, 1.0)
+        // Ignore small jitter <= 1/3 of the lazy-decrease diff threshold (analogous to Moblin's
+        // `pifSpikeDiff <= settings.packetsInFlight / 5` deadzone).
+        val effectiveSpike = if (spikeDiff <= FILL_RATIO_LAZY_DECREASE_DIFF_THRESHOLD / 3.0) {
+            0.0
+        } else {
+            spikeDiff
+        }
+        val scaledBitrate = (currentMaximumBitrate.toDouble() * (1.0 - effectiveSpike)).toInt()
+        return videoBitrateRange.coerceIn(scaledBitrate)
+    }
+
+    /**
      * Dual-rate smoothing of the fillRatio signal, mirrors Moblin's calcPifs: smoothFillRatio only
-     * rises slowly (needs sustained saturation to move up) but falls quickly once things improve,
-     * while fastFillRatio tracks near real time so a divergence between the two flags a fresh spike.
+     * rises slowly (needs sustained saturation to move up) but falls more quickly once things
+     * improve, while fastFillRatio tracks near real time (and decays faster than smoothFillRatio)
+     * so a divergence between the two flags a fresh spike and clears promptly once writes recover.
      */
     private fun calcFillRatios(instantFillRatio: Double) {
         if (instantFillRatio > smoothFillRatio) {
             // Slow rise: ~10 polls to 63%, prevents single noisy polls from triggering decreases
             smoothFillRatio = smoothFillRatio * 0.90 + instantFillRatio * 0.10
         } else {
-            // Fast fall: ~3 polls to 63%, so bitrate can recover quickly once congestion clears
-            smoothFillRatio = smoothFillRatio * 0.70 + instantFillRatio * 0.30
+            // Moderate fall: ~6 polls to 63%, while fastFillRatio (0.67/0.33, ~2.5 polls to 63%)
+            // decays faster so transient spikes (fastFillRatio > smoothFillRatio) clear without
+            // leaving a lingering fake positive diff during recovery.
+            smoothFillRatio = smoothFillRatio * 0.85 + instantFillRatio * 0.15
         }
         fastFillRatio = fastFillRatio * 0.67 + instantFillRatio * 0.33
     }
