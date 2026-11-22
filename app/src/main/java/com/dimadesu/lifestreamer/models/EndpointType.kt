@@ -17,6 +17,7 @@ package com.dimadesu.lifestreamer.models
 
 import androidx.annotation.StringRes
 import com.dimadesu.lifestreamer.R
+import io.github.thibaultbee.streampack.core.elements.endpoints.MediaSinkType
 
 enum class EndpointType(val id: Int, @param:StringRes val labelResId: Int) {
     SRT(2, R.string.to_srt),
@@ -28,6 +29,19 @@ enum class EndpointType(val id: Int, @param:StringRes val labelResId: Int) {
     WEBM_FILE(5, R.string.to_webm_file),
     OGG_FILE(6, R.string.to_ogg_file),
     THREEGP_FILE(7, R.string.to_3gp_file);
+
+    val isStreaming: Boolean
+        get() = this == SRT || this == SRTLA || this == RTMP
+
+    val isLocalFile: Boolean
+        get() = !isStreaming
+
+    val sinkType: MediaSinkType
+        get() = when (this) {
+            SRT, SRTLA -> MediaSinkType.SRT
+            RTMP -> MediaSinkType.RTMP
+            else -> MediaSinkType.CONTENT
+        }
 
     companion object {
         fun fromId(id: Int): EndpointType = entries.first { it.id == id }

@@ -18,6 +18,9 @@ package com.dimadesu.lifestreamer.utils
 import android.Manifest
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import android.util.Range
 import androidx.annotation.RequiresPermission
@@ -34,6 +37,7 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.exten
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.extensions.isBackCamera
 import io.github.thibaultbee.streampack.core.interfaces.IWithVideoSource
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
+import java.io.File
 
 @RequiresPermission(Manifest.permission.CAMERA)
 suspend fun IWithVideoSource.setNextCameraId(context: Context) {
@@ -79,15 +83,43 @@ val Context.dataStore by preferencesDataStore(
     name = userPrefName
 )
 
-fun Context.createVideoContentUri(name: String): UriMediaDescriptor {
-    val videoDetails = ContentValues().apply {
-        put(MediaStore.Video.Media.TITLE, name)
-        put(
-            MediaStore.Video.Media.DISPLAY_NAME,
-            name
+private const val RECORDINGS_SUBFOLDER = "LifeStreamer"
+
+fun Context.createVideoContentUri(name: String, mimeType: String? = null): UriMediaDescriptor {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val videoDetails = ContentValues().apply {
+            put(MediaStore.Video.Media.TITLE, name)
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            if (mimeType != null) {
+                put(MediaStore.Video.Media.MIME_TYPE, mimeType)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(
+                    MediaStore.Video.Media.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_MOVIES}/$RECORDINGS_SUBFOLDER"
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                val directory = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+                    RECORDINGS_SUBFOLDER
+                )
+                directory.mkdirs()
+                @Suppress("DEPRECATION")
+                put(MediaStore.Video.Media.DATA, File(directory, name).absolutePath)
+            }
+        }
+        return mediaStoreMediaDescriptor(this, videoDetails)
+    } else {
+        @Suppress("DEPRECATION")
+        val directory = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+            RECORDINGS_SUBFOLDER
         )
+        directory.mkdirs()
+        val file = File(directory, name)
+        return UriMediaDescriptor(Uri.fromFile(file))
     }
-    return mediaStoreMediaDescriptor(this, videoDetails)
 }
 
 fun String.appendIfNotEndsWith(suffix: String): String {
