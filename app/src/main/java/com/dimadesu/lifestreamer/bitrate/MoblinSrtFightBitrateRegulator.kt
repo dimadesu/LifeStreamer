@@ -1,11 +1,7 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
-import io.github.thibaultbee.srtdroid.core.models.Stats
-import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
 import io.github.thibaultbee.streampack.ext.srt.elements.endpoints.SrtEndpointMetrics
-import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 import kotlin.math.max
 import kotlin.math.min
 
@@ -19,21 +15,16 @@ import kotlin.math.min
  * - Aggressive response to network congestion
  * - Fast recovery when conditions improve
  *
- * @param bitrateRegulatorConfig bitrate regulation configuration
- * @param moblinConfig Moblin SrtFight-specific algorithm configuration
- * @param onVideoTargetBitrateChange call when you have to change video bitrate
+ * Supports live bitrate range updates, Fast/Slow settings changes, and warm state handoff.
  */
 class MoblinSrtFightBitrateRegulator(
-    metricsTracker: EndpointMetricsTracker,
-    bitrateRegulatorConfig: BitrateRegulatorConfig,
+    override val metricsTracker: EndpointMetricsTracker,
+    initialVideoBitrateRange: BitrateRange,
     private val moblinConfig: MoblinSrtFightConfig = MoblinSrtFightConfig(),
-    onVideoTargetBitrateChange: ((Int) -> Unit)
-) : SrtBitrateRegulator(
-    metricsTracker,
-    bitrateRegulatorConfig,
-    onVideoTargetBitrateChange,
-    { /* No audio bitrate changes */ }
-) {
+    private val onVideoTargetBitrateChange: ((Int) -> Unit),
+    initialSnapshot: SrtRegulatorSnapshot? = null,
+    nanoTimeProvider: () -> Long = System::nanoTime
+) : SnapshotableSrtRegulator {
 
     companion object {
         private const val TAG = "MoblinSrtFightBitrateRegulator"
@@ -43,11 +34,16 @@ class MoblinSrtFightBitrateRegulator(
         private const val TRANSPORT_BITRATE_MINIMUM = ADAPTIVBITRATE_START
     }
 
+    private var videoBitrateRange: BitrateRange = initialVideoBitrateRange
+
+    // Current settings (fast vs slow)
+    private var currentSettings = moblinConfig.fastSettings
+
     // Current bitrate state - matches Moblin's approach
-    private var currentBitrate: Long = ADAPTIVBITRATE_START
-    private var previousBitrate: Long = ADAPTIVBITRATE_START
-    private var targetBitrate: Long = 0L
-    private var currentMaximumBitrate: Long = ADAPTIVBITRATE_START
+    private var targetBitrate: Long = initialVideoBitrateRange.upper.toLong()
+    private var currentBitrate: Long = ADAPTIVBITRATE_START.coerceIn(configuredMinBitrate(), targetBitrate)
+    private var previousBitrate: Long = currentBitrate
+    private var currentMaximumBitrate: Long = currentBitrate
 
     // RTT tracking - dual approach like Moblin
     private var avgRtt: Double = 0.0
@@ -60,56 +56,83 @@ class MoblinSrtFightBitrateRegulator(
     // Real send rate, used to cap the max bitrate (Moblin's limitByTransportBitrate).
     // Ported from Moblin's updateSrtTransportBitrate: EMA over deltas of the cumulative bytes-sent
     // counter, not SRT's own mbpsSendRate stat (which Moblin's algorithm never actually reads).
-    private val transportBitrateEstimator = TransportBitrateEstimator()
+    private val transportBitrateEstimator = TransportBitrateEstimator(nanoTimeProvider)
     private val transportBitrateBps: Long
         get() = transportBitrateEstimator.bitrateBps
 
-    // Current settings (fast vs slow)
-    private var currentSettings = moblinConfig.fastSettings
-
     // Action logging for debugging
     private val actionHistory = mutableListOf<String>()
-    private var lastUpdateTime = 0L
+
+    init {
+        if (initialSnapshot != null) {
+            val seeded = initialSnapshot.currentBitrate.coerceIn(configuredMinBitrate(), targetBitrate)
+            currentBitrate = seeded
+            previousBitrate = seeded
+            currentMaximumBitrate = seeded
+            transportBitrateEstimator.restoreSnapshot(initialSnapshot.transportSnapshot)
+            if (initialSnapshot.avgRtt > 0.0) {
+                avgRtt = initialSnapshot.avgRtt
+                fastRtt = initialSnapshot.avgRtt
+            }
+            if (initialSnapshot.avgPif > 0.0) {
+                smoothPif = initialSnapshot.avgPif
+                fastPif = initialSnapshot.avgPif
+            }
+        }
+    }
+
+    private fun configuredMinBitrate(): Long =
+        max(currentSettings.minimumBitrate, videoBitrateRange.lower.toLong())
+
+    private fun emitVideoTargetBitrate(bitrate: Int) {
+        onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
+    }
+
+    override fun updateVideoBitrateRange(range: BitrateRange) {
+        videoBitrateRange = range
+        targetBitrate = range.upper.toLong()
+        val minBitrate = configuredMinBitrate()
+        val floor = min(minBitrate, targetBitrate)
+        currentMaximumBitrate = currentMaximumBitrate.coerceIn(floor, targetBitrate)
+        val clampedBitrate = currentBitrate.coerceIn(floor, targetBitrate)
+        if (clampedBitrate != currentBitrate) {
+            currentBitrate = clampedBitrate
+            previousBitrate = clampedBitrate
+            emitVideoTargetBitrate(currentBitrate.toInt())
+        }
+    }
+
+    override fun exportSnapshot(): SrtRegulatorSnapshot = SrtRegulatorSnapshot(
+        currentBitrate = currentBitrate,
+        transportSnapshot = transportBitrateEstimator.exportSnapshot(),
+        avgRtt = avgRtt,
+        avgPif = smoothPif
+    )
 
     override fun update(currentVideoBitrate: Int, currentAudioBitrate: Int) {
-        val currentTime = System.currentTimeMillis()
-        
-        // Skip if called too frequently (Moblin updates every 200ms)
-        if (currentTime - lastUpdateTime < 200) {
-            return
-        }
-        lastUpdateTime = currentTime
-
-        // Initialize target bitrate if first run
-        if (targetBitrate == 0L) {
-            // Use the upper limit from bitrate regulator config as target, not current bitrate
-            targetBitrate = bitrateRegulatorConfig.videoBitrateRange.upper.toLong()
-            currentMaximumBitrate = ADAPTIVBITRATE_START // Start from 1 Mbps, scale up to target
-        }
-
         val metrics = metricsTracker.cumulative as? SrtEndpointMetrics ?: return
         val stats = metrics.rawMetrics.bistatsOrNull(clear = false, instantaneous = true) ?: return
+        updateWithStats(
+            rttMs = stats.msRTT,
+            packetsInFlight = stats.pktFlightSize.toDouble(),
+            byteSentTotal = stats.byteSentTotal
+        )
+    }
 
+    // Expected to be called every 200 ms by DynamicBitrateRegulatorController (matching Moblin iOS).
+    internal fun updateWithStats(rttMs: Double, packetsInFlight: Double, byteSentTotal: Long) {
         // Skip if no valid data
-        if (stats.msRTT <= 0) {
+        if (rttMs <= 0) {
             return
         }
 
-        val rttMs = stats.msRTT
-        val packetsInFlight = stats.pktFlightSize.toDouble()
-        updateTransportBitrate(stats.byteSentTotal)
-        
-        // Log.d(TAG, "=== SRT UPDATE ===")
-        // Log.d(TAG, "RTT: ${stats.msRTT}ms, PIF: ${stats.pktFlightSize}, Send rate: ${stats.mbpsSendRate}Mbps")
-        // Log.d(TAG, "Current: ${currentBitrate / 1000}k, Max: ${currentMaximumBitrate / 1000}k, Target: ${targetBitrate / 1000}k")
-        // Log.d(TAG, "Smooth PIF: ${"%.1f".format(smoothPif)}, Avg RTT: ${"%.1f".format(avgRtt)}, Fast RTT: ${"%.1f".format(fastRtt)}")
-        // Log.d(TAG, "Settings: PIF=${currentSettings.packetsInFlight}, Factor=${currentSettings.rttDiffHighFactor}")
+        updateTransportBitrate(byteSentTotal)
 
         // Core algorithm steps - matches Moblin's update() method
         calcPifs(packetsInFlight)
         calcRtts(rttMs)
         increaseCurrentMaxBitrate(packetsInFlight, rttMs, allowedRttJitter = 15.0, allowedPifJitter = 10.0)
-        
+
         // Slow decreases if needed - matches Moblin's thresholds
         decreaseMaxRateIfPifIsHigh(factor = 0.9, pifMax = 100.0, minimumDecrease = 250_000L)
         decreaseMaxRateIfRttIsHigh(factor = 0.9, rttMax = 250.0, minimumDecrease = 250_000L)
@@ -119,20 +142,15 @@ class MoblinSrtFightBitrateRegulator(
             rttSpikeAllowed = currentSettings.rttDiffHighAllowedSpike,
             minimumDecrease = currentSettings.rttDiffHighMinDecrease
         )
-        
+
         calculateCurrentBitrate()
 
         // Apply video bitrate change if needed
         if (previousBitrate != currentBitrate) {
             val newVideoBitrate = currentBitrate.toInt()
-            onVideoTargetBitrateChange(newVideoBitrate)
+            emitVideoTargetBitrate(newVideoBitrate)
             previousBitrate = currentBitrate
-            // Log.i(TAG, "*** BITRATE CHANGED: ${(previousBitrate / 1000)}k -> ${newVideoBitrate / 1000}k ***")
-        } else {
-            // Log.d(TAG, "Bitrate unchanged: ${currentBitrate / 1000}k")
         }
-        
-        // Log.d(TAG, "=== END UPDATE ===")
     }
 
     /**
@@ -199,8 +217,6 @@ class MoblinSrtFightBitrateRegulator(
         allowedRttJitter: Double,
         allowedPifJitter: Double
     ) {
-        val oldMaxBitrate = currentMaximumBitrate
-        
         var pifSpikeDiff = (packetsInFlight - smoothPif).toLong()
         if (pifSpikeDiff < 0) {
             pifSpikeDiff = 0
@@ -211,34 +227,19 @@ class MoblinSrtFightBitrateRegulator(
         
         val pifDiffThing = currentSettings.packetsInFlight - pifSpikeDiff
         
-        // Log.d(TAG, "--- INCREASE CHECK ---")
-        // Log.d(TAG, "PIF: ${"%.1f".format(packetsInFlight)}, Smooth PIF: ${"%.1f".format(smoothPif)}, Threshold: ${currentSettings.packetsInFlight}")
-        // Log.d(TAG, "Fast RTT: ${"%.1f".format(fastRtt)}, Avg RTT: ${"%.1f".format(avgRtt)}, Jitter allowed: ${allowedRttJitter}")
-        // Log.d(TAG, "PIF spike diff: ${pifSpikeDiff}, PIF diff thing: ${pifDiffThing}")
-        // Log.d(TAG, "PIF - smooth PIF: ${"%.1f".format(packetsInFlight - smoothPif)}, Allowed: ${allowedPifJitter}")
-        
         val pifCondition = smoothPif < currentSettings.packetsInFlight.toDouble()
         val rttCondition = fastRtt <= avgRtt + allowedRttJitter
         val jitterCondition = packetsInFlight - smoothPif < allowedPifJitter
-        
-        // Log.d(TAG, "Conditions - PIF OK: ${pifCondition}, RTT OK: ${rttCondition}, Jitter OK: ${jitterCondition}")
         
         if (pifCondition && rttCondition) {
             if (jitterCondition) {
                 val increase = (currentSettings.pifDiffIncreaseFactor * pifDiffThing) / currentSettings.packetsInFlight
                 currentMaximumBitrate += increase
-                // Log.d(TAG, "INCREASING: +${increase / 1000}k (factor=${currentSettings.pifDiffIncreaseFactor})")
                 
                 if (currentMaximumBitrate > targetBitrate) {
                     currentMaximumBitrate = targetBitrate
-                    // Log.d(TAG, "Capped at target: ${targetBitrate / 1000}k")
                 }
-                // Log.i(TAG, "Max bitrate increased: ${oldMaxBitrate / 1000}k -> ${currentMaximumBitrate / 1000}k")
-            } else {
-                // Log.d(TAG, "Not increasing - jitter too high")
             }
-        } else {
-            // Log.d(TAG, "Not increasing - conditions not met")
         }
     }
 
@@ -251,7 +252,6 @@ class MoblinSrtFightBitrateRegulator(
         val factorDecrease = (currentMaximumBitrate.toDouble() * (1 - factor)).toLong()
         val decrease = max(factorDecrease, minimumDecrease)
         currentMaximumBitrate -= decrease
-        // logAction("PIF: Decreasing bitrate by ${decrease / 1000}k, smooth ${smoothPif.toInt()} > max ${pifMax.toInt()}")
     }
 
     /**
@@ -263,7 +263,6 @@ class MoblinSrtFightBitrateRegulator(
         val factorDecrease = (currentMaximumBitrate.toDouble() * (1 - factor)).toLong()
         val decrease = max(factorDecrease, minimumDecrease)
         currentMaximumBitrate -= decrease
-        // logAction("RTT: Decrease bitrate by ${decrease / 1000}k, avg ${avgRtt.toInt()} > max ${rttMax.toInt()}")
     }
 
     /**
@@ -280,27 +279,17 @@ class MoblinSrtFightBitrateRegulator(
         val factorDecrease = (currentMaximumBitrate.toDouble() * (1 - factor)).toLong()
         val decrease = max(factorDecrease, minimumDecrease)
         currentMaximumBitrate -= decrease
-        // logAction("RTT: Decreasing bitrate by ${decrease / 1000}k, ${rttMs.toInt()} > avg + allow ${(avgRtt + rttSpikeAllowed).toInt()}")
     }
 
     /**
      * Calculate current bitrate - matches Moblin's calculateCurrentBitrate
      */
     private fun calculateCurrentBitrate() {
-        val oldCurrentBitrate = currentBitrate
-        val oldMaxBitrate = currentMaximumBitrate
-        
         var pifSpikeDiff = (fastPif - smoothPif).toLong()
-        
-        // Log.d(TAG, "--- CALCULATE BITRATE ---")
-        // Log.d(TAG, "Fast PIF: ${"%.1f".format(fastPif)}, Smooth PIF: ${"%.1f".format(smoothPif)}")
-        // Log.d(TAG, "PIF spike diff: ${pifSpikeDiff} (threshold: ${currentSettings.packetsInFlight})")
         
         // Lazy decrease
         if (pifSpikeDiff > currentSettings.packetsInFlight) {
-            // logAction("PIF: Lazy decrease diff $pifSpikeDiff > ${currentSettings.packetsInFlight}")
             currentMaximumBitrate = (currentMaximumBitrate.toDouble() * 0.95).toLong()
-            // Log.d(TAG, "Lazy decrease applied: ${oldMaxBitrate / 1000}k -> ${currentMaximumBitrate / 1000}k")
         }
         
         if (pifSpikeDiff <= (currentSettings.packetsInFlight / 5)) {
@@ -316,13 +305,9 @@ class MoblinSrtFightBitrateRegulator(
         // Harder decrease
         if (pifSpikeDiff == currentSettings.packetsInFlight) {
             currentMaximumBitrate -= 500_000
-            // logAction("PIF: -500k dec diff $pifSpikeDiff == ${currentSettings.packetsInFlight}")
-            // Log.d(TAG, "Hard decrease applied: -500k")
         }
         
         val pifDiffThing = currentSettings.packetsInFlight - pifSpikeDiff
-        
-        // Log.d(TAG, "PIF diff thing: ${pifDiffThing} (${currentSettings.packetsInFlight} - ${pifSpikeDiff})")
         
         // Don't let the max bitrate run away from what SRT can actually send right now.
         if (transportBitrateBps > 0) {
@@ -333,11 +318,10 @@ class MoblinSrtFightBitrateRegulator(
             currentMaximumBitrate = min(currentMaximumBitrate, maxAllowedByTransport)
         }
         
-        val configuredMinBitrate = max(currentSettings.minimumBitrate, bitrateRegulatorConfig.videoBitrateRange.lower.toLong())
+        val configuredMinBitrate = configuredMinBitrate()
         val minimumBitrate = max(50000L, configuredMinBitrate)
         if (currentMaximumBitrate < minimumBitrate) {
             currentMaximumBitrate = minimumBitrate
-            // Log.d(TAG, "Min bitrate applied: ${minimumBitrate / 1000}k")
         }
         
         var tempBitrate = currentMaximumBitrate
@@ -345,20 +329,14 @@ class MoblinSrtFightBitrateRegulator(
         tempBitrate /= currentSettings.packetsInFlight
         currentBitrate = tempBitrate
         
-        // Log.d(TAG, "Calculated bitrate: ${currentBitrate / 1000}k (${currentMaximumBitrate / 1000}k * ${pifDiffThing} / ${currentSettings.packetsInFlight})")
-        
         if (currentBitrate < configuredMinBitrate) {
             currentBitrate = configuredMinBitrate
-            // Log.d(TAG, "Applied minimum: ${configuredMinBitrate / 1000}k")
         }
         
         // PIF running away - do a quick lower of bitrate temporarily
         if ((fastPif - smoothPif).toInt() > currentSettings.packetsInFlight * 2) {
             currentBitrate = configuredMinBitrate
-            // Log.w(TAG, "PIF running away - emergency minimum!")
         }
-
-        // Log.d(TAG, "Final bitrate: ${oldCurrentBitrate / 1000}k -> ${currentBitrate / 1000}k")
     }
 
     /**
@@ -370,8 +348,10 @@ class MoblinSrtFightBitrateRegulator(
         } else {
             moblinConfig.slowSettings
         }
-        Log.i(TAG, "Switched to ${if (useFastSettings) "fast" else "slow"} settings")
+        BitrateRegulatorLog.i(TAG, "Switched to ${if (useFastSettings) "fast" else "slow"} settings")
     }
+
+    internal fun isUsingFastSettings(): Boolean = currentSettings == moblinConfig.fastSettings
 
     /**
      * Set target bitrate
@@ -400,11 +380,15 @@ class MoblinSrtFightBitrateRegulator(
      */
     fun getSmoothPif(): Long = smoothPif.toLong()
 
+    internal fun getAvgRtt(): Double = avgRtt
+
+    internal fun getTransportBitrateBps(): Long = transportBitrateBps
+
     /**
      * Log action for debugging
      */
     private fun logAction(action: String) {
-        Log.d(TAG, action)
+        BitrateRegulatorLog.d(TAG, action)
         actionHistory.add(action)
         if (actionHistory.size > 6) {
             actionHistory.removeAt(0)

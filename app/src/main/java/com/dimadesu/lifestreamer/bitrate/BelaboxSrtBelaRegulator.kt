@@ -1,23 +1,23 @@
 package com.dimadesu.lifestreamer.bitrate
 
-import android.util.Log
 import io.github.thibaultbee.srtdroid.core.models.Stats
-import io.github.thibaultbee.streampack.core.configuration.BitrateRegulatorConfig
 import io.github.thibaultbee.streampack.core.elements.metrics.EndpointMetricsTracker
 import io.github.thibaultbee.streampack.ext.srt.elements.endpoints.SrtEndpointMetrics
-import io.github.thibaultbee.streampack.ext.srt.regulator.SrtBitrateRegulator
 import kotlin.math.max
 import kotlin.math.min
 
 /**
  * Port of AdaptiveBitrateSrtBela (Belabox) adaptive bitrate algorithm from the inspiration Swift code.
- * This is a faithful translation of the control logic and timers.
+ * This is a faithful translation of the control logic and timers, with support for live
+ * bitrate range updates and warm state handoff.
  */
 class BelaboxSrtBelaRegulator(
-    metricsTracker: EndpointMetricsTracker,
-    bitrateRegulatorConfig: BitrateRegulatorConfig,
-    onVideoTargetBitrateChange: ((Int) -> Unit)
-) : SrtBitrateRegulator(metricsTracker, bitrateRegulatorConfig, onVideoTargetBitrateChange, { /* no audio */ }) {
+    override val metricsTracker: EndpointMetricsTracker,
+    initialVideoBitrateRange: BitrateRange,
+    private val onVideoTargetBitrateChange: ((Int) -> Unit),
+    initialSnapshot: SrtRegulatorSnapshot? = null,
+    private val nanoTimeProvider: () -> Long = System::nanoTime
+) : SnapshotableSrtRegulator {
 
     companion object {
         private const val TAG = "BelaboxSrtBela"
@@ -45,11 +45,12 @@ class BelaboxSrtBelaRegulator(
         var minimumBitrate: Long = 250_000L
     )
 
+    private var videoBitrateRange: BitrateRange = initialVideoBitrateRange
     private var settings = Settings().apply {
         // The UI slider overrides the default BelaBox minimum bitrate
-        minimumBitrate = bitrateRegulatorConfig.videoBitrateRange.lower.toLong()
+        minimumBitrate = initialVideoBitrateRange.lower.toLong()
     }
-    private var targetBitrate: Long = bitrateRegulatorConfig.videoBitrateRange.upper.toLong()
+    private var targetBitrate: Long = initialVideoBitrateRange.upper.toLong()
 
     // State
     private var sendBufferSizeAvg: Double = 0.0
@@ -61,29 +62,78 @@ class BelaboxSrtBelaRegulator(
     private var rttMin: Double = 200.0
     private var rttJitter: Double = 0.0
     private var throughput: Double = 0.0
-    private var nextBitrateIncrTimeNs: Long = System.nanoTime()
-    private var nextBitrateDecrTimeNs: Long = System.nanoTime()
-    private var curBitrate: Long = ADAPTIVE_BITRATE_START
+    private var nextBitrateIncrTimeNs: Long = nanoTimeProvider()
+    private var nextBitrateDecrTimeNs: Long = nanoTimeProvider()
+    private var curBitrate: Long = ADAPTIVE_BITRATE_START.coerceIn(settings.minimumBitrate, targetBitrate)
 
     // Transport bitrate: EMA over byte-sent deltas, matching iOS's streamTransportBitrate()
-    private val transportBitrateEstimator = TransportBitrateEstimator()
+    private val transportBitrateEstimator = TransportBitrateEstimator(nanoTimeProvider)
     private val transportBitrateBps: Long
         get() = transportBitrateEstimator.bitrateBps
 
     private val defaultSrtLatencyMs: Int = 3000
+
+    init {
+        if (initialSnapshot != null) {
+            curBitrate = initialSnapshot.currentBitrate.coerceIn(settings.minimumBitrate, targetBitrate)
+            transportBitrateEstimator.restoreSnapshot(initialSnapshot.transportSnapshot)
+            if (transportBitrateEstimator.bitrateBps > 0L) {
+                throughput = transportBitrateEstimator.bitrateBps / 1000.0
+            }
+            if (initialSnapshot.avgRtt > 0.0) {
+                rttAvg = initialSnapshot.avgRtt
+                prevRtt = initialSnapshot.avgRtt
+                rttMin = min(initialSnapshot.avgRtt, 200.0)
+            }
+            if (initialSnapshot.avgPif > 0.0) {
+                sendBufferSizeAvg = initialSnapshot.avgPif
+                prevSendBufferSize = initialSnapshot.avgPif
+            }
+        }
+    }
+
+    override fun updateVideoBitrateRange(range: BitrateRange) {
+        videoBitrateRange = range
+        settings.minimumBitrate = range.lower.toLong()
+        targetBitrate = range.upper.toLong()
+        val clamped = curBitrate.coerceIn(settings.minimumBitrate, targetBitrate)
+        if (clamped != curBitrate) {
+            curBitrate = clamped
+            emitVideoTargetBitrate(curBitrate.toInt())
+        }
+    }
+
+    override fun exportSnapshot(): SrtRegulatorSnapshot = SrtRegulatorSnapshot(
+        currentBitrate = curBitrate,
+        transportSnapshot = transportBitrateEstimator.exportSnapshot(),
+        avgRtt = rttAvg,
+        avgPif = sendBufferSizeAvg
+    )
 
     fun setTargetBitrate(bitrate: Int) {
         targetBitrate = bitrate.toLong()
     }
 
     fun setSettings(s: Settings) {
-        Log.i(TAG, "adaptive-bitrate: Using settings $s")
+        BitrateRegulatorLog.i(TAG, "adaptive-bitrate: Using settings $s")
         settings = s
     }
 
     fun getCurrentBitrate(): Int = curBitrate.toInt()
 
     fun getCurrentMaximumBitrateInKbps(): Long = curBitrate / 1000
+
+    internal fun getRttAvg(): Double = rttAvg
+
+    internal fun getRttMin(): Double = rttMin
+
+    internal fun getSendBufferSizeAvg(): Double = sendBufferSizeAvg
+
+    internal fun getTransportBitrateBps(): Long = transportBitrateBps
+
+    private fun emitVideoTargetBitrate(bitrate: Int) {
+        onVideoTargetBitrateChange(videoBitrateRange.coerceIn(bitrate))
+    }
 
     private fun rttToSendBufferSize(rtt: Double, throughput: Double): Double {
         return (throughput / 8.0) * rtt / 1316.0
@@ -131,9 +181,8 @@ class BelaboxSrtBelaRegulator(
         }
     }
 
-
     private fun logAdaptiveAction(actionTaken: String) {
-        Log.i(TAG, actionTaken)
+        BitrateRegulatorLog.i(TAG, actionTaken)
     }
 
     /**
@@ -150,10 +199,16 @@ class BelaboxSrtBelaRegulator(
     }
 
     private fun updateBitrate(stats: Stats) {
-        val rttMs = stats.msRTT
+        updateWithStats(
+            rttMs = stats.msRTT,
+            sendBufferSize = stats.pktFlightSize.toDouble(),
+            byteSentTotal = stats.byteSentTotal
+        )
+    }
+
+    internal fun updateWithStats(rttMs: Double, sendBufferSize: Double, byteSentTotal: Long) {
         if (rttMs <= 0) return
 
-        val sendBufferSize = stats.pktFlightSize.toDouble()
         updateSendBufferSizeAverage(sendBufferSize)
         updateSendBufferSizeJitter(sendBufferSize)
 
@@ -162,12 +217,12 @@ class BelaboxSrtBelaRegulator(
         val deltaRtt = updateAverageRttDelta(rtt)
         updateRttMin(rtt)
         updateRttJitter(deltaRtt)
-        updateTransportBitrate(stats.byteSentTotal)
+        updateTransportBitrate(byteSentTotal)
 
         // srtdroid Stats doesn't expose every optional field the Swift version used.
         // Use a sensible default SRT latency when not available.
         val srtLatency = defaultSrtLatencyMs.toDouble()
-        val nowNs = System.nanoTime()
+        val nowNs = nanoTimeProvider()
         var bitrate = curBitrate
 
         val sendBufferSizeTh3 = (sendBufferSizeAvg + sendBufferSizeJitter) * 4.0
@@ -209,7 +264,7 @@ class BelaboxSrtBelaRegulator(
 
         if (bitrate != curBitrate) {
             curBitrate = bitrate
-            onVideoTargetBitrateChange(curBitrate.toInt())
+            emitVideoTargetBitrate(curBitrate.toInt())
         }
     }
 
