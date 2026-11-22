@@ -38,9 +38,9 @@ import kotlin.math.min
  * does replicate Moblin's real mechanism exactly.
  *
  * [TransportBitrateEstimator] scales its 0.7/0.3 retention by actual elapsed time rather than assuming
- * a fixed 1s tick, which matters here because the controller polls every 500ms,
- * not 1s - without the time scaling the EMA would decay per-second at 0.7^2 = 0.49 instead of the
- * intended 0.7, making the estimate needlessly noisy/reactive.
+ * a fixed 1s tick, which matters here because the controller polls every 200ms (matching Moblin's
+ * `is200MsTick` cadence), not 1s - without the time scaling the EMA would decay per-second at
+ * 0.7^5 = 0.168 instead of the intended 0.7, making the estimate needlessly noisy/reactive.
  */
 class RtmpSendDurationBitrateRegulator(
     override val metricsTracker: EndpointMetricsTracker,

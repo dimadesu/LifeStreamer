@@ -219,11 +219,11 @@ class DynamicBitrateRegulatorController internal constructor(
         private const val TAG = "DynamicBitrateCtrl"
 
         // iOS calls BelaBox on every ~20ms tick (internal timers gate decisions),
-        // while SrtFight is gated to every 200ms. Match those intervals so the
-        // EMA filters (0.99 decay etc.) behave as designed.
+        // while SrtFight and RTMP are gated to every 200ms (is200MsTick = updateTickCount % 10 == 0).
+        // Match those intervals so the EMA filters behave as designed.
         internal val BELABOX_POLLING_TIME: Duration = 20L.milliseconds
         internal val MOBLIN_POLLING_TIME: Duration = 200L.milliseconds
-        internal val RTMP_POLLING_TIME: Duration = 500L.milliseconds
+        internal val RTMP_POLLING_TIME: Duration = 200L.milliseconds
 
         internal fun pollingTimeFor(sinkType: MediaSinkType, mode: RegulatorMode): Duration =
             when (sinkType) {
