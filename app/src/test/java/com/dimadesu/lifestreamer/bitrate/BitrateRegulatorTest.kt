@@ -243,4 +243,117 @@ class BitrateRegulatorTest {
         assertEquals(1, emitted.size)
         assertTrue("Expected bitrate increase > 2 Mbps, got ${emitted.first()}", emitted.first() > 2_000_000)
     }
+
+    @Test
+    fun rtmpRegulator_inFlightWriteStallWithZeroCompletedMessages_treatedAsFullSaturation() {
+        var nowNs = 1_000_000_000L
+        val emitted = mutableListOf<Int>()
+
+        val regulator = RtmpSendDurationBitrateRegulator(
+            metricsTracker = dummyMetricsTracker(),
+            initialVideoBitrateRange = BitrateRange(300_000, 4_000_000),
+            onVideoTargetBitrateChange = { emitted.add(it) },
+            nanoTimeProvider = { nowNs }
+        )
+
+        var sent = 10L
+        var sendDurNs = 10_000_000L
+        var bytesSent = 100_000L
+        // Baseline sample
+        regulator.updateWithMetrics(3_000_000, sent, 0L, sendDurNs, bytesSent)
+
+        // One healthy poll (2% fill ratio)
+        nowNs += 500_000_000L
+        sent += 20L
+        sendDurNs += 10_000_000L
+        bytesSent += 187_500L
+        regulator.updateWithMetrics(3_000_000, sent, 0L, sendDurNs, bytesSent)
+        val smoothBeforeStall = regulator.getSmoothFillRatio()
+        assertTrue("Expected low smoothFillRatio before stall, got $smoothBeforeStall", smoothBeforeStall < 0.05)
+
+        // Now simulate a socket freeze where komuxer is blocked mid-write:
+        // messagesSent, sendDurationNs, and totalBytesSent do not advance while write() is suspended.
+        emitted.clear()
+        nowNs += 500_000_000L
+        regulator.updateWithMetrics(3_000_000, sent, 0L, sendDurNs, bytesSent)
+
+        assertTrue(
+            "Expected smoothFillRatio to rise on mid-write stall, was $smoothBeforeStall -> ${regulator.getSmoothFillRatio()}",
+            regulator.getSmoothFillRatio() > smoothBeforeStall
+        )
+        assertTrue("Expected bitrate decrease on mid-write stall, got $emitted", emitted.isNotEmpty() && emitted.last() < 3_000_000)
+    }
+
+    @Test
+    fun rtmpRegulator_transientSaturationSpike_throttlesImmediatelyAndReboundsToCeilingWithoutSlowCrawl() {
+        var nowNs = 1_000_000_000L
+        var encoderBitrate = 4_000_000
+        val emitted = mutableListOf<Int>()
+
+        val regulator = RtmpSendDurationBitrateRegulator(
+            metricsTracker = dummyMetricsTracker(),
+            initialVideoBitrateRange = BitrateRange(300_000, 4_000_000),
+            onVideoTargetBitrateChange = {
+                encoderBitrate = it
+                emitted.add(it)
+            },
+            nanoTimeProvider = { nowNs }
+        )
+
+        var sent = 0L
+        var sendDurNs = 0L
+        var bytesSent = 0L
+        regulator.updateWithMetrics(encoderBitrate, sent, 0L, sendDurNs, bytesSent)
+
+        // Warm up at 4 Mbps under clean 2% fill ratio so transportBitrateEstimator converges near 4 Mbps
+        repeat(10) {
+            nowNs += 500_000_000L
+            sent += 20L
+            sendDurNs += 10_000_000L // 2% fill ratio
+            bytesSent += 250_000L // 4 Mbps
+            regulator.updateWithMetrics(encoderBitrate, sent, 0L, sendDurNs, bytesSent)
+        }
+        assertEquals(4_000_000, regulator.getCurrentMaximumBitrate())
+        assertEquals(4_000_000, encoderBitrate)
+
+        // Hit a sudden 1.5-second severe stall (3 polls of 90% fill ratio) that pushes fastFillRatio
+        // above the emergency threshold or triggers a deep spike throttle
+        repeat(3) {
+            nowNs += 500_000_000L
+            sent += 5L
+            sendDurNs += 450_000_000L // 90% fill ratio
+            bytesSent += 125_000L // still trickling at 2 Mbps
+            regulator.updateWithMetrics(encoderBitrate, sent, 0L, sendDurNs, bytesSent)
+        }
+        val throttledBitrate = encoderBitrate
+        val ceilingAfterBriefStall = regulator.getCurrentMaximumBitrate()
+        assertTrue(
+            "Expected transient stall to throttle active encoder bitrate significantly below ceiling ($ceilingAfterBriefStall), got $throttledBitrate",
+            throttledBitrate < ceilingAfterBriefStall
+        )
+        assertTrue(
+            "Expected capacity ceiling to remain well above minimum after a brief stall, got $ceilingAfterBriefStall",
+            ceilingAfterBriefStall >= 1_800_000
+        )
+
+        // Congestion clears immediately (back to 2% fill ratio). Within a few polls,
+        // fastFillRatio decays below smoothFillRatio + deadzone and active bitrate rebounds right
+        // back up to the preserved ceiling instead of crawling up from the throttled floor at +5%/sec.
+        repeat(5) {
+            nowNs += 500_000_000L
+            sent += 20L
+            sendDurNs += 10_000_000L
+            bytesSent += 200_000L
+            regulator.updateWithMetrics(encoderBitrate, sent, 0L, sendDurNs, bytesSent)
+        }
+        assertEquals(
+            "Expected active bitrate to rebound back to current ceiling",
+            regulator.getCurrentMaximumBitrate(),
+            encoderBitrate
+        )
+        assertTrue(
+            "Expected rebounded bitrate to remain well above minimum (>= 2 Mbps), got $encoderBitrate",
+            encoderBitrate >= 2_000_000
+        )
+    }
 }
