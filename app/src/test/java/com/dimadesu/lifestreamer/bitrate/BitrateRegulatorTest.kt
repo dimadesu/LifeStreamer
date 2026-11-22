@@ -243,4 +243,44 @@ class BitrateRegulatorTest {
         assertEquals(1, emitted.size)
         assertTrue("Expected bitrate increase > 2 Mbps, got ${emitted.first()}", emitted.first() > 2_000_000)
     }
+
+    @Test
+    fun rtmpRegulator_inFlightWriteStallWithZeroCompletedMessages_treatedAsFullSaturation() {
+        var nowNs = 1_000_000_000L
+        val emitted = mutableListOf<Int>()
+
+        val regulator = RtmpSendDurationBitrateRegulator(
+            metricsTracker = dummyMetricsTracker(),
+            initialVideoBitrateRange = BitrateRange(300_000, 4_000_000),
+            onVideoTargetBitrateChange = { emitted.add(it) },
+            nanoTimeProvider = { nowNs }
+        )
+
+        var sent = 10L
+        var sendDurNs = 10_000_000L
+        var bytesSent = 100_000L
+        // Baseline sample
+        regulator.updateWithMetrics(3_000_000, sent, 0L, sendDurNs, bytesSent)
+
+        // One healthy poll (2% fill ratio)
+        nowNs += 500_000_000L
+        sent += 20L
+        sendDurNs += 10_000_000L
+        bytesSent += 187_500L
+        regulator.updateWithMetrics(3_000_000, sent, 0L, sendDurNs, bytesSent)
+        val smoothBeforeStall = regulator.getSmoothFillRatio()
+        assertTrue("Expected low smoothFillRatio before stall, got $smoothBeforeStall", smoothBeforeStall < 0.05)
+
+        // Now simulate a socket freeze where komuxer is blocked mid-write:
+        // messagesSent, sendDurationNs, and totalBytesSent do not advance while write() is suspended.
+        emitted.clear()
+        nowNs += 500_000_000L
+        regulator.updateWithMetrics(3_000_000, sent, 0L, sendDurNs, bytesSent)
+
+        assertTrue(
+            "Expected smoothFillRatio to rise on mid-write stall, was $smoothBeforeStall -> ${regulator.getSmoothFillRatio()}",
+            regulator.getSmoothFillRatio() > smoothBeforeStall
+        )
+        assertTrue("Expected bitrate decrease on mid-write stall, got $emitted", emitted.isNotEmpty() && emitted.last() < 3_000_000)
+    }
 }

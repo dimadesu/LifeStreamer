@@ -153,7 +153,16 @@ class RtmpSendDurationBitrateRegulator(
         val deltaDropped = currentSample.messagesSendDropped - previousSample.messagesSendDropped
         val deltaSendDurationNs = (currentSample.sendDurationNs - previousSample.sendDurationNs)
             .coerceAtLeast(0)
-        val instantFillRatio = (deltaSendDurationNs.toDouble() / elapsedNs.toDouble()).coerceIn(0.0, 1.0)
+        // komuxer's MetricsSocket only adds elapsed write duration to sendDuration AFTER a socket
+        // write returns. If a write is currently suspended in-flight for the entire polling window
+        // (and streaming has already started, i.e. messagesSent > 0), deltaSent and
+        // deltaSendDurationNs will both be 0 even though the socket has been 100% blocked for the
+        // entire interval. Treat a 0-completion poll on an active stream as full saturation (1.0).
+        val instantFillRatio = if (deltaSent == 0L && currentSample.messagesSent > 0L) {
+            1.0
+        } else {
+            (deltaSendDurationNs.toDouble() / elapsedNs.toDouble()).coerceIn(0.0, 1.0)
+        }
         calcFillRatios(instantFillRatio)
 
         transportBitrateEstimator.update(totalBytesSent)
