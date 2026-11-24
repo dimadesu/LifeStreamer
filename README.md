@@ -12,7 +12,7 @@ LifeStreamer is an Android app designed for IRL live streaming based on [StreamP
 - Can use feed from any RTMP or SRT server as source. For Android I built [MediaSrvr](https://github.com/dimadesu/MediaSrvr) app that can run RTMP server on Android devices.
 - USB as source. Works with DJI Osmo Action 4 in 'Webcam' mode when connected to phone with one USB-C to USB-C cable. Also can work with Elgato Cam Link even when connected via USB hub. Feel free to test other UVC devices, like capture cards. I will mostly target DJI OA4 and Cam Link for now. Note: Phones can lower USB audio quality when USB video is used.
 - Capture Android device screen (screen sharing).
-- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings and bitrate. Note: Performance has improved significantly since switching from "debug" to "release" builds.
+- Background mode (foreground service) allows streaming with app in background, phone locked and screen off. Phone limits access to resources in this mode, so performance can be worse. Test first and consider lowering video encoder settings like bitrate.
 - Aggressive infinite reconnect when app loses connection.
 - Audio monitoring for all audio sources.
 - Switch between all video and audio sources while streaming.
@@ -27,6 +27,7 @@ Share ideas or report issues in Discord https://discord.gg/2UzEkU2AJW or create 
 There are more features available in [LifeStreamerV2](https://github.com/dimadesu/LifeStreamerV2), which is a separate Git project for unstable experimental releases (GitHub releases only).
 
 - Dual camera support with picture-in-picture (PIP) and split view layouts.
+- Smooth video source switching with a blur transition effect.
 - Extra options for Android camera video source:
   - Stabilisation: OIS/EIS/OFF.
   - Noise reduction.
