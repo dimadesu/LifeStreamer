@@ -5,16 +5,21 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.AudioProcessor.AudioFormat as Media3AudioFormat
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.audio.ToInt16PcmAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Arrays
+import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Thread-safe bridge between ExoPlayer's [androidx.media3.exoplayer.audio.DefaultAudioSink]
@@ -23,15 +28,26 @@ import kotlin.math.min
  * Captures decoded PCM before AudioTrack volume/mute is applied, converts sample format,
  * channel layout, and sample rate via Media3's audio processors outside the ring-buffer lock
  * to match StreamPack's configured [AudioSourceConfig], and buffers into a low-latency
- * circular buffer.
+ * circular buffer whose target depth dynamically tracks ExoPlayer's AudioSink playout lag.
  */
 @OptIn(UnstableApi::class)
 open class RtmpAudioBridgeCore {
     companion object {
         private const val TAG = "RtmpAudioBridge"
-        private const val RING_CAPACITY_MS = 600
-        private const val TARGET_BUFFER_MS = 140
-        private const val MAX_BUFFER_MS = 220
+        internal const val RING_CAPACITY_MS = 1000
+        internal const val DEFAULT_TARGET_BUFFER_MS = 235
+        internal const val MIN_TARGET_BUFFER_MS = 140
+        internal const val MAX_TARGET_BUFFER_MS = 650
+        internal const val OVERFLOW_HEADROOM_MS = 85
+        internal const val DEFAULT_MAX_BUFFER_MS = DEFAULT_TARGET_BUFFER_MS + OVERFLOW_HEADROOM_MS
+        internal const val MAX_STAGED_BUFFER_MS = MAX_TARGET_BUFFER_MS + OVERFLOW_HEADROOM_MS
+        internal const val SONIC_INTERNAL_LATENCY_MS = 20
+        internal const val TARGET_UPDATE_DEADBAND_MS = 15
+        private const val CUSHION_REFILL_DEFICIT_MS = 75
+        private const val SINK_LAG_EMA_ALPHA = 0.25
+        private const val MIN_PLAUSIBLE_SINK_LAG_MS = 80
+        private const val MAX_PLAUSIBLE_SINK_LAG_MS = 1200
+        private const val MIN_ADVANCING_PLAYOUT_DELTA_US = 20_000L
 
         private fun logI(msg: String) {
             try {
@@ -89,8 +105,13 @@ open class RtmpAudioBridgeCore {
 
     // Ring buffer state (protected by lock)
     private var ringBuffer: ByteArray = ByteArray(((48000L * RING_CAPACITY_MS) / 1000L).toInt() * 4)
-    private var targetFillBytes: Int = ((48000L * TARGET_BUFFER_MS) / 1000L).toInt() * 4
-    private var maxFillBytes: Int = ((48000L * MAX_BUFFER_MS) / 1000L).toInt() * 4
+    private var targetBufferMs: Int = DEFAULT_TARGET_BUFFER_MS
+    private var maxBufferMs: Int = DEFAULT_MAX_BUFFER_MS
+    private var targetFillBytes: Int = ((48000L * DEFAULT_TARGET_BUFFER_MS) / 1000L).toInt() * 4
+    private var maxFillBytes: Int = ((48000L * DEFAULT_MAX_BUFFER_MS) / 1000L).toInt() * 4
+    private var hasMeasuredSinkLag: Boolean = false
+    private var smoothedSinkLagMs: Double = DEFAULT_TARGET_BUFFER_MS.toDouble()
+    private var needsCushionRefill: Boolean = false
     private var readPos: Int = 0
     private var writePos: Int = 0
     private var availableBytes: Int = 0
@@ -126,14 +147,12 @@ open class RtmpAudioBridgeCore {
                 targetBytesPerFrame = bytesPerFrame
                 val capacityFrames = ((sampleRate.toLong() * RING_CAPACITY_MS) / 1000L).toInt().coerceAtLeast(1024)
                 val capacityBytes = capacityFrames * bytesPerFrame
-                val maxFrames = ((sampleRate.toLong() * MAX_BUFFER_MS) / 1000L).toInt().coerceAtLeast(256)
-                val targetFrames = ((sampleRate.toLong() * TARGET_BUFFER_MS) / 1000L).toInt().coerceAtLeast(256)
                 ringBuffer = ByteArray(capacityBytes)
-                maxFillBytes = (maxFrames * bytesPerFrame).coerceAtMost(capacityBytes)
-                targetFillBytes = (targetFrames * bytesPerFrame).coerceAtMost(maxFillBytes)
+                recomputeTargetFillBytesLocked(forceUpdate = true, allowOverflowTrim = false)
                 readPos = 0
                 writePos = 0
                 availableBytes = 0
+                needsCushionRefill = false
                 formatGeneration++
                 logFormatConfigLocked()
             }
@@ -146,6 +165,10 @@ open class RtmpAudioBridgeCore {
             writePos = 0
             availableBytes = 0
             hasActiveInput = false
+            hasMeasuredSinkLag = false
+            smoothedSinkLagMs = DEFAULT_TARGET_BUFFER_MS.toDouble()
+            needsCushionRefill = false
+            recomputeTargetFillBytesLocked(forceUpdate = true, allowOverflowTrim = false)
             formatGeneration++
         }
     }
@@ -174,30 +197,61 @@ open class RtmpAudioBridgeCore {
             readPos = 0
             writePos = 0
             availableBytes = 0
+            needsCushionRefill = false
         }
     }
 
     /**
      * Target ring buffer fill level in milliseconds used to stay aligned with AudioTrack playback.
      */
-    fun targetBufferDurationMs(): Int = TARGET_BUFFER_MS
+    fun targetBufferDurationMs(): Int {
+        synchronized(lock) {
+            return targetBufferMs
+        }
+    }
 
     /**
-     * Trims any buffered audio older than [TARGET_BUFFER_MS] while keeping the newest
-     * [TARGET_BUFFER_MS] of audio intact so RtmpAudioBridge stays aligned with the
-     * audio currently in-flight inside ExoPlayer's AudioTrack.
+     * Maximum ring buffer fill level in milliseconds before hysteresis snap-back trims to target.
+     */
+    fun maxBufferDurationMs(): Int {
+        synchronized(lock) {
+            return maxBufferMs
+        }
+    }
+
+    /**
+     * Atomically consumes any pending request for [ExoPlayerAudioSource] to re-enter prebuffering
+     * when a dynamic latency jump (e.g. Bluetooth A2DP routing) raises the target cushion
+     * significantly above the currently buffered audio.
+     */
+    fun consumeCushionRefillRequest(): Boolean {
+        synchronized(lock) {
+            if (!needsCushionRefill) return false
+            needsCushionRefill = false
+            return availableBytes < targetFillBytes
+        }
+    }
+
+    /**
+     * Trims any buffered audio older than [targetBufferDurationMs] while keeping the newest
+     * target cushion of audio intact so RtmpAudioBridge stays aligned with the
+     * audio currently in-flight inside ExoPlayer's AudioSink + HAL pipeline.
      */
     fun trimToTargetBuffer() {
         synchronized(lock) {
-            val frameSize = targetBytesPerFrame.coerceAtLeast(2)
-            val excess = availableBytes - targetFillBytes
-            if (excess > 0) {
-                val dropBytes = ((excess / frameSize) * frameSize).coerceAtMost(availableBytes)
-                val capacity = ringBuffer.size
-                if (capacity > 0 && dropBytes > 0) {
-                    readPos = (readPos + dropBytes) % capacity
-                    availableBytes -= dropBytes
-                }
+            trimToTargetBufferLocked()
+        }
+    }
+
+    private fun trimToTargetBufferLocked() {
+        val frameSize = targetBytesPerFrame.coerceAtLeast(2)
+        val excess = availableBytes - targetFillBytes
+        if (excess > 0) {
+            val dropBytes = ((excess / frameSize) * frameSize).coerceAtMost(availableBytes)
+            val capacity = ringBuffer.size
+            if (capacity > 0 && dropBytes > 0) {
+                readPos = (readPos + dropBytes) % capacity
+                availableBytes -= dropBytes
             }
         }
     }
@@ -209,6 +263,78 @@ open class RtmpAudioBridgeCore {
         synchronized(lock) {
             val bytesPerSec = (targetSampleRate.toLong() * targetBytesPerFrame).coerceAtLeast(1L)
             return ((availableBytes.toLong() * 1000L) / bytesPerSec).toInt()
+        }
+    }
+
+    fun onAudioSinkLagMeasured(sinkLagMs: Int) {
+        onSinkLagMeasuredInternal(sinkLagMs, sourceTap = null)
+    }
+
+    private fun onSinkLagMeasuredInternal(sinkLagMs: Int, sourceTap: TapAudioProcessor?) {
+        if (sinkLagMs < MIN_PLAUSIBLE_SINK_LAG_MS || sinkLagMs > MAX_PLAUSIBLE_SINK_LAG_MS) {
+            return
+        }
+        synchronized(lock) {
+            if (sourceTap != null && activeTapProcessor !== sourceTap) return
+            val isFirstMeasurement = !hasMeasuredSinkLag
+            if (isFirstMeasurement) {
+                smoothedSinkLagMs = sinkLagMs.toDouble()
+                hasMeasuredSinkLag = true
+            } else {
+                smoothedSinkLagMs += SINK_LAG_EMA_ALPHA * (sinkLagMs.toDouble() - smoothedSinkLagMs)
+            }
+            recomputeTargetFillBytesLocked(
+                forceUpdate = isFirstMeasurement,
+                allowOverflowTrim = true
+            )
+        }
+    }
+
+    private fun recomputeTargetFillBytesLocked(
+        forceUpdate: Boolean,
+        allowOverflowTrim: Boolean
+    ) {
+        val rawLagMs = if (hasMeasuredSinkLag) {
+            smoothedSinkLagMs.roundToInt()
+        } else {
+            DEFAULT_TARGET_BUFFER_MS
+        }
+        val conversionLatencyMs = if (
+            hasMeasuredSinkLag &&
+            inputSampleRate > 0 &&
+            targetSampleRate > 0 &&
+            inputSampleRate != targetSampleRate
+        ) {
+            SONIC_INTERNAL_LATENCY_MS
+        } else {
+            0
+        }
+        val desiredTargetMs = (rawLagMs - conversionLatencyMs)
+            .coerceIn(MIN_TARGET_BUFFER_MS, MAX_TARGET_BUFFER_MS)
+
+        if (!forceUpdate && abs(desiredTargetMs - targetBufferMs) < TARGET_UPDATE_DEADBAND_MS) {
+            return
+        }
+
+        val previousTargetMs = targetBufferMs
+        targetBufferMs = desiredTargetMs
+        maxBufferMs = (desiredTargetMs + OVERFLOW_HEADROOM_MS).coerceAtMost(RING_CAPACITY_MS)
+
+        val capacityBytes = ringBuffer.size
+        val maxFrames = ((targetSampleRate.toLong() * maxBufferMs) / 1000L).toInt().coerceAtLeast(256)
+        val targetFrames = ((targetSampleRate.toLong() * targetBufferMs) / 1000L).toInt().coerceAtLeast(256)
+        maxFillBytes = (maxFrames * targetBytesPerFrame).coerceAtMost(capacityBytes)
+        targetFillBytes = (targetFrames * targetBytesPerFrame).coerceAtMost(maxFillBytes)
+
+        if (desiredTargetMs > previousTargetMs && hasActiveInput) {
+            val refillDeficitFrames = ((targetSampleRate.toLong() * CUSHION_REFILL_DEFICIT_MS) / 1000L).toInt()
+            val refillDeficitBytes = refillDeficitFrames * targetBytesPerFrame
+            if (targetFillBytes - availableBytes >= refillDeficitBytes) {
+                needsCushionRefill = true
+            }
+        }
+        if (allowOverflowTrim && availableBytes > maxFillBytes) {
+            trimToTargetBufferLocked()
         }
     }
 
@@ -225,6 +351,7 @@ open class RtmpAudioBridgeCore {
             inputSampleRate = inputFormat.sampleRate
             inputChannelCount = inputFormat.channelCount
             inputEncoding = inputFormat.encoding
+            recomputeTargetFillBytesLocked(forceUpdate = true, allowOverflowTrim = false)
             formatGeneration++
             logFormatConfigLocked()
         }
@@ -291,7 +418,7 @@ open class RtmpAudioBridgeCore {
             val mode = if (isPassthrough) "passthrough" else "Media3 AudioProcessor pipeline"
             logI(
                 "Configured audio bridge ($mode): in=${inputSampleRate}Hz/${inputChannelCount}ch/enc=$inputEncoding -> " +
-                    "out=${targetSampleRate}Hz/${targetChannelCount}ch (maxBuffer=${MAX_BUFFER_MS}ms)"
+                    "out=${targetSampleRate}Hz/${targetChannelCount}ch (targetBuffer=${targetBufferMs}ms, maxBuffer=${maxBufferMs}ms)"
             )
         }
     }
@@ -422,6 +549,9 @@ open class RtmpAudioBridgeCore {
         }
         writePos = (writePos + bytesToWrite) % capacity
         availableBytes += bytesToWrite
+        if (availableBytes >= targetFillBytes) {
+            needsCushionRefill = false
+        }
     }
 
     /**
@@ -585,7 +715,18 @@ open class RtmpAudioBridgeCore {
         dest.put(zeroScratch, 0, silenceBytes)
     }
 
-    fun createTapAudioProcessor(startStaged: Boolean = false): AudioProcessor {
+    class TapSession internal constructor(
+        private val tapProcessor: TapAudioProcessor
+    ) {
+        val audioProcessor: AudioProcessor
+            get() = tapProcessor
+
+        fun wrapAudioSink(delegate: AudioSink): AudioSink {
+            return SinkLagTrackingAudioSink(delegate, tapProcessor)
+        }
+    }
+
+    fun createTapSession(startStaged: Boolean = false): TapSession {
         val processor = TapAudioProcessor(this, startStaged)
         if (startStaged) {
             synchronized(tapSelectionLock) {
@@ -596,7 +737,11 @@ open class RtmpAudioBridgeCore {
             activeTapProcessor?.markSuperseded()
             activeTapProcessor = processor
         }
-        return processor
+        return TapSession(processor)
+    }
+
+    fun createTapAudioProcessor(startStaged: Boolean = false): AudioProcessor {
+        return createTapSession(startStaged).audioProcessor
     }
 
     private fun clearPendingIfSame(tap: TapAudioProcessor) {
@@ -607,7 +752,173 @@ open class RtmpAudioBridgeCore {
         }
     }
 
-    private class TapAudioProcessor(
+    private class SinkLagTrackingAudioSink(
+        delegate: AudioSink,
+        private val tapProcessor: TapAudioProcessor
+    ) : ForwardingAudioSink(delegate) {
+
+        private var configuredSampleRate: Int = 0
+        private var inputBytesPerFrame: Int = 0
+        private var isSinkPlaying: Boolean = false
+        private var baselinePlayoutPosUs: Long = C.TIME_UNSET
+
+        private fun resetAdvancingBaseline() {
+            baselinePlayoutPosUs = C.TIME_UNSET
+        }
+
+        override fun setListener(listener: AudioSink.Listener) {
+            super.setListener(object : AudioSink.Listener {
+                override fun onPositionDiscontinuity() {
+                    resetAdvancingBaseline()
+                    listener.onPositionDiscontinuity()
+                }
+
+                override fun onPositionAdvancing(playoutStartSystemTimeMs: Long) {
+                    listener.onPositionAdvancing(playoutStartSystemTimeMs)
+                }
+
+                override fun onUnderrun(
+                    bufferSize: Int,
+                    bufferSizeMs: Long,
+                    elapsedSinceLastFeedMs: Long
+                ) {
+                    resetAdvancingBaseline()
+                    listener.onUnderrun(bufferSize, bufferSizeMs, elapsedSinceLastFeedMs)
+                }
+
+                override fun onSkipSilenceEnabledChanged(skipSilenceEnabled: Boolean) {
+                    listener.onSkipSilenceEnabledChanged(skipSilenceEnabled)
+                }
+
+                override fun onOffloadBufferEmptying() {
+                    listener.onOffloadBufferEmptying()
+                }
+
+                override fun onOffloadBufferFull() {
+                    listener.onOffloadBufferFull()
+                }
+
+                override fun onAudioSinkError(audioSinkError: Exception) {
+                    listener.onAudioSinkError(audioSinkError)
+                }
+
+                override fun onAudioCapabilitiesChanged() {
+                    resetAdvancingBaseline()
+                    listener.onAudioCapabilitiesChanged()
+                }
+
+                override fun onAudioTrackInitialized(audioTrackConfig: AudioSink.AudioTrackConfig) {
+                    resetAdvancingBaseline()
+                    listener.onAudioTrackInitialized(audioTrackConfig)
+                }
+
+                override fun onAudioTrackReleased(audioTrackConfig: AudioSink.AudioTrackConfig) {
+                    resetAdvancingBaseline()
+                    listener.onAudioTrackReleased(audioTrackConfig)
+                }
+
+                override fun onSilenceSkipped() {
+                    listener.onSilenceSkipped()
+                }
+
+                override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                    listener.onAudioSessionIdChanged(audioSessionId)
+                }
+            })
+        }
+
+        override fun configure(
+            inputFormat: Format,
+            specifiedBufferSize: Int,
+            outputChannels: IntArray?
+        ) {
+            resetAdvancingBaseline()
+            val isLinearPcm = inputFormat.sampleMimeType == null ||
+                MimeTypes.AUDIO_RAW == inputFormat.sampleMimeType
+            val encoding = if (inputFormat.pcmEncoding != Format.NO_VALUE) {
+                inputFormat.pcmEncoding
+            } else {
+                C.ENCODING_PCM_16BIT
+            }
+            val bytesPerSample = if (isLinearPcm) pcmBytesPerSample(encoding) else 0
+            if (bytesPerSample > 0 && inputFormat.sampleRate > 0 && inputFormat.channelCount > 0) {
+                configuredSampleRate = inputFormat.sampleRate
+                inputBytesPerFrame = bytesPerSample * inputFormat.channelCount
+            } else {
+                configuredSampleRate = 0
+                inputBytesPerFrame = 0
+            }
+            super.configure(inputFormat, specifiedBufferSize, outputChannels)
+        }
+
+        override fun play() {
+            isSinkPlaying = true
+            super.play()
+        }
+
+        override fun pause() {
+            isSinkPlaying = false
+            resetAdvancingBaseline()
+            super.pause()
+        }
+
+        override fun handleDiscontinuity() {
+            resetAdvancingBaseline()
+            super.handleDiscontinuity()
+        }
+
+        override fun flush() {
+            resetAdvancingBaseline()
+            super.flush()
+        }
+
+        override fun reset() {
+            isSinkPlaying = false
+            resetAdvancingBaseline()
+            super.reset()
+        }
+
+        override fun handleBuffer(
+            buffer: ByteBuffer,
+            presentationTimeUs: Long,
+            encodedAccessUnitCount: Int
+        ): Boolean {
+            val bytesBefore = buffer.remaining()
+            val fullyHandled = super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+            if (fullyHandled &&
+                bytesBefore > 0 &&
+                isSinkPlaying &&
+                presentationTimeUs != C.TIME_UNSET &&
+                configuredSampleRate > 0 &&
+                inputBytesPerFrame > 0
+            ) {
+                val playoutPosUs = getCurrentPositionUs(false)
+                if (playoutPosUs != AudioSink.CURRENT_POSITION_NOT_SET) {
+                    val baseline = baselinePlayoutPosUs
+                    if (baseline == C.TIME_UNSET || playoutPosUs < baseline) {
+                        baselinePlayoutPosUs = playoutPosUs
+                    } else if (playoutPosUs - baseline >= MIN_ADVANCING_PLAYOUT_DELTA_US) {
+                        val frames = bytesBefore / inputBytesPerFrame
+                        val bufferDurationUs = (frames.toLong() * 1_000_000L) / configuredSampleRate
+                        val writeHeadPtsUs = presentationTimeUs + bufferDurationUs
+                        val sinkLagMs = ((writeHeadPtsUs - playoutPosUs) / 1000L).toInt()
+                        tapProcessor.onSinkLagMeasured(sinkLagMs)
+                    }
+                }
+            }
+            return fullyHandled
+        }
+
+        private fun pcmBytesPerSample(encoding: Int): Int = when (encoding) {
+            C.ENCODING_PCM_8BIT -> 1
+            C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 2
+            C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> 3
+            C.ENCODING_PCM_32BIT, C.ENCODING_PCM_32BIT_BIG_ENDIAN, C.ENCODING_PCM_FLOAT -> 4
+            else -> 0
+        }
+    }
+
+    internal class TapAudioProcessor(
         private val bridge: RtmpAudioBridgeCore,
         startStaged: Boolean
     ) : BaseAudioProcessor() {
@@ -621,9 +932,26 @@ open class RtmpAudioBridgeCore {
         private var stagedFormat: Media3AudioFormat? = null
         private val stagedBuffers = kotlin.collections.ArrayDeque<ByteBuffer>()
         private var stagedBytes = 0
+        private var stagedSinkLagMs: Int? = null
 
         fun markSuperseded() {
             isSuperseded = true
+        }
+
+        fun onSinkLagMeasured(sinkLagMs: Int) {
+            if (sinkLagMs < MIN_PLAUSIBLE_SINK_LAG_MS || sinkLagMs > MAX_PLAUSIBLE_SINK_LAG_MS) {
+                return
+            }
+            synchronized(stagingLock) {
+                if (isSuperseded || isDiscarded) return
+                if (isPromoted) {
+                    if (bridge.activeTapProcessor === this) {
+                        bridge.onSinkLagMeasuredInternal(sinkLagMs, this)
+                    }
+                } else {
+                    stagedSinkLagMs = sinkLagMs
+                }
+            }
         }
 
         fun promoteToActive(): Boolean {
@@ -638,12 +966,17 @@ open class RtmpAudioBridgeCore {
                 bridge.activeTapProcessor = this
                 bridge.clear()
                 stagedFormat?.let { bridge.onExoPlayerFormatChangedInternal(it, this) }
+                // Apply the staged sink lag BEFORE replaying pre-fill so the ring's target/max
+                // already reflect high-latency sinks (e.g. Bluetooth A2DP); otherwise the replay
+                // would overflow-trim against the default cushion and force a refill gap.
+                stagedSinkLagMs?.let { bridge.onSinkLagMeasuredInternal(it, this) }
                 while (stagedBuffers.isNotEmpty()) {
                     val chunk = stagedBuffers.removeFirst()
                     bridge.onExoPlayerAudioInputInternal(chunk, this)
                 }
                 stagedBytes = 0
                 stagedFormat = null
+                stagedSinkLagMs = null
                 return true
             }
         }
@@ -659,6 +992,7 @@ open class RtmpAudioBridgeCore {
                     stagedFormat = inputAudioFormat
                     stagedBuffers.clear()
                     stagedBytes = 0
+                    stagedSinkLagMs = null
                 }
             }
             return inputAudioFormat
@@ -692,7 +1026,10 @@ open class RtmpAudioBridgeCore {
             val fmt = stagedFormat
             val frameSize = (fmt?.bytesPerFrame ?: 0).takeIf { it > 0 } ?: 4
             val rate = (fmt?.sampleRate ?: 0).takeIf { it > 0 } ?: 48000
-            val maxBytes = ((rate.toLong() * MAX_BUFFER_MS) / 1000L).toInt() * frameSize
+            // Retain enough pre-fill to satisfy the largest dynamic target (plus headroom) so a
+            // high-latency sink measured during warm-up can be promoted without a silence gap.
+            // promotePendingTap() trims back down to the actual target after replay.
+            val maxBytes = ((rate.toLong() * MAX_STAGED_BUFFER_MS) / 1000L).toInt() * frameSize
             var excess = stagedBytes - maxBytes
             while (excess > 0 && stagedBuffers.isNotEmpty()) {
                 val head = stagedBuffers.first()
@@ -716,6 +1053,7 @@ open class RtmpAudioBridgeCore {
             synchronized(stagingLock) {
                 stagedBuffers.clear()
                 stagedBytes = 0
+                stagedSinkLagMs = null
                 if (isPromoted && !isSuperseded && bridge.activeTapProcessor === this) {
                     // Keep target config and conversion pipeline; clear stale buffered samples on seek/flush
                     bridge.clear()
@@ -728,6 +1066,7 @@ open class RtmpAudioBridgeCore {
                 stagedBuffers.clear()
                 stagedBytes = 0
                 stagedFormat = null
+                stagedSinkLagMs = null
                 isDiscarded = true
                 if (isPromoted && bridge.activeTapProcessor === this) {
                     bridge.clear()

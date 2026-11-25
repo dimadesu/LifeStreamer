@@ -96,11 +96,16 @@ class ExoPlayerAudioSource(
     override suspend fun startStream() {
         if (isRunning.getAndSet(true)) return
         bridge.trimToTargetBuffer()
+        bridge.consumeCushionRefillRequest()
         isPrebuffering = bridge.availableDurationMs() < bridge.targetBufferDurationMs()
         nextReadTimeNs = System.nanoTime()
         _isStreamingFlow.tryEmit(true)
         try {
-            Log.i(TAG, "ExoPlayerAudioSource started (prebuffering=$isPrebuffering, bufferedMs=${bridge.availableDurationMs()})")
+            Log.i(
+                TAG,
+                "ExoPlayerAudioSource started (prebuffering=$isPrebuffering, " +
+                    "bufferedMs=${bridge.availableDurationMs()}, targetMs=${bridge.targetBufferDurationMs()})"
+            )
         } catch (_: Throwable) {
         }
     }
@@ -147,6 +152,10 @@ class ExoPlayerAudioSource(
                 LockSupport.parkNanos(waitNs)
             }
             nextReadTimeNs = scheduledNs + frameDurationNs
+        }
+
+        if (bridge.consumeCushionRefillRequest()) {
+            isPrebuffering = true
         }
 
         if (isPrebuffering) {

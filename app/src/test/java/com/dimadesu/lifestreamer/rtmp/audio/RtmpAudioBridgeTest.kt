@@ -1,9 +1,21 @@
 package com.dimadesu.lifestreamer.rtmp.audio
 
 import android.media.AudioFormat
+import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.AuxEffectInfo
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.audio.AudioProcessor.AudioFormat as Media3AudioFormat
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.audio.AudioSink
+import io.github.thibaultbee.streampack.core.elements.sources.audio.AudioSourceConfig
+import io.github.thibaultbee.streampack.core.utils.InternalStreamPackApi
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -12,6 +24,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 
+@OptIn(UnstableApi::class)
 class RtmpAudioBridgeTest {
 
     @Test
@@ -265,14 +278,15 @@ class RtmpAudioBridgeTest {
         assertEquals((-1111).toShort(), prePromoteRead.getShort(2))
         assertEquals(80, bridge.availableDurationMs())
 
-        // Promoting replaces the active stream, mixes mono->stereo, and trims pre-fill to TARGET_BUFFER_MS (140ms)
+        // Promoting replaces the active stream, mixes mono->stereo, and preserves all 180ms of pre-fill
+        // intact because 180ms <= DEFAULT_TARGET_BUFFER_MS (235ms) without clipping initial startup samples.
         bridge.promotePendingTap()
-        assertEquals(140, bridge.availableDurationMs())
+        assertEquals(180, bridge.availableDurationMs())
         val postPromoteRead = ByteBuffer.allocateDirect(probeBytes).order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(probeBytes, bridge.readPcm(postPromoteRead, probeBytes))
         assertEquals(2222.toShort(), postPromoteRead.getShort(0))
         assertEquals(2222.toShort(), postPromoteRead.getShort(2))
-        assertEquals(120, bridge.availableDurationMs())
+        assertEquals(160, bridge.availableDurationMs())
 
         // Late frames or reset from the superseded active tap are ignored
         val lateBuf = ByteBuffer.allocateDirect(1920 * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -283,7 +297,7 @@ class RtmpAudioBridgeTest {
         lateBuf.flip()
         activeTap.queueInput(lateBuf)
         activeTap.reset()
-        assertEquals(120, bridge.availableDurationMs())
+        assertEquals(160, bridge.availableDurationMs())
 
         // Abandoned staged tap reset without promotion cannot disturb live stream or promote later
         val abandonedTap = bridge.createTapAudioProcessor(startStaged = true)
@@ -294,7 +308,22 @@ class RtmpAudioBridgeTest {
         abandonedTap.queueInput(abandonedBuf)
         abandonedTap.reset()
         bridge.promotePendingTap()
-        assertEquals(120, bridge.availableDurationMs())
+        assertEquals(160, bridge.availableDurationMs())
+
+        // Oversized staged pre-fill (280ms) trims down to DEFAULT_TARGET_BUFFER_MS (235ms) on promotion
+        val oversizedStagedTap = bridge.createTapAudioProcessor(startStaged = true)
+        oversizedStagedTap.configure(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
+        oversizedStagedTap.flush()
+        val oversizedFrames = 13440 // 280ms
+        val oversizedBuf = ByteBuffer.allocateDirect(oversizedFrames * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (f in 0 until oversizedFrames) {
+            oversizedBuf.putShort(3333)
+            oversizedBuf.putShort(-3333)
+        }
+        oversizedBuf.flip()
+        oversizedStagedTap.queueInput(oversizedBuf)
+        bridge.promotePendingTap()
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.availableDurationMs())
     }
 
     @Test
@@ -304,11 +333,11 @@ class RtmpAudioBridgeTest {
         bridge.setTargetConfig(sampleRate, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         bridge.onExoPlayerFormatChanged(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
 
-        // maxFillBytes = 220ms at 48kHz stereo 16-bit = (48000 * 220 / 1000) * 4 = 42,240 bytes (10,560 frames)
-        // Push 3 blocks of 3,520 frames (220ms exact) to verify fill up to maxFillBytes without overflow,
-        // then verify trimToTargetBuffer() drops back to TARGET_BUFFER_MS (140ms).
-        val framesPerBlock = 3520
-        for (block in 1..3) {
+        // maxFillBytes = 320ms at 48kHz stereo 16-bit = (48000 * 320 / 1000) * 4 = 61,440 bytes (15,360 frames)
+        // Push 4 blocks of 3,840 frames (80ms each = 320ms exact) to verify fill up to maxFillBytes without overflow,
+        // then verify trimToTargetBuffer() drops back to DEFAULT_TARGET_BUFFER_MS (235ms = 11,280 frames).
+        val framesPerBlock = 3840
+        for (block in 1..4) {
             val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
             val marker = (block * 1000).toShort()
             for (f in 0 until framesPerBlock) {
@@ -318,14 +347,14 @@ class RtmpAudioBridgeTest {
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
         }
-        assertEquals(220, bridge.availableDurationMs())
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_MAX_BUFFER_MS, bridge.availableDurationMs())
         bridge.trimToTargetBuffer()
-        assertEquals(140, bridge.availableDurationMs())
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.availableDurationMs())
 
-        // Flush and push 6 blocks (440ms) to verify hysteresis overflow trim snaps >220ms back to 140ms
-        // keeping the newest 6,720 frames: 3,200 tail frames of block 5 + 3,520 frames of block 6.
+        // Flush and push 7 blocks (560ms): block 5 overflows 320ms -> snaps to 235ms, block 6 reaches 315ms,
+        // block 7 reaches 395ms -> snaps to 235ms (11,280 frames: 3,600 tail frames of block 5 + 3,840 of block 6 + 3,840 of block 7).
         bridge.flushRingBuffer()
-        for (block in 1..6) {
+        for (block in 1..7) {
             val buf = ByteBuffer.allocateDirect(framesPerBlock * 4).order(ByteOrder.LITTLE_ENDIAN)
             val marker = (block * 1000).toShort()
             for (f in 0 until framesPerBlock) {
@@ -335,9 +364,9 @@ class RtmpAudioBridgeTest {
             buf.flip()
             bridge.onExoPlayerAudioInput(buf)
         }
-        assertEquals(140, bridge.availableDurationMs())
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.availableDurationMs())
 
-        val block5TailBytes = 3200 * 4
+        val block5TailBytes = 3600 * 4
         val block5Buf = ByteBuffer.allocateDirect(block5TailBytes).order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(block5TailBytes, bridge.readPcm(block5Buf, block5TailBytes))
         assertEquals(5000.toShort(), block5Buf.getShort(0))
@@ -345,7 +374,7 @@ class RtmpAudioBridgeTest {
         assertEquals(5000.toShort(), block5Buf.getShort(block5TailBytes - 4))
         assertEquals((-5000).toShort(), block5Buf.getShort(block5TailBytes - 2))
 
-        val blockBytes = framesPerBlock * 4 // 14,080 bytes
+        val blockBytes = framesPerBlock * 4 // 15,360 bytes
         val block6Buf = ByteBuffer.allocateDirect(blockBytes).order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(blockBytes, bridge.readPcm(block6Buf, blockBytes))
         assertEquals(6000.toShort(), block6Buf.getShort(0))
@@ -353,7 +382,14 @@ class RtmpAudioBridgeTest {
         assertEquals(6000.toShort(), block6Buf.getShort(blockBytes - 4))
         assertEquals((-6000).toShort(), block6Buf.getShort(blockBytes - 2))
 
-        // Next read after draining 140ms should be silence (0)
+        val block7Buf = ByteBuffer.allocateDirect(blockBytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(blockBytes, bridge.readPcm(block7Buf, blockBytes))
+        assertEquals(7000.toShort(), block7Buf.getShort(0))
+        assertEquals((-7000).toShort(), block7Buf.getShort(2))
+        assertEquals(7000.toShort(), block7Buf.getShort(blockBytes - 4))
+        assertEquals((-7000).toShort(), block7Buf.getShort(blockBytes - 2))
+
+        // Next read after draining 235ms should be silence (0)
         val silenceBuf = ByteBuffer.allocateDirect(1920)
         val silenceBytes = bridge.readPcm(silenceBuf, 1920)
         assertEquals(1920, silenceBytes)
@@ -374,5 +410,332 @@ class RtmpAudioBridgeTest {
         assertEquals(0, bridge.availableDurationMs())
         assertTrue(bridge.hasActiveInput)
         assertEquals(48000, bridge.inputSampleRate)
+    }
+
+    @kotlin.OptIn(InternalStreamPackApi::class)
+    @Test
+    fun forwardingAudioSinkTracksSteadyStateLagAndBluetoothCushionExpansion() = runBlocking {
+        val bridge = RtmpAudioBridgeCore()
+        val sampleRate = 48000
+        val source = ExoPlayerAudioSource(bridge)
+        source.configure(
+            AudioSourceConfig(
+                channelConfig = AudioFormat.CHANNEL_IN_STEREO,
+                sampleRate = sampleRate,
+                byteFormat = AudioFormat.ENCODING_PCM_16BIT
+            )
+        )
+
+        val fakeDelegate = FakeAudioSink()
+        val session = bridge.createTapSession(startStaged = false)
+        val wrappedSink = session.wrapAudioSink(fakeDelegate)
+        val tap = session.audioProcessor
+
+        val pcmFormat = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setSampleRate(sampleRate)
+            .setChannelCount(2)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT)
+            .build()
+        wrappedSink.configure(pcmFormat, 0, null)
+        tap.configure(Media3AudioFormat(sampleRate, 2, C.ENCODING_PCM_16BIT))
+        tap.flush()
+
+        fun feedChunk(ptsUs: Long, sampleVal: Short = 4000, acceptInSink: Boolean = true) {
+            val frames = 960 // 20ms
+            val chunk = ByteBuffer.allocateDirect(frames * 4).order(ByteOrder.LITTLE_ENDIAN)
+            for (f in 0 until frames) {
+                chunk.putShort(sampleVal)
+                chunk.putShort(sampleVal)
+            }
+            chunk.flip()
+            fakeDelegate.acceptNextBuffer = acceptInSink
+            fakeDelegate.onHandleAccepted = { buf ->
+                if (acceptInSink) {
+                    tap.queueInput(buf)
+                }
+            }
+            wrappedSink.handleBuffer(chunk, ptsUs, 1)
+        }
+
+        // Pre-fill 8 chunks (160ms, PTS = 5_000_000 .. 5_160_000) before play() / advancing playhead
+        val startPtsUs = 5_000_000L
+        fakeDelegate.currentPositionUs = startPtsUs
+        for (i in 0 until 8) {
+            feedChunk(startPtsUs + i * 20_000L)
+        }
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+        assertEquals(160, bridge.availableDurationMs())
+
+        // Start playback; while playhead is still stationary at startPtsUs during HAL traversal,
+        // target remains 235ms and ExoPlayerAudioSource prebuffers with silence instead of clipping PTS=0.
+        wrappedSink.play()
+        source.startStream()
+
+        val outBuf = ByteBuffer.allocateDirect(960 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        source.fillAudioFrame(outBuf)
+        assertEquals(0.toShort(), outBuf.getShort(0))
+        // Still 160ms untouched in bridge because prebuffering padded silence
+        assertEquals(160, bridge.availableDurationMs())
+
+        // Feed 4 more chunks (PTS 5_160_000 .. 5_240_000) while playhead still at 5_000_000 -> bridge reaches 240ms >= 235ms
+        for (i in 8 until 12) {
+            feedChunk(startPtsUs + i * 20_000L)
+        }
+        assertEquals(240, bridge.availableDurationMs())
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+
+        // Playout position now advances by 20ms (5_020_000), while write head reaches 5_280_000 -> 260ms speaker lag!
+        fakeDelegate.currentPositionUs = startPtsUs + 20_000L
+        feedChunk(startPtsUs + 260_000L) // writeHead = 5_280_000, lag = 260ms
+        assertEquals(260, bridge.targetBufferDurationMs())
+        assertFalse("Small +25ms target refinement should not force mid-stream silence refill", bridge.consumeCushionRefillRequest())
+
+        // Simulate route change / flush to Bluetooth A2DP with 430ms lag
+        wrappedSink.flush()
+        tap.flush()
+        val btStartPtsUs = 10_000_000L
+        fakeDelegate.currentPositionUs = btStartPtsUs
+        for (i in 0 until 12) {
+            feedChunk(btStartPtsUs + i * 20_000L, sampleVal = 7000)
+        }
+        // Bridge has 240ms (>= 235ms default), so fillAudioFrame starts reading real audio (7000)
+        source.fillAudioFrame(outBuf)
+        assertEquals(7000.toShort(), outBuf.getShort(0))
+        assertEquals(220, bridge.availableDurationMs())
+
+        // Once Bluetooth playhead advances by 20ms, sink reports 430ms lag (writeHead = 10_450_000, playout = 10_020_000)
+        fakeDelegate.currentPositionUs = btStartPtsUs + 20_000L
+        feedChunk(btStartPtsUs + 430_000L, sampleVal = 7000)
+        assertEquals(430, bridge.targetBufferDurationMs())
+        assertEquals(430 + RtmpAudioBridgeCore.OVERFLOW_HEADROOM_MS, bridge.maxBufferDurationMs())
+
+        // Deficit (430ms - 240ms = 190ms >= 75ms) triggers cushion refill: ExoPlayerAudioSource outputs silence until 430ms fills
+        source.fillAudioFrame(outBuf)
+        assertEquals(0.toShort(), outBuf.getShort(0))
+        assertEquals(240, bridge.availableDurationMs())
+
+        // Top up 10 more 20ms chunks (200ms -> 440ms >= 430ms target) and verify real audio resumes cleanly
+        for (i in 0 until 10) {
+            fakeDelegate.currentPositionUs = btStartPtsUs + (40_000L + i * 20_000L)
+            feedChunk(btStartPtsUs + (450_000L + i * 20_000L), sampleVal = 7000)
+        }
+        assertTrue("Buffered audio should meet 430ms target, was ${bridge.availableDurationMs()}ms", bridge.availableDurationMs() >= 430)
+        source.fillAudioFrame(outBuf)
+        assertEquals(7000.toShort(), outBuf.getShort(0))
+
+        source.stopStream()
+        source.release()
+    }
+
+    @Test
+    fun dynamicTargetSubtractsSonicInternalLatencyWhenResampling() {
+        val bridge = RtmpAudioBridgeCore()
+        bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+
+        val fakeDelegate = FakeAudioSink()
+        val session = bridge.createTapSession(startStaged = false)
+        val wrappedSink = session.wrapAudioSink(fakeDelegate)
+        val tap = session.audioProcessor
+
+        // Input is 44.1 kHz -> output is 48 kHz (SonicAudioProcessor active)
+        val pcm441Format = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setSampleRate(44100)
+            .setChannelCount(2)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT)
+            .build()
+        wrappedSink.configure(pcm441Format, 0, null)
+        tap.configure(Media3AudioFormat(44100, 2, C.ENCODING_PCM_16BIT))
+        tap.flush()
+        wrappedSink.play()
+
+        val chunkFrames = 882 // 20ms at 44.1 kHz
+        fun feed441Chunk(ptsUs: Long) {
+            val buf = ByteBuffer.allocateDirect(chunkFrames * 4).order(ByteOrder.LITTLE_ENDIAN)
+            buf.limit(chunkFrames * 4)
+            fakeDelegate.onHandleAccepted = { tap.queueInput(it) }
+            wrappedSink.handleBuffer(buf, ptsUs, 1)
+        }
+
+        // Establish baseline at 1_000_000 us
+        fakeDelegate.currentPositionUs = 1_000_000L
+        feed441Chunk(1_245_000L)
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+
+        // Advance playhead by 20ms -> writeHead = 1_265_000 + 20_000 = 1_285_000, playout = 1_020_000 => rawLag = 265ms
+        // Expected ring buffer target = 265ms - 20ms (Sonic window) = 245ms
+        fakeDelegate.currentPositionUs = 1_020_000L
+        feed441Chunk(1_265_000L)
+        assertEquals(265 - RtmpAudioBridgeCore.SONIC_INTERNAL_LATENCY_MS, bridge.targetBufferDurationMs())
+    }
+
+    @Test
+    fun stagedHighLatencySinkPromotesWithoutCushionRefillGap() {
+        val bridge = RtmpAudioBridgeCore()
+        bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+
+        val delegate = FakeAudioSink()
+        val session = bridge.createTapSession(startStaged = true)
+        val sink = session.wrapAudioSink(delegate)
+        val tap = session.audioProcessor
+
+        val pcmFormat = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setSampleRate(48000)
+            .setChannelCount(2)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT)
+            .build()
+        sink.configure(pcmFormat, 0, null)
+        tap.configure(Media3AudioFormat(48000, 2, C.ENCODING_PCM_16BIT))
+        tap.flush()
+        sink.play()
+        delegate.onHandleAccepted = { tap.queueInput(it) }
+
+        // Warm-up: stage 30 x 20ms = 600ms of pre-fill (well above the old 320ms staging cap)
+        val startPtsUs = 2_000_000L
+        delegate.currentPositionUs = startPtsUs
+        for (i in 0 until 30) {
+            if (i == 29) {
+                // Playhead advances 20ms while the warm-up sink reports a Bluetooth-like 450ms lag
+                delegate.currentPositionUs = startPtsUs + 20_000L
+                val buf = ByteBuffer.allocateDirect(960 * 4).apply { limit(960 * 4) }
+                sink.handleBuffer(buf, startPtsUs + 450_000L, 1) // writeHead=470ms, lag=450ms
+            } else {
+                val buf = ByteBuffer.allocateDirect(960 * 4).apply { limit(960 * 4) }
+                sink.handleBuffer(buf, startPtsUs + i * 20_000L, 1)
+            }
+        }
+        // Still staged: active target unaffected
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+
+        bridge.promotePendingTap()
+        assertEquals(450, bridge.targetBufferDurationMs())
+        // Full 450ms cushion is available immediately from staged pre-fill (no trim to 235/320ms)
+        assertEquals(450, bridge.availableDurationMs())
+        assertFalse("Staged pre-fill should satisfy the high-latency target", bridge.consumeCushionRefillRequest())
+    }
+
+    @Test
+    fun supersededTapSessionCannotMutateActiveTargetBuffer() {
+        val bridge = RtmpAudioBridgeCore()
+        bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+
+        val oldDelegate = FakeAudioSink()
+        val oldSession = bridge.createTapSession(startStaged = false)
+        val oldSink = oldSession.wrapAudioSink(oldDelegate)
+        val oldTap = oldSession.audioProcessor
+
+        val pcmFormat = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setSampleRate(48000)
+            .setChannelCount(2)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT)
+            .build()
+        oldSink.configure(pcmFormat, 0, null)
+        oldTap.configure(Media3AudioFormat(48000, 2, C.ENCODING_PCM_16BIT))
+        oldTap.flush()
+        oldSink.play()
+
+        // Establish baseline on old sink
+        oldDelegate.currentPositionUs = 0L
+        oldDelegate.onHandleAccepted = { oldTap.queueInput(it) }
+        val buf1 = ByteBuffer.allocateDirect(960 * 4).apply { limit(960 * 4) }
+        oldSink.handleBuffer(buf1, 220_000L, 1)
+
+        // Promote a new tap session, superseding oldSession
+        val newSession = bridge.createTapSession(startStaged = true)
+        val newTap = newSession.audioProcessor
+        newTap.configure(Media3AudioFormat(48000, 2, C.ENCODING_PCM_16BIT))
+        newTap.flush()
+        bridge.promotePendingTap()
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+
+        // Old sink reports 500ms lag after advancing -> must be ignored!
+        oldDelegate.currentPositionUs = 30_000L
+        val buf2 = ByteBuffer.allocateDirect(960 * 4).apply { limit(960 * 4) }
+        oldSink.handleBuffer(buf2, 510_000L, 1)
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+    }
+
+    private class FakeAudioSink : AudioSink {
+        var sinkListener: AudioSink.Listener? = null
+        var currentPositionUs: Long = AudioSink.CURRENT_POSITION_NOT_SET
+        var acceptNextBuffer: Boolean = true
+        var onHandleAccepted: ((ByteBuffer) -> Unit)? = null
+        private var playbackParameters: PlaybackParameters = PlaybackParameters.DEFAULT
+        private var skipSilence: Boolean = false
+        private var audioAttributes: AudioAttributes = AudioAttributes.DEFAULT
+
+        override fun setListener(listener: AudioSink.Listener) {
+            this.sinkListener = listener
+        }
+
+        override fun supportsFormat(format: Format): Boolean = true
+
+        override fun getFormatSupport(format: Format): Int = AudioSink.SINK_FORMAT_SUPPORTED_DIRECTLY
+
+        override fun getCurrentPositionUs(sourceEnded: Boolean): Long = currentPositionUs
+
+        override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {}
+
+        override fun play() {}
+
+        override fun handleDiscontinuity() {}
+
+        override fun handleBuffer(
+            buffer: ByteBuffer,
+            presentationTimeUs: Long,
+            encodedAccessUnitCount: Int
+        ): Boolean {
+            if (!acceptNextBuffer) return false
+            onHandleAccepted?.invoke(buffer)
+            if (buffer.hasRemaining()) {
+                buffer.position(buffer.limit())
+            }
+            return true
+        }
+
+        override fun playToEndOfStream() {}
+
+        override fun isEnded(): Boolean = false
+
+        override fun hasPendingData(): Boolean = true
+
+        override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
+            this.playbackParameters = playbackParameters
+        }
+
+        override fun getPlaybackParameters(): PlaybackParameters = playbackParameters
+
+        override fun setSkipSilenceEnabled(skipSilenceEnabled: Boolean) {
+            this.skipSilence = skipSilenceEnabled
+        }
+
+        override fun getSkipSilenceEnabled(): Boolean = skipSilence
+
+        override fun setAudioAttributes(audioAttributes: AudioAttributes) {
+            this.audioAttributes = audioAttributes
+        }
+
+        override fun getAudioAttributes(): AudioAttributes = audioAttributes
+
+        override fun setAudioSessionId(audioSessionId: Int) {}
+
+        override fun setAuxEffectInfo(auxEffectInfo: AuxEffectInfo) {}
+
+        override fun getAudioTrackBufferSizeUs(): Long = 160_000L
+
+        override fun enableTunnelingV21() {}
+
+        override fun disableTunneling() {}
+
+        override fun setVolume(volume: Float) {}
+
+        override fun pause() {}
+
+        override fun flush() {}
+
+        override fun reset() {}
     }
 }

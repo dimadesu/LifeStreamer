@@ -108,12 +108,14 @@ internal object RtmpSourceSwitchHelper {
                         .setMaxPcmBufferDurationUs(180_000)
                         .setPcmBufferMultiplicationFactor(2)
                         .build()
-                    return DefaultAudioSink.Builder(context)
+                    val tapSession = RtmpAudioBridge.createTapSession(startStaged = true)
+                    val defaultSink = DefaultAudioSink.Builder(context)
                         .setEnableFloatOutput(enableFloatOutput)
                         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                         .setAudioTrackBufferSizeProvider(bufferSizeProvider)
-                        .setAudioProcessors(arrayOf(RtmpAudioBridge.createTapAudioProcessor(startStaged = true)))
+                        .setAudioProcessors(arrayOf(tapSession.audioProcessor))
                         .build()
+                    return tapSession.wrapAudioSink(defaultSink)
                 }
             }
 
