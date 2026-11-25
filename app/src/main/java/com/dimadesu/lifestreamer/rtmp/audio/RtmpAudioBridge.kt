@@ -40,6 +40,7 @@ open class RtmpAudioBridgeCore {
         internal const val MAX_TARGET_BUFFER_MS = 650
         internal const val OVERFLOW_HEADROOM_MS = 85
         internal const val DEFAULT_MAX_BUFFER_MS = DEFAULT_TARGET_BUFFER_MS + OVERFLOW_HEADROOM_MS
+        internal const val MAX_STAGED_BUFFER_MS = MAX_TARGET_BUFFER_MS + OVERFLOW_HEADROOM_MS
         internal const val SONIC_INTERNAL_LATENCY_MS = 20
         internal const val TARGET_UPDATE_DEADBAND_MS = 15
         private const val CUSHION_REFILL_DEFICIT_MS = 75
@@ -965,11 +966,14 @@ open class RtmpAudioBridgeCore {
                 bridge.activeTapProcessor = this
                 bridge.clear()
                 stagedFormat?.let { bridge.onExoPlayerFormatChangedInternal(it, this) }
+                // Apply the staged sink lag BEFORE replaying pre-fill so the ring's target/max
+                // already reflect high-latency sinks (e.g. Bluetooth A2DP); otherwise the replay
+                // would overflow-trim against the default cushion and force a refill gap.
+                stagedSinkLagMs?.let { bridge.onSinkLagMeasuredInternal(it, this) }
                 while (stagedBuffers.isNotEmpty()) {
                     val chunk = stagedBuffers.removeFirst()
                     bridge.onExoPlayerAudioInputInternal(chunk, this)
                 }
-                stagedSinkLagMs?.let { bridge.onSinkLagMeasuredInternal(it, this) }
                 stagedBytes = 0
                 stagedFormat = null
                 stagedSinkLagMs = null
@@ -1022,7 +1026,10 @@ open class RtmpAudioBridgeCore {
             val fmt = stagedFormat
             val frameSize = (fmt?.bytesPerFrame ?: 0).takeIf { it > 0 } ?: 4
             val rate = (fmt?.sampleRate ?: 0).takeIf { it > 0 } ?: 48000
-            val maxBytes = ((rate.toLong() * DEFAULT_MAX_BUFFER_MS) / 1000L).toInt() * frameSize
+            // Retain enough pre-fill to satisfy the largest dynamic target (plus headroom) so a
+            // high-latency sink measured during warm-up can be promoted without a silence gap.
+            // promotePendingTap() trims back down to the actual target after replay.
+            val maxBytes = ((rate.toLong() * MAX_STAGED_BUFFER_MS) / 1000L).toInt() * frameSize
             var excess = stagedBytes - maxBytes
             while (excess > 0 && stagedBuffers.isNotEmpty()) {
                 val head = stagedBuffers.first()

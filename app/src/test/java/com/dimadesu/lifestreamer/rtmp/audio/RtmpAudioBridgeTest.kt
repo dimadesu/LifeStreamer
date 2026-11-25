@@ -571,6 +571,52 @@ class RtmpAudioBridgeTest {
     }
 
     @Test
+    fun stagedHighLatencySinkPromotesWithoutCushionRefillGap() {
+        val bridge = RtmpAudioBridgeCore()
+        bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+
+        val delegate = FakeAudioSink()
+        val session = bridge.createTapSession(startStaged = true)
+        val sink = session.wrapAudioSink(delegate)
+        val tap = session.audioProcessor
+
+        val pcmFormat = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setSampleRate(48000)
+            .setChannelCount(2)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT)
+            .build()
+        sink.configure(pcmFormat, 0, null)
+        tap.configure(Media3AudioFormat(48000, 2, C.ENCODING_PCM_16BIT))
+        tap.flush()
+        sink.play()
+        delegate.onHandleAccepted = { tap.queueInput(it) }
+
+        // Warm-up: stage 30 x 20ms = 600ms of pre-fill (well above the old 320ms staging cap)
+        val startPtsUs = 2_000_000L
+        delegate.currentPositionUs = startPtsUs
+        for (i in 0 until 30) {
+            if (i == 29) {
+                // Playhead advances 20ms while the warm-up sink reports a Bluetooth-like 450ms lag
+                delegate.currentPositionUs = startPtsUs + 20_000L
+                val buf = ByteBuffer.allocateDirect(960 * 4).apply { limit(960 * 4) }
+                sink.handleBuffer(buf, startPtsUs + 450_000L, 1) // writeHead=470ms, lag=450ms
+            } else {
+                val buf = ByteBuffer.allocateDirect(960 * 4).apply { limit(960 * 4) }
+                sink.handleBuffer(buf, startPtsUs + i * 20_000L, 1)
+            }
+        }
+        // Still staged: active target unaffected
+        assertEquals(RtmpAudioBridgeCore.DEFAULT_TARGET_BUFFER_MS, bridge.targetBufferDurationMs())
+
+        bridge.promotePendingTap()
+        assertEquals(450, bridge.targetBufferDurationMs())
+        // Full 450ms cushion is available immediately from staged pre-fill (no trim to 235/320ms)
+        assertEquals(450, bridge.availableDurationMs())
+        assertFalse("Staged pre-fill should satisfy the high-latency target", bridge.consumeCushionRefillRequest())
+    }
+
+    @Test
     fun supersededTapSessionCannotMutateActiveTargetBuffer() {
         val bridge = RtmpAudioBridgeCore()
         bridge.setTargetConfig(48000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
