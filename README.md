@@ -31,6 +31,7 @@ There are more features available in [LifeStreamerV2](https://github.com/dimades
 - Extra options for Android camera video source:
   - Stabilisation: OIS/EIS/OFF.
   - Noise reduction.
+- Force video sources to render at 60 fps and more.
 
 ## LifeStreamer sources
 
